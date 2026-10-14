@@ -21,7 +21,7 @@ export function createTimeControls({ onChange, initialHour = 16.5, initialDate =
     const label = formatTime(hour);
     slider.value = String(hour);
     slider.style.setProperty('--time-progress', `${hour / 24 * 100}%`);
-    slider.setAttribute('aria-valuetext', `${label}，日本标准时间`);
+    slider.setAttribute('aria-valuetext', label);
     timeOutput.value = label;
     timeOutput.textContent = label;
     dateInput.value = date;

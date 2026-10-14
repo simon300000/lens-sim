@@ -13,6 +13,8 @@ import { createDaylight } from './lighting.js';
 import { createTimeControls } from './time-controls.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { probeHDRCanvas,isHDRConfiguration,outputRendererOptions,displayOutputNode,captureCanvasRange } from './hdr-output.js';
+import { createHybridRuntime } from './rendering/hybrid-runtime.js';
+import { createLensUI } from './ui/lens-ui.js';
 
 const loading=document.querySelector('#loading'), message=document.querySelector('#loading-message');
 const faults=[];
@@ -20,6 +22,8 @@ window.addEventListener('error',event=>faults.push(event.message));
 window.addEventListener('unhandledrejection',event=>faults.push(String(event.reason)));
 
 async function createScene(){
+  const startupStarted=performance.now();
+  const pixelDiagnostics=new URLSearchParams(location.search).get('gpu-diagnostics')==='1';
   if(!navigator.gpu)throw new Error('此浏览器尚未启用 WebGPU。请用支持 WebGPU 的 Chrome 或 Edge 打开本地地址。');
   const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});
   if(!adapter)throw new Error('未找到可用的 WebGPU 设备。请检查浏览器硬件加速设置。');
@@ -123,16 +127,19 @@ async function createScene(){
   }
   let ready=false,framesNeeded=0,rendering=false;
   let timeRevision=0;
-  let pipeline;
+  let completionRevision=-1;
+  let pipeline,hybrid;
   const cameraExposure=uniform(1);
-  function invalidate(){if(!ready)return;framesNeeded=Math.max(framesNeeded,4);if(!rendering){rendering=true;requestAnimationFrame(frame);}}
+  function wake(){if(!ready)return;framesNeeded=Math.max(framesNeeded,2);if(!rendering){rendering=true;requestAnimationFrame(frame);}}
+  function invalidate(){hybrid?.invalidateScene();wake();}
   function frame(){
     const revision=timeRevision,hour=sceneElement.dataset.hour;
-    controls.update();pipeline.render();
-    renderer.backend.device.queue.onSubmittedWorkDone().then(()=>{
+    controls.update();if(hybrid)hybrid.frame();else pipeline.render();
+    // Time completion is checked only on a new scene revision, never per optical batch.
+    if(completionRevision!==revision&&sceneElement.dataset.renderedHour!==hour){completionRevision=revision;renderer.backend.device.queue.onSubmittedWorkDone().then(()=>{
       if(revision===timeRevision){sceneElement.dataset.renderedHour=hour;document.querySelector('#time-controls').setAttribute('aria-busy','false');}
-    });
-    framesNeeded--;if(framesNeeded>0)requestAnimationFrame(frame);else rendering=false;
+    });}
+    framesNeeded--;if(framesNeeded>0||hybrid?.needsFrame())requestAnimationFrame(frame);else rendering=false;
   }
   const daylight=createDaylight(scene,renderer,{details,invalidate});
   let celestialState;
@@ -143,6 +150,7 @@ async function createScene(){
     document.querySelector('#time-controls').setAttribute('aria-busy','true');
     celestialState=daylight.update(value,immediate);
     cameraExposure.value=renderer.toneMappingExposure;
+    hybrid?.setBaseExposure(renderer.toneMappingExposure);
     const s=celestialState;
     const periodLabel=s.sun.geometricAltitude>6?(value.hour<12?'日光':'午后'):s.sun.geometricAltitude>-6?(value.hour<12?'晨光':'薄暮'):'夜色';
     timeControls?.update({hour:value.hour,date:value.date,sunAltitude:s.sun.altitude,moonAltitude:s.moon.altitude,
@@ -178,22 +186,24 @@ async function createScene(){
 
   const diagnostics={backend:'WebGPU',three:THREE.REVISION,ready:false,errors:faults,groups:{},instances:0,meshes:0,triangles:0,
     hdr:{canvasSupported:hdr.supported,probe:hdr,displayHigh:displayHDR.matches,internalFormat:'rgba16float',
-      canvasConfiguration:renderer.backend.context.getConfiguration?.(),outputTransfer:'sRGB',fallback:'ACESFilmic'}};
+      canvasConfiguration:renderer.backend.context.getConfiguration?.(),outputTransfer:'sRGB',fallback:'ACESFilmic',
+      fullFrameReadback:pixelDiagnostics?'startup-night-opt-in':'on-demand-only'}};
   scene.traverse(o=>{if(o.isMesh){diagnostics.meshes++;if(o.isInstancedMesh)diagnostics.instances+=o.count;diagnostics.triangles+=(o.geometry.index?.count||o.geometry.attributes.position.count)/3*(o.isInstancedMesh?o.count:1);}});
   for(const [name,item]of Object.entries({villa,vegetation,garden,landscape,details}))diagnostics.groups[name]=item?.metadata||item?.userData||(name==='vegetation'?item:{});
   window.__SANTEI__={scene,camera,renderer,controls,pipeline,diagnostics,garden,daylight,timeControls,scenePass};
   message.textContent='预编译日月、晨光与反射';
   // Render on time/date changes and camera movement; never run an idle GPU loop.
-  controls.addEventListener('change',invalidate);
-  controls.addEventListener('start',invalidate);
-  addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);invalidate();});
+  controls.addEventListener('change',()=>{if(hybrid)hybrid.cameraChanged();else invalidate();wake();});
+  controls.addEventListener('start',()=>{hybrid?.setInteracting(true);wake();});
+  controls.addEventListener('end',()=>{hybrid?.setInteracting(false);wake();});
+  addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);hybrid?.resize();wake();});
   // Warm the visible Moon/stars, lamp shadows and unlit predawn variants while
   // the loading curtain is up, instead of compiling them on the first slider move.
   const initialTime=timeControls.getValue();
   for(const hour of [0,5.5]){
     applyTime({...initialTime,hour},true);
     pipeline.render();
-    const canvasRange=hour===0?captureCanvasRange(renderer):null;
+    const canvasRange=hour===0&&pixelDiagnostics?captureCanvasRange(renderer):null;
     await renderer.backend.device.queue.onSubmittedWorkDone();
     if(canvasRange){
       diagnostics.hdr.nightCanvas=await canvasRange;
@@ -204,10 +214,33 @@ async function createScene(){
   applyTime(initialTime,true);
   pipeline.render();
   await renderer.backend.device.queue.onSubmittedWorkDone();
+  message.textContent='编译真实镜组、光谱采样与自动对焦';
+  hybrid=await createHybridRuntime({renderer,scene,camera,rasterPipeline:pipeline,rasterBeauty:beauty,rasterGlare:glare,cameraExposure,hdr,requestFrame:wake,
+    onOutputState:mode=>{outputStatus.textContent=mode==='hdr'?'HDR':'SDR';sceneElement.dataset.outputMode=mode;}});
+  const lensPanel=document.createElement('aside');lensPanel.id='lens-controls';document.body.appendChild(lensPanel);
+  const lensUI=createLensUI({store:hybrid.store,container:lensPanel});
+  window.__SANTEI__.hybrid=hybrid;window.__SANTEI__.lensUI=lensUI;
+  window.__SANTEI__.captureOutputRange=()=>{hybrid.frame();return captureCanvasRange(renderer);};
+  hybrid.store.subscribe(state=>{
+    Object.assign(sceneElement.dataset,{lensMode:state.mode,lensStatus:state.status,lensId:state.lensId,
+      lensSpp:state.sampling.spp,lensTargetSpp:state.sampling.targetSpp,captureCount:state.diagnostics.captures,
+      opticsRevision:state.revisions.optics,sceneRevision:state.revisions.scene,displayRevision:state.revisions.display,
+      lensConfiguration:state.configurationIndex,focusDistanceM:state.optics.focusDistanceM??'infinity',
+      imageDistanceMm:state.optics.imageDistanceMm,samplingPaused:String(state.sampling.paused),batchSpp:state.sampling.batchSpp,
+      afStatus:state.af.status,lensError:state.error||'',cacheMissRate:state.diagnostics.cacheMissRate,
+      opticalNumericalErrorRate:state.diagnostics.numericalErrorRate,opticalWidth:state.diagnostics.width,opticalHeight:state.diagnostics.height,
+      opticalComputeMs:state.diagnostics.computeMs??'',captureSubmitMs:state.diagnostics.captureMs??'',opticalMemoryBytes:state.diagnostics.memoryBytes,
+      opticalBlockedRate:state.diagnostics.opticalBlockedRate,opticalTirRate:state.diagnostics.tirRate,
+      attemptedSamples:state.diagnostics.attemptedSamples,opticalPipelineCount:state.diagnostics.pipelineCompilations});
+    diagnostics.hybrid=state;
+  });
+  try{await hybrid.initialize();}catch(error){hybrid.store.update({status:'error',error:error.message});faults.push(error.message);console.error(error);}
   sceneElement.dataset.renderedHour=sceneElement.dataset.hour;
   sceneElement.dataset.gpuErrors=String(faults.length);
   document.querySelector('#time-controls').setAttribute('aria-busy','false');
   diagnostics.ready=true;
+  diagnostics.initializationWallMs=performance.now()-startupStarted;
+  sceneElement.dataset.initializationWallMs=String(diagnostics.initializationWallMs);
   ready=true;
   diagnostics.drawCalls=renderer.info.render.drawCalls;
   sceneElement.dataset.backend=diagnostics.backend;
@@ -218,6 +251,7 @@ async function createScene(){
   sceneElement.dataset.koi=garden.koi.length;
   console.info('SANTEI scene ready',diagnostics);
   loading.classList.add('complete');
+  addEventListener('pagehide',()=>{ready=false;lensUI.dispose();hybrid.dispose();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
   invalidate();
 }
 createScene().catch(error=>{console.error(error);loading.classList.add('error');message.textContent=error.message;});
