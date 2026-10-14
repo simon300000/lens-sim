@@ -5,29 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#eeeadd" />
     <meta name="description" content="一座用 WebGPU 呈现的山间别墅与日式庭园。全部建筑、植物、鱼塘和材质由代码生成。" />
-    <title>lens-sim — 山庭 · 山间别墅</title>
+    <title>lens-sim</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   </head>
   <body>
     <main id="scene" aria-label="山间别墅三维场景"></main>
-    <header class="identity">
-      <span class="seal" aria-hidden="true">山<br>庭</span>
-      <div><p class="eyebrow">A QUIET PLACE IN THE MOUNTAINS</p><h1>山庭 <span>SANTEI</span></h1></div>
-    </header>
-    <div class="scene-note"><span class="note-line"></span><p>山有远色，庭有生意。<small>一座山居 · 一个花园 · 一段闲时</small></p></div>
-    <footer class="caption"><span class="caption-number">01 /</span><span>山间别墅与庭园<small>MOUNTAIN VILLA & GARDEN</small></span></footer>
     <div class="view-hint" aria-label="操作提示"><span id="output-status" class="output-status" aria-label="输出动态范围">HDR</span><svg width="16" height="20" viewBox="0 0 16 20" fill="none" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="14" rx="4.5" stroke="currentColor"/><path d="M8 4v3M5 18h6" stroke="currentColor" stroke-linecap="round"/></svg><span>拖动环视<span class="hint-divider">·</span>滚轮靠近</span></div>
     <section id="time-controls" class="time-controls" aria-label="庭院日照时间">
       <div class="time-heading">
         <div class="time-current"><label for="time-slider">时光</label><output id="time-output" for="time-slider">16:30</output><span id="time-period" class="time-period">午后</span></div>
         <label class="time-date-label"><span class="visually-hidden">观景日期</span><input id="time-date" class="time-date" type="date" value="2026-09-26" aria-label="观景日期" /></label>
       </div>
-      <p class="time-location">长野山地 <span>· 日本标准时间 UTC+9</span></p>
-      <div class="time-slider-wrap"><input id="time-slider" class="time-slider" type="range" min="0" max="24" step="0.016666666666666666" value="16.5" aria-label="一天中的时间" aria-valuetext="16:30，日本标准时间" /></div>
+      <div class="time-slider-wrap"><input id="time-slider" class="time-slider" type="range" min="0" max="24" step="0.016666666666666666" value="16.5" aria-label="一天中的时间" aria-valuetext="16:30" /></div>
       <div class="time-marks" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
       <div class="time-bottom"><div class="time-presets" aria-label="时间预设"><button type="button" data-hour="5.5"><i class="time-icon time-icon-dawn" aria-hidden="true"></i>晨光</button><button type="button" data-hour="12"><i class="time-icon time-icon-sun" aria-hidden="true"></i>正午</button><button type="button" data-hour="17.5"><i class="time-icon time-icon-dusk" aria-hidden="true"></i>薄暮</button><button type="button" data-hour="0"><i class="time-icon time-icon-moon" aria-hidden="true"></i>子夜</button></div><span id="time-readout" class="time-readout">太阳与月亮随时光流转</span></div>
     </section>
-    <div id="loading" role="status"><div class="loading-mark">山庭</div><p id="loading-message">正在营造山间庭院</p><span class="loading-line"></span></div>
+    <div id="loading" role="status"><p id="loading-message">正在加载场景</p><span class="loading-line"></span></div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

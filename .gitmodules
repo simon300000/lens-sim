@@ -1,0 +1,4 @@
+[submodule "vendor/lens-bench"]
+	path = vendor/lens-bench
+	url = https://github.com/anvcor/lens-bench.git
+	branch = main

@@ -5,7 +5,8 @@
 ## 本地打开
 
 ```powershell
-npm install
+git submodule update --init --recursive
+npm ci
 npm run dev
 ```
 
@@ -18,6 +19,8 @@ npm run preview
 
 生产构建保存到 `dist/`。构建后的网页不需要外部 CDN；用 HTTP 服务打开，不能直接双击 HTML。
 
+镜头数据以 `vendor/lens-bench` 中固定提交的原始文件为唯一来源。`dev`、`test` 和 `build` 会自动转换数据到被 Git 忽略的 `public/lenses/`；这些是生成产物，不在主仓库重复提交。也可用 `npm run build:lenses` 手动重新生成。
+
 ## 场景
 
 - 木结构别墅、立缝屋顶、木廊、滑开障子门与开放的榻榻米客厅。
@@ -28,7 +31,60 @@ npm run preview
 
 模型、木纹、叶片、水面法线及地形都在代码中生成，没有使用网上现成材质、纹理、HDR 或三维模型，也没有外部字体请求。
 
-场景保持静态；只有视角、时间、日期或窗口尺寸变化时绘制。不支持 WebGPU 时明确显示提示，不会悄悄切换到 WebGL。
+场景保持静态。光栅视图按需绘制；镜头视图渐进累计到目标 spp 后停止，暂停或页面不可见时也停止。不支持 WebGPU 时明确显示提示，不会悄悄切换到 WebGL。
+
+## 真实镜头混合渲染器 V1
+
+侧边「镜头」面板保留 **A · 光栅近似** 导航/对照，选择 **B · 镜头追迹** 启用实际镜组。每次尝试从 36×24 mm 传感器采样一个像素位置、一个后部参考面圆盘位置和一个连续波长（380–780 nm），反向逐面折射；玻璃采用当前镜头的波长相关 n(λ) LUT，保留全反射、物理孔径裁切和真实通光损失。失败样本不会补发，f32 XYZ 之和始终除以全部尝试次数。不是最终图片的景深或 RGB 位移滤镜。
+
+首选镜头来自上游真实数据 **Canon FL 50mm F1.8 / INF**，11 面，实际近轴焦距约 49.06 mm，初始 f/2.8。各玻璃界面的通光半径均已知；独立 stop 半径由原始 fno 与入瞳倍率标定，仍明确显示缺少独立 stop 数据的提示。配置选择使用原始离散结构、像面和物距，不猜测商业镜头的对焦组轨迹。当前静态预检有 420 支镜头、1820 个配置可选；这不代表逐镜头 GPU 成像验收。DOE、奇次面、未知玻璃及不满足当前初始化/数值条件的配置不可选，并保留原因。
+
+- 光圈只改变 stop 的实际半径，受数据约束；不额外乘 1/f² 或人工暗角。
+- **AF-S / F** 沿实际参考光路取中心深度目标，在 GPU 正向追迹固定光束并归约最佳像面；手动距离与 AF 共用同一调焦状态。∞ 使用平行物方光束。
+- **像距** 是末面顶点至传感器的 mm 距离，可 ±0.01 mm 微调；固定镜组、传感器轴向调焦是首版的等效机构。
+- 目标 spp 提高会继续原序列；曝光、Bloom、HDR/SDR 与诊断视图只改变显示，不重置成像。暂停/继续和重置只控制累计。传感器固定 3:2，通过 letterbox 适配窗口。
+- 交互时降到 240×160、1 spp/批，停止后恢复所选分辨率。参数在 buffer 中更新，不逐镜头重编译 shader。只有场景、相机或捕获范围改变才重新光栅捕获。
+
+一个 Three WebGPURenderer / GPUDevice 完成未曝光 HDR beauty + 对齐深度/法线捕获、融合 compute、f32 累计、最终显示。光栅缓存有扩大视锥的 guard band；每条实际出射光线以带 origin 的世界射线做有界、透视正确的深度求交。背景读取已有天空；`SCENE_CACHE_MISS` 使用明确的确定性环境近似并单独计数，不能算镜头挡光。超过光学通过光线的 10% 时界面提示场景查询不可靠，并可查看缺失掩码。显著数值错误会停止累计。
+
+限制：这是单中心视点 RGB/深度的屏幕空间混合方法，无法恢复被遮挡表面，不是完整场景路径追踪或光场。水面/透明体/镜面仍沿用中心视角辐亮度；大光圈、前景遮挡边缘、超广角和画外查询有固有限制。RGB→非负光谱是保持颜色匹配的近似 metamer，不能恢复真实材质/灯具光谱；CIE 匹配函数采用有来源的解析近似。T=1 是理想几何透射，不是 T-stop；没有鬼影、镀膜、吸收、衍射、噪声或运动模糊。未知通光口径不会由 sdDraw 冒充；使用有限数值域的来源会显示。上游未提供各玻璃厂商认证的波段范围，380–780 nm 是已检查公式的工作区间。
+
+计算、采样测度、固定全局标定 `4/π`、坐标和来源见 [光学数学](docs/optics-math.md)、[光谱](docs/spectral.md)、[场景查询](docs/scene-query.md)。
+
+## 数据来源、许可与更新
+
+`vendor/lens-bench` 是 [anvcor/lens-bench](https://github.com/anvcor/lens-bench) 的 submodule，main 分支固定在 **8274ca9d34bf75611f5a3c00af54a6a8498f076b**。运行时仅按镜头加载生成的数据，绝不加载上游应用或光学后端。上游数据/派生公式约定保留 **GPL-3.0** 来源，完整许可保存在 submodule 和 `public/lenses/LICENSE.lens-bench.txt`，没有改标其他许可。场景材质依然完全由本项目程序生成。
+
+构建不会自动拉取 main。手动更新时：
+
+```powershell
+git -C vendor/lens-bench fetch origin main
+git -C vendor/lens-bench checkout <已审核的完整SHA>
+npm run build:lenses
+npm test
+npm run build
+```
+
+审查 gitlink、适配器、生成结果、许可和测试；提交 gitlink 与适配器/文档的变更，不提交 `public/lenses/` 生成产物。详见 [数据适配](docs/lens-data.md) 与 [能力预检/失败采样审计](docs/lens-capabilities.md)。
+
+## 验证与 UI 分工
+
+UI 实际由本机 Claude Code **2.1.299（后续同一会话恢复为 2.1.300）/ claude-opus-5-5** 实现，交互会话 **[private session removed]**；模型通过 CLI `/status` 与保存会话的 `message.model` 核对，未使用别名或其他模型。Codex 提供轻量状态/动作接口并负责核心、集成和真实 GPU 验收。Claude 修改 `src/ui/`、UI 测试及 [UI 实现记录](docs/ui-implementation.md)，并依据实际页面截图在同一会话修订；用户在该会话直接要求的 HTML/时间标签清理也已保留。未修改 shader、光学、GPU 生命周期或共享入口。最终 115 项测试、生产构建和独立克隆验证通过。
+
+```powershell
+npm test
+npm run build
+```
+
+开发服务器还提供实际 WebGPU 验收页（不会以 mock 替代）：
+
+- `/tests/hybrid-chain.html`：共享 device 的几何捕获 → compute → HDR 显示。
+- `/tests/hybrid-optics.html?lens=canon-fl-50mm-f1-8`：GPU/CPU 光路互易、连续光谱、固定尝试、跨批次、孔径与 PDF 能量、HDR、AF。
+- `/tests/runtime-gpu.html`：累计失效、暂停重置、AF 过期结果、显示隔离与捕获复用。
+- `/tests/imaging-gpu.html`：多个深度的条纹、非对称标记、有限发光点及各目标轮流对焦。
+- `/tests/hdr-gpu.html`：原有 HDR/SDR 输出回归。
+
+实际平台、数值结果、耗时来源和未验项目见 [V1 验收记录](docs/validation-v1.md)。浏览器兼容入口 `window.__SANTEI__` 保留，并扩展 `.hybrid` / `.diagnostics.hybrid`。
 
 ## 昼夜与天文
 
@@ -54,7 +110,7 @@ npm test
 
 两条路径最后只做一次 sRGB 编码。`rgba16float` 表示存储精度，不会把 `colorSpace="srgb"` 自动变为线性编码。右下角的 HDR/SDR 标记说明所选输出路径；悬停显示浏览器与当前显示链路的情况。显示器报告标准动态范围不会触发浏览器兼容回退，系统与显示器决定最终可见的 HDR 亮度。
 
-`npm test` 验证能力检测、静默忽略扩展模式、异步验证错误和清理。开发服务器的 `/tests/hdr-gpu.html` 用实际 GPU 验证 HDR/SDR 两条着色器输出路径：线性 `4.0` 保留在中间缓冲，HDR sRGB 输出约 `1.825`；SDR 路径输出限制在 `0–1`。场景启动时还会回读夜景画布，统计超过白色的像素与非有限值，结果位于 `window.__SANTEI__.diagnostics.hdr`。
+`npm test` 验证能力检测、静默忽略扩展模式、异步验证错误和清理。开发服务器的 `/tests/hdr-gpu.html` 用实际 GPU 验证 HDR/SDR 两条着色器输出路径：线性 `4.0` 保留在中间缓冲，HDR sRGB 输出约 `1.825`；SDR 路径输出限制在 `0–1`。正常模式不回读整图；显式使用 `?gpu-diagnostics=1` 才在启动时统计夜景画布，结果位于 `window.__SANTEI__.diagnostics.hdr`。开发时可按需调用 `window.__SANTEI__.captureOutputRange()` 检查当前实际输出。
 
 ## 文件
 

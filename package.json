@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:lenses": "node scripts/build-lens-data.mjs",
+    "predev": "npm run build:lenses",
     "dev": "vite --host 127.0.0.1",
+    "prebuild": "npm run build:lenses",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
+    "pretest": "npm run build:lenses",
     "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
