@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.openai/local/
+artifacts/
+*.tar.gz
+.env
+.env.*
+!.env.example
+*.log
