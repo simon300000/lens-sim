@@ -65,3 +65,36 @@ The working interval is **380–780 nm**. The upstream packed table does not inc
 `createGlassLUT` uploads only current-prescription media, default spacing **0.25 nm**, including air. The test evaluates interpolation at half-step samples throughout the interval. For the default lens the measured maximum absolute index error against its f64 reference is **2.828801602e-7** (f32 storage included), bounded by **3e-7**. Separate ray tests must bound how this affects the actual path; small index error alone does not prove optical path accuracy.
 
 Unit tests independently exercise the four formula conventions, compare current formulas with the pinned upstream program to `2e-13` absolute index error, and verify models' nd/vd/partial dispersion, aliases, strict catalog identity, stop/config indexing, physical/drawing aperture separation, final image gap, media ownership, and every library configuration's explicit support status.
+
+## Focus motion
+
+Normalized prescriptions retain `focusMotion`. The adapter prefers the supplied
+`zoomcam.focus` table, using natural cubic splines on the infinity zoom nodes,
+linear interpolation in inverse object-to-sensor distance, and linear interpolation
+between log-focal-length rows, matching the upstream conventions. Zoom position is
+estimated from the selected configuration's non-focus gaps. Table MFD limits are
+applied and reported; extrapolation beyond tabulated nodes is visible in AF status.
+
+Without an explicit table, the adapter identifies a same-zoom focus family from
+`cfgs.thi` and `cfgs.obj` using the upstream focusCam rules. It interpolates the
+varying gaps in inverse first-vertex object distance. Curvature changes and
+ambiguous duplicate-distance configurations do not define a usable motion cam.
+Configurations that vary only the final image gap use the original image-distance
+solver, as do lenses with no focus-motion data.
+
+Manual distance commands and centre AF-S both use the motion data when available.
+AF-S obtains the scene target through the existing reference ray, then applies its
+axial object distance to the cam; it does not replace the table calibration with an
+RMS sensor search. The prescribed sensor coordinate stays fixed while surface
+positions, focal length, pupil calibration and GPU surface buffers update. The
+physical stop opening is retained across focus changes. The UI distance remains
+measured from the first vertex; explicit table distances are converted to the
+object-to-sensor convention internally. Manual image-distance micro-adjustment
+remains available; the next cam focus command restores the prescribed sensor.
+
+Invalid or overlapping cam positions fail visibly and retain the previous optical
+state. They never silently switch to sensor translation. Data interpolation can
+reproduce the supplied motion, but does not establish commercial-lens calibration
+between its source nodes. Unit tests compare all 23 supplied explicit tables to
+the pinned upstream interpolation functions; GPU runtime acceptance covers both
+cam paths and the existing sensor fallback.
