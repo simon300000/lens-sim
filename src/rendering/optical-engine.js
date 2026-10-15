@@ -195,8 +195,8 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       const ax=moments[0]/count,ay=moments[1]/count,bx=moments[2]/count,by=moments[3]/count;
       const A=moments[6]/count-bx*bx-by*by,B=moments[5]/count-ax*bx-ay*by,C=moments[4]/count-ax*ax-ay*ay;
       if(!(A>1e-12))throw new Error('像方光束退化，无有限最佳焦点');
-      const delta=-B/A,z=referenceSensorZ+delta,min=lens.lastVertexZMm+.05,max=lens.lastVertexZMm+Math.max(200,Math.abs(packed.limits.focalLengthMm)*4);
-      if(!Number.isFinite(z)||z<=min||z>=max)throw new Error('最佳像面超出可调范围，保留原焦点');
+      const delta=-B/A,z=referenceSensorZ+delta,min=lens.lastVertexZMm,max=lens.lastVertexZMm+Math.max(200,Math.abs(packed.limits.focalLengthMm)*4);
+      if(!Number.isFinite(z)||z<min||z>=max)throw new Error('最佳像面超出可调范围，保留原焦点');
       const merit=position=>{const q=position-referenceSensorZ;return Math.max(0,C+2*B*q+A*q*q);};
       const rmsResolutionMm=Math.max(1e-5,Math.sqrt((Math.abs(C)+Math.abs(2*B*delta)+Math.abs(A*delta*delta))*5e-5));
       return {sensorZMm:z,imageDistanceMm:z-lens.lastVertexZMm,beams:count,beamBudget:focusBudget,beforeRmsMm:Math.sqrt(merit(previousSensorZ)),afterRmsMm:Math.sqrt(merit(z)),rmsResolutionMm,quadratic:{A,B,C,originSensorZMm:referenceSensorZ},target:localTarget};

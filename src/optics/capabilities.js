@@ -1,8 +1,9 @@
+import { normalizeDiffraction } from './diffractive.js';
 import { normalizeAsphere, firstOrder, apertureLimits, paraxialSensorZ, rearSamplingRegion } from './lens-state.js';
 
 const F32_MIN_NORMAL = 1.1754943508222875e-38;
 
-/** Static acceptance for the *current* 96-byte r183/WebGPU optical ABI.
+/** Static acceptance for the *current* 224-byte r183/WebGPU optical ABI.
  * This deliberately does not claim successful ray traversal or GPU validation.
  * Uses the same scalar setup as packLens, but never allocates glass LUTs.
  */
@@ -31,7 +32,7 @@ export function preflightLens(lens, options = {}) {
       return packed;
     };
     for (const [index, s] of lens.surfaces.entries()) {
-      if (!['plane', 'sphere', 'conic', 'even-asphere'].includes(s.type)) throw new Error(`S${index + 1}: 未支持的面型 ${s.type}`);
+      if (!['plane', 'sphere', 'conic', 'even-asphere', 'extended-odd-asphere', 'diffractive'].includes(s.type)) throw new Error(`S${index + 1}: 未支持的面型 ${s.type}`);
       if (s.index !== index || !lens.glasses[s.mediumBefore] || !lens.glasses[s.mediumAfter]) throw new Error(`S${index + 1}: 面索引或介质引用无效`);
       for (const field of ['zMm', 'radiusMm', 'conic', 'thicknessMm']) f32(s[field], `S${index + 1}.${field}`);
       if (s.apertureRadiusMm !== null) {
@@ -42,6 +43,8 @@ export function preflightLens(lens, options = {}) {
         throw new Error(`S${index + 1}: 正轴向间距在 f32 打包后消失`);
       }
       const normalized = normalizeAsphere(s);
+      if(s.type==='diffractive'&&!s.doe)throw new Error(`S${index+1}: missing DOE phase prescription`);
+      normalizeDiffraction(s,normalized.scaleMm);
       f32(normalized.numericalRadiusMm, `S${index + 1} 求交域`);
       // WGSL computes c*c and scale*scale before applying these factors.
       if (s.radiusMm !== 0) f32(Math.fround(1 / Math.fround(s.radiusMm)) ** 2, `S${index + 1} 曲率平方`);
@@ -54,8 +57,6 @@ export function preflightLens(lens, options = {}) {
     const fNumber = Math.max(limits.minFNumber, 2.8);
     if (fNumber > limits.maxFNumber) throw new Error('初始光圈超出数据约束');
     const sensorZMm = focusOverride ? paraxialSensorZ(lens, focusDistanceM) : lens.sensorZMm;
-    const rearGapMm = sensorZMm - lens.lastVertexZMm;
-    if (!(rearGapMm > .05)) throw new Error(`当前后部采样器要求像面距最后顶点 > 0.05 mm；此配置为 ${rearGapMm.toPrecision(6)} mm，尚不支持该原生像面间距`);
     const region = rearSamplingRegion(lens, sensorZMm, sensorMm);
     const stopRadiusMm = Math.abs(limits.focalLengthMm * limits.pupilMagnification) / (2 * fNumber);
     for (const [field, value] of Object.entries({ sensorZMm, stopRadiusMm, radiusMm: region.radiusMm, areaPdf: region.areaPdf })) f32(value, field);

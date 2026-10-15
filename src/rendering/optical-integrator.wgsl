@@ -111,9 +111,23 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>){
       let uv=(vec2<f32>(f32(id.x),f32(imageY))+jitter)/vec2<f32>(render.size.xy);
       // A real sensor image is inverted. Stored output y=0 is the displayed top.
       let sensor=vec3<f32>(-(uv.x-.5)*optics.sensor.x,(uv.y-.5)*optics.sensor.y,optics.geometry.x);
-      let disk=sampleDisk(vec2<f32>(sampleDimension(globalPixel,index,2u,render.settings.x),sampleDimension(globalPixel,index,3u,render.settings.x)));
-      let reference=vec3<f32>(disk*optics.geometry.z,optics.geometry.y);
-      let direction=normalize(reference-sensor);
+      let pupilUV=vec2<f32>(sampleDimension(globalPixel,index,2u,render.settings.x),sampleDimension(globalPixel,index,3u,render.settings.x));
+      var direction:vec3<f32>;
+      if(optics.sensor.w>0.5){
+        // At a planar sensor/cover interface a finite reference disk is
+        // singular. Full cosine hemisphere: pdf_omega=cos(theta)/pi, so
+        // (4/pi)*cos(theta)/pdf_omega=4. No accepted-path normalization.
+        let disk=sampleDisk(pupilUV);
+        direction=vec3<f32>(disk,-sqrt(max(0.0,1.0-dot(disk,disk))));
+        weight=4.0;
+      }else{
+        let disk=sampleDisk(pupilUV);
+        let reference=vec3<f32>(disk*optics.geometry.z,optics.geometry.y);
+        direction=normalize(reference-sensor);
+        let dz=optics.geometry.x-optics.geometry.y;
+        let cosTheta=abs(direction.z);
+        weight=4.*optics.geometry.z*optics.geometry.z*pow(cosTheta,4.)/(dz*dz);
+      }
       lambda=optics.wavelength.x+(optics.wavelength.y-optics.wavelength.x)*sampleDimension(globalPixel,index,4u,render.settings.x);
       // Physically blocked / TIR / numerical optical paths: zero contribution,
       // counted as attempts, and the scene query is skipped entirely.
@@ -123,11 +137,6 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>){
       if(ray.status!=0u){a.failures.z++;continue;}
       worldOrigin=(render.cameraToWorld*vec4<f32>(ray.p*.001,1)).xyz;
       worldDirection=normalize((render.cameraToWorld*vec4<f32>(ray.v,0)).xyz);
-      let dz=optics.geometry.x-optics.geometry.y;
-      let cosTheta=abs(direction.z);
-      // p_A=1/(pi Rref²) in mm^-2, d in mm. T=1. No successful-ray normalization.
-      // Fixed global radiometric calibration 4/pi makes ideal f/1 axial L=1 ->1.
-      weight=4.*optics.geometry.z*optics.geometry.z*pow(cosTheta,4.)/(dz*dz);
     }
     a.queries.z++;
     var rgb=render.environment.xyz;

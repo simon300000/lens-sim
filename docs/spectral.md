@@ -34,7 +34,7 @@ pathXYZ = K * spectralRadiance(RGB, lambda)
 
 This Y normalization is fixed globally, not a throughput/exposure normalization. The attempted path's XYZ contribution is accumulated in f32, then divided by **all attempted samples**, including zero contributions from blocked/TIR paths. The XYZ→linear-sRGB matrix is the inverse of the RGB matrix. Negative RGB caused by finite-sample color noise can occur after this final matrix; it is not negative spectral radiance. Display conversion/gamut handling is a separate stage. Exposure, Bloom, HDR/SDR tone mapping and sRGB encoding are applied only after accumulation.
 
-The approximation has no spectral material BRDFs, measured light spectra, fluorescence, diffraction, coherent phase, absorption or wavelength-dependent sensor response beyond XYZ matching. It cannot reconstruct the true spectrum of the existing scene.
+The approximation has no spectral material BRDFs, measured light spectra, fluorescence, wave-optical diffraction imaging, coherent interference, absorption or wavelength-dependent sensor response beyond XYZ matching. It cannot reconstruct the true spectrum of the existing scene.
 
 ## Glass wavelength support
 

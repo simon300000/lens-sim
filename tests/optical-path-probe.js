@@ -1,7 +1,7 @@
 import opticalCore from '../src/optics/optical-core.wgsl?raw';
 import probeKernel from './optical-path-probe.wgsl?raw';
-import { AIR, modelGlass, createGlassLUT } from '../src/optics/glass.js';
-import { normalizeAsphere, packLens } from '../src/optics/lens-state.js';
+import { AIR, modelGlass } from '../src/optics/glass.js';
+import { packOpticalSurfaces, packLens } from '../src/optics/lens-state.js';
 import { traceLens, unit, add } from '../src/optics/optical-reference.js';
 import { sampleDimension, concentricDisk } from '../src/spectral/sampler.js';
 
@@ -15,17 +15,11 @@ const check=(condition,message)=>{if(!condition)throw new Error(message);};
 // Afocal fixtures have no first-order focus/f-number, so cannot use packLens's
 // camera controls. Their surface/LUT/uniform layout is the production ABI.
 function packAfocal(lens,dispersion=true) {
-  const lut=createGlassLUT(lens.glasses),raw=new ArrayBuffer(lens.surfaces.length*96),f=new Float32Array(raw),u=new Uint32Array(raw);
-  for(const s of lens.surfaces){
-    const j=24*s.index,n=normalizeAsphere(s);
-    f.set([s.zMm,s.radiusMm,s.conic,s.apertureRadiusMm??-1],j);
-    u.set([lut.ids.indexOf(s.mediumBefore),lut.ids.indexOf(s.mediumAfter),s.aspheric.length,0],j+4);
-    f.set(n.coefficients,j+8);f[j+20]=n.numericalRadiusMm;f[j+21]=n.scaleMm;
-  }
+  const {surfaces,lut}=packOpticalSurfaces(lens);
   const parameters=new ArrayBuffer(64),pf=new Float32Array(parameters),pu=new Uint32Array(parameters);
   pu.set([lens.surfaces.length,lut.count,0xffffffff,dispersion?1:0]);
   pf.set([lut.minNm,lut.maxNm,lut.stepNm,587.5618,80,30,50,50,36,24,0,0],4);
-  return {surfaces:new Uint8Array(raw),parameters:new Uint8Array(parameters),lut,stopRadiusMm:null};
+  return {surfaces,parameters:new Uint8Array(parameters),lut,stopRadiusMm:null};
 }
 
 async function loadLens(id){
@@ -53,7 +47,7 @@ export async function runOpticalPathProbe(interop){
   const asphere={...plate,surfaces:[makeSurface(0,0,{radiusMm:200,aspheric:coefficients,mediumAfter:glass.id}),makeSurface(1,30,{mediumBefore:glass.id})]};
   const tir={...plate,surfaces:[makeSurface(0,0,{mediumBefore:glass.id,mediumAfter:'air'})]};
   const dispersion={...sphere,glasses:{air:AIR,[strongGlass.id]:strongGlass},surfaces:sphere.surfaces.map(s=>({...s,mediumBefore:s.mediumBefore==='air'?'air':strongGlass.id,mediumAfter:s.mediumAfter==='air'?'air':strongGlass.id}))};
-  const cases=[];
+  const cases=[],doeCatalogPairs=[];
   const addFixture=(name,lens,rays,{dispersionEnabled=true,packed=null}={})=>cases.push({name,lens,rays,dispersionEnabled,packed:packed??packAfocal(lens,dispersionEnabled)});
   const surfaceRays=[];
   for(const nm of WAVELENGTHS)for(const x of [0,3,8]){
@@ -70,6 +64,22 @@ export async function runOpticalPathProbe(interop){
     highOrderRays.push(makeRay([x,1,40],[0,0,-1],nm,true));
   }
   addFixture('normalized A4/A24/A26 asphere',asphere,highOrderRays);
+  for(const [name,rn,coefficients]of [
+    ['A1 off-axis',2.5,[.001,.002,-.0003,.00001]],
+    ['A2/A3/A5',2.8,[0,.002,-.0003,0,.00001]],
+    ['A20/A28',50,Array.from({length:28},(_,j)=>j===2?.01:j===19?-.002:j===27?.001:0)],
+  ]){
+    const extended={...plate,surfaces:[makeSurface(0,0,{radiusMm:200,xodd:{normalizationRadiusMm:rn,coefficients},mediumAfter:glass.id}),makeSurface(1,30,{mediumBefore:glass.id})]};
+    const rays=[];for(const nm of WAVELENGTHS)for(const x of name==='A20/A28'?[10,25,40,49]:[.1,.5,1,2]){
+      rays.push(makeRay([x,.1,-10],[.001,-.002,1],nm));
+      rays.push(makeRay([x,.1,40],[.001,-.002,-1],nm,true));
+    }
+    if(name!=='A1 off-axis')for(const nm of WAVELENGTHS){
+      rays.push(makeRay([0,0,-10],[0,0,1],nm));
+      rays.push(makeRay([0,0,40],[0,0,-1],nm,true));
+    }
+    addFixture(`XODD ${name} Rn=${rn}`,extended,rays);
+  }
   addFixture('explicit total internal reflection',tir,WAVELENGTHS.map(nm=>makeRay([0,0,-2],[.9,0,.3],nm)));
   const dispersionRays=WAVELENGTHS.map(nm=>makeRay([7,2,-10],[.01,0,1],nm));
   addFixture('strong dispersion ON',dispersion,dispersionRays);
@@ -83,6 +93,14 @@ export async function runOpticalPathProbe(interop){
     }
     addFixture(`catalog ${id} cfg0`,lens,rays,{packed});
   }
+  for(const id of ['canon-rf-28mm-f2-8-stm','fujifilm-xf-18mm-f1-4-r-lm-wr','fujifilm-gf-50mm-f3-5-r-lm-wr']){
+    const lens=await loadLens(id),packed=packLens(lens,{sensorZMm:lens.sensorZMm}),rays=[];
+    for(const nm of WAVELENGTHS)for(const xy of [[0,0],[1,.3],[3,1],[6,2]]){
+      rays.push(makeRay([xy[0],xy[1],-10],[.005,-.003,1],nm));
+      rays.push(makeRay([xy[0],xy[1],lens.sensorZMm],[.005,-.003,-1],nm,true));
+    }
+    addFixture(`XODD catalog ${id} cfg0`,lens,rays,{packed});
+  }
   // Pinned Noct S28 rays: disjoint sag/cylinder intervals and a cylinder miss.
   // These are physical misses, not failed numerical solves. Include an axial
   // hit and an edge hit to ensure the conservative bound does not clip rays.
@@ -94,6 +112,26 @@ export async function runOpticalPathProbe(interop){
     makeRay([0,0,158.12413412796502],[0,0,-1],550,true),
     makeRay([18.798,0,158.12413412796502],[0,0,-1],550,true),
   ]);
+  const phaseSurface=makeSurface(0,0,{doe:{order:1,normalizationRadiusMm:10,coefficients:[-Math.PI*100/(550e-6*100)]}});
+  const phaseRays=WAVELENGTHS.flatMap(nm=>[makeRay([5,0,-1],[0,0,1],nm),makeRay([5,0,1],[0,0,-1],nm,true)]);
+  addFixture('DOE analytic plane phase lens',airLens([phaseSurface]),phaseRays);
+  addFixture('DOE dispersion OFF',airLens([phaseSurface]),phaseRays,{dispersionEnabled:false});
+  addFixture('DOE negative order curved carrier',airLens([{...phaseSurface,radiusMm:100,aspheric:[1e-9],doe:{...phaseSurface.doe,order:-2}}]),surfaceRays);
+  addFixture('DOE forbidden order',airLens([{...phaseSurface,doe:{...phaseSurface.doe,order:100}}]),WAVELENGTHS.map(nm=>makeRay([5,0,-1],[0,0,1],nm)));
+  const doeIds=['canon-ef-400mm-f4-do-is-ii-usm','canon-ef-400mm-f4-do-is-usm','canon-rf-600mm-f11-is-stm','canon-rf-800mm-f11-is-stm','nikon-af-s-nikkor-300mm-f4e-pf-ed-vr','nikon-af-s-nikkor-500mm-f5-6e-pf-ed-vr','nikon-z-600mm-f4-vr-s'];
+  for(const id of doeIds){
+    const asset=await (await fetch(`/lenses/${id}.json`)).json();
+    for(const lens of asset.configurations){
+      check(lens?.surfaces.some(s=>s.doe),`${id}: missing DOE configuration`);
+      const packed=packLens(lens,{sensorZMm:lens.sensorZMm}),rays=[];
+      for(const nm of WAVELENGTHS)for(const x of [0,2,5,10])for(const field of [0,.005])rays.push(makeRay([x,1,-1],[field,0,1],nm));
+      const name=`catalog DOE ${id} cfg${lens.configurationIndex}`;
+      addFixture(name,lens,rays,{packed});
+      const baseline={...lens,surfaces:lens.surfaces.map(s=>({...s,doe:null}))};
+      addFixture(`no phase ${id} cfg${lens.configurationIndex}`,baseline,rays,{packed:packAfocal(baseline)});
+      doeCatalogPairs.push({name,baseline:`no phase ${id} cfg${lens.configurationIndex}`});
+    }
+  }
   const summaries=[],allResults=new Map();let totalRays=0,totalPassed=0,peakMemoryBytes=0,maxPositionErrorMm=0,maxDirectionError=0,maxReciprocityPositionMm=0,maxReciprocityDirection=0;
   for(const fixture of cases){
     const resources=[];let scopePending=false;
@@ -136,7 +174,8 @@ export async function runOpticalPathProbe(interop){
         rows.push(actual);
       }
       maxPositionErrorMm=Math.max(maxPositionErrorMm,casePosition);maxDirectionError=Math.max(maxDirectionError,caseDirection);
-      if(fixture.name.startsWith('catalog'))check(statusCounts[0]>=20,`${fixture.name}: insufficient successful paths for meaningful reference comparison`);
+      if(fixture.name.startsWith('XODD catalog'))check(statusCounts[0]>=6,`${fixture.name}: insufficient successful XODD paths`);
+      if(fixture.name.startsWith('catalog'))check(statusCounts[0]>=12,`${fixture.name}: insufficient successful paths for meaningful reference comparison`);
       const memory=packed.surfaces.byteLength+packed.lut.values.byteLength+packed.parameters.byteLength+raw.byteLength+result.byteLength;
       peakMemoryBytes=Math.max(peakMemoryBytes,memory);
       summaries.push({name:fixture.name,surfaces:fixture.lens.surfaces.length,rays:fixture.rays.length,statusCounts,maxPositionErrorMm:casePosition,maxDirectionError:caseDirection,maxReciprocityPositionMm:caseReciprocity});allResults.set(fixture.name,rows);
@@ -150,9 +189,22 @@ export async function runOpticalPathProbe(interop){
   check(dispersionDirectionDifference>1e-3,'Strong dispersion must alter actual geometric ray direction');
   const noDispersionDifference=Math.max(...off.map(r=>distance(r.direction,off[0].direction)+distance(r.point,off[0].point)));
   check(noDispersionDifference===0,'Dispersion OFF must give bit-identical paths for different sampled wavelengths');
-  return {passed:true,sharedDevice:true,productionOpticalCore:true,cases:summaries,totalRays,totalPassed,
+  const doeCatalogSpectralEffects=doeCatalogPairs.map(pair=>{
+    const rows=allResults.get(pair.name),baseline=allResults.get(pair.baseline);
+    const wavelengthDirectionDifference=distance(rows[4].direction,rows[20].direction);
+    const prescribedPhaseDirectionEffect=distance(rows[4].direction,baseline[4].direction);
+    check(rows[4].status===0&&rows[20].status===0&&baseline[4].status===0,'DOE catalog comparison needs transmitted rays');
+    check(wavelengthDirectionDifference>1e-8&&prescribedPhaseDirectionEffect>1e-6,`${pair.name}: lost DOE/spectral effect`);
+    return {name:pair.name,wavelengthsNm:[390,770],wavelengthDirectionDifference,prescribedPhaseDirectionEffect};
+  });
+  const phaseOn=allResults.get('DOE analytic plane phase lens'),phaseOff=allResults.get('DOE dispersion OFF');
+  for(let i=0;i<WAVELENGTHS.length;i++)check(Math.abs(phaseOn[i*2].direction[0]+.05*WAVELENGTHS[i]/550)<2e-6,'DOE plane analytic sin(theta) mismatch');
+  const doeWavelengthDirectionDifference=distance(phaseOn[0].direction,phaseOn[4].direction);
+  const doeDispersionOffDifference=distance(phaseOff[0].direction,phaseOff[4].direction);
+  check(doeWavelengthDirectionDifference>.01&&doeDispersionOffDifference===0,'DOE wavelength/dispersion-off behavior failed');
+  return {passed:true,sharedDevice:true,productionOpticalCore:true,doeCatalogSpectralEffects,cases:summaries,totalRays,totalPassed,
     tolerances:{positionMm:POSITION_TOLERANCE_MM,direction:DIRECTION_TOLERANCE},maxPositionErrorMm,maxDirectionError,maxReciprocityPositionMm,maxReciprocityDirection,
-    dispersionDirectionDifference,dispersionPositionDifferenceMm,noDispersionDifference,
+    dispersionDirectionDifference,dispersionPositionDifferenceMm,noDispersionDifference,doeWavelengthDirectionDifference,doeDispersionOffDifference,
     pipelineCompilations:interop.compilations-compilationsBefore,peakMemoryBytes,elapsedMs:performance.now()-started,
     timingKind:'CPU wall time including compilation, data loading and small diagnostic readbacks; not GPU execution time'};
 }

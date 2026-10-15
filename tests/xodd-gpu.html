@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en"><meta charset="UTF-8"><title>XODD GPU regression</title>
+<pre id="result">Running production optical kernel…</pre>
+<script type="module">
+import * as THREE from 'three/webgpu';
+import { createGPUInterop } from '../src/rendering/three-interop.js';
+import { runOpticalPathProbe } from './optical-path-probe.js';
+let report;const errors=[];
+const out=document.querySelector('#result');
+let renderer,interop;
+try {
+  renderer=new THREE.WebGPURenderer();
+  await renderer.init();
+  interop=createGPUInterop(renderer);
+  interop.device.addEventListener('uncapturederror',e=>errors.push(e.error.message));
+  const result=await runOpticalPathProbe(interop);
+  if(errors.length)throw new Error(errors.join('\n'));
+  report={...result,errors,visibility:document.visibilityState,focused:document.hasFocus(),browser:navigator.userAgent,url:location.href,at:new Date().toISOString()};
+  out.textContent=JSON.stringify(result,null,2);
+  document.body.dataset.passed='true';
+} catch(error) {
+  out.textContent=error.stack||String(error);
+  report={passed:false,error:out.textContent,browser:navigator.userAgent,url:location.href,at:new Date().toISOString()};
+  document.body.dataset.passed='false';
+} finally {
+  await fetch('/__xodd_report',{method:'POST',body:JSON.stringify(report,null,2)}).catch(()=>{});
+  interop?.dispose();
+  renderer?.dispose();
+}
+</script></html>
