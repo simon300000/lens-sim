@@ -117,7 +117,7 @@ test('moving-center proposal encloses shared endpoint/midpoint bounds with the a
   assert.ok(Math.abs(got.energy/ref.energy-1)<.03,`moving energy at ${h}`);assert.equal(got.outside,0);
   for(const [u,v]of [[.01,.8],[.7,.31]]){
    const x=samplePupil(moving,[h,0],packed.region.radiusMm,u,v),y=samplePupil(moving,[0,h],packed.region.radiusMm,u,v);
-   if(u<.05){assert.ok(x.inGlobal&&y.inGlobal&&x.pdf>0&&y.pdf>0);assert.ok(Math.abs(x.reference[0]-y.reference[0])<1e-8&&Math.abs(x.reference[1]-y.reference[1])<1e-8);}else{assert.ok(Math.abs(x.reference[0]-y.reference[1])<1e-8&&Math.abs(x.reference[1]+y.reference[0])<1e-8);assert.ok(Math.abs(x.pdf-y.pdf)<1e-10);}
+   if(h===0||u<.05){assert.ok(x.inGlobal&&y.inGlobal&&x.pdf>0&&y.pdf>0);assert.ok(Math.abs(x.reference[0]-y.reference[0])<1e-8&&Math.abs(x.reference[1]-y.reference[1])<1e-8);}else{assert.ok(Math.abs(x.reference[0]-y.reference[1])<1e-8&&Math.abs(x.reference[1]+y.reference[0])<1e-8);assert.ok(Math.abs(x.pdf-y.pdf)<1e-10);}
   }
  }
 });
