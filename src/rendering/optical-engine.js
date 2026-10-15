@@ -108,9 +108,16 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     if(table!==pupilTable){device.queue.writeBuffer(pupil,0,table.data);pupilTable=table;}
   }
   function setLens(nextLens,state){
-    const next=packLens(nextLens,state);updatePupil(nextLens,next,state);
+    const next=packLens(nextLens,state);
+    // Build the proposal before replacing any live GPU resources.
+    const nextPupil=buildPupilTable(nextLens,next,{enabled:state?.pupilSampling!==false});
+    const nextSurfaces=interop.storage(next.surfaces,'Current lens analytic surfaces');let nextLut;
+    try{
+      nextLut=interop.storage(next.lut.values,'Current lens n(lambda) LUT');
+      if(nextPupil!==pupilTable){device.queue.writeBuffer(pupil,0,nextPupil.data);pupilTable=nextPupil;}
+    }catch(error){interop.release(nextSurfaces);if(nextLut)interop.release(nextLut);throw error;}
     if(surfaces)interop.release(surfaces);if(lut)interop.release(lut);
-    surfaces=interop.storage(next.surfaces,'Current lens analytic surfaces');lut=interop.storage(next.lut.values,'Current lens n(lambda) LUT');
+    surfaces=nextSurfaces;lut=nextLut;
     packed=next;lens=nextLens;device.queue.writeBuffer(optics,0,next.parameters);rebuildGroups();reset();return next;
   }
   function updateOptics(state){

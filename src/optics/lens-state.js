@@ -37,7 +37,7 @@ export function apertureLimits(lens) {
     epd=Math.abs(p.entrancePupilZMm+L)/(lens.apertureValue*Math.abs(uEnd));
   }else epd=f/lens.apertureValue;
   const explicit=lens.surfaces[lens.stopIndex].apertureRadiusMm;
-  const maxStop=Math.min(epd*mag/2,explicit??Infinity);
+  const maxStop=Math.min(lens.focusMaxStopRadiusMm??epd*mag/2,explicit??Infinity);
   return {minFNumber:f*mag/(2*maxStop),maxFNumber:Math.max(22,f*mag/(2*maxStop)*8),maxStopRadiusMm:maxStop,...p};
 }
 
