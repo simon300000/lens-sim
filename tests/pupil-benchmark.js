@@ -7,6 +7,7 @@ import {packLens} from '../src/optics/lens-state.js';
 import {buildPupilTable,PUPIL_TABLE_BYTES} from '../src/optics/pupil-sampling.js';
 import {buildPupilTable as legacyBuild} from './fixtures/pupil-sampling-legacy.js';
 import {sweepIds} from './pupil-sweep.js';
+import {experimentCases,experimentVariants,prescriptionSummary} from './pupil-diverse-cases.js';
 const button=document.querySelector('#run'),progress=document.querySelector('#progress'),output=document.querySelector('#result');
 button.onclick=async()=>{
  button.disabled=true;let device;const buffers=[],errors=[],losses=[];let interrupted=false;
@@ -25,11 +26,12 @@ button.onclick=async()=>{
   const pipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module,entryPoint:'main'}});report.compileMs=performance.now()-started;
   const T=uniform(PUPIL_TABLE_BYTES),Q=uniform(32),O=storage(256*48),read=buf(256*48,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST);
   let qs,resolve,timeRead;if(timestamp){qs=device.createQuerySet({type:'timestamp',count:2});resolve=buf(16,GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC);timeRead=buf(16,GPUBufferUsage.MAP_READ|GPUBufferUsage.COPY_DST);}
-  const options=new URLSearchParams(location.search),ids=options.has('lens')?[options.get('lens')]:sweepIds;
-  for(const id of ids){
+  const options=new URLSearchParams(location.search),cases=experimentCases(options,sweepIds),diverse=options.get('suite')==='diverse';report.suite=diverse?'diverse':'resolution';
+  for(const spec of cases){const {id}=spec;
    progress.textContent=`预计算 ${id}`;await new Promise(r=>setTimeout(r,0));
-   const lens=(await(await fetch(`/lenses/${id}.json`)).json()).configurations[0],p=packLens(lens,{sensorZMm:lens.sensorZMm});
-   const variants=[];for(const bins of [128,256,512,1024])for(const movingCenter of [false,true]){progress.textContent=`预计算 ${id} ${movingCenter?'moving':'fixed'}${bins}`;await new Promise(r=>setTimeout(r,0));variants.push({name:(movingCenter?'moving':'fixed')+bins,table:buildPupilTable(lens,p,{bins,movingCenter})});}const baseline=variants[0].table;
+   const lens=(await(await fetch(`/lenses/${id}.json`)).json()).configurations[spec.config],p=packLens(lens,{sensorZMm:lens.sensorZMm,sensorMm:spec.sensorMm});
+   if(p.region.directional){report.results.push({id,...spec,directional:true,skipped:true,reason:"Native contact plane uses angular sampler; area kernel is inapplicable",prescription:prescriptionSummary(lens)});continue;}
+   const variants=[];for(const {bins,movingCenter} of experimentVariants(spec,diverse)){progress.textContent=`预计算 ${id} ${movingCenter?'moving':'fixed'}${bins}`;await new Promise(r=>setTimeout(r,0));variants.push({name:(movingCenter?'moving':'fixed')+bins,table:buildPupilTable(lens,p,{bins,movingCenter})});}const baseline=variants[0].table;
    const U=uniform(p.parameters),S=storage(p.surfaces),L=storage(p.lut.values);
    const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[[0,U],[1,S],[2,L],[3,Q],[4,O],[20,T]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
    async function run(table,h,nm,seed){
@@ -51,9 +53,9 @@ button.onclick=async()=>{
      progress.textContent=`${id} ${v.name} h=${fraction} nm=${nm} seed=${seed}`;track();rows.push({variant:v.name,...await run(v.table,baseline.maxHeight*fraction,nm,seed)});
     }
    }
-   report.results.push({id,sensorZMm:p.sensorZMm,region:p.region,builds:variants.map(v=>({variant:v.name,buildMs:v.table.buildMs,precomputeMs:v.table.precomputeMs,deriveMs:v.table.deriveMs,physicalCacheHit:v.table.physicalCacheHit,coldBuildMs:v.table.coldBuildMs,probes:v.table.probes,diagnostics:v.table.diagnostics})),rows});
+   report.results.push({id,...spec,prescription:prescriptionSummary(lens),sensorZMm:p.sensorZMm,fNumber:p.fNumber,region:p.region,builds:variants.map(v=>({variant:v.name,buildMs:v.table.buildMs,precomputeMs:v.table.precomputeMs,deriveMs:v.table.deriveMs,physicalCacheHit:v.table.physicalCacheHit,coldBuildMs:v.table.coldBuildMs,probes:v.table.probes,diagnostics:v.table.diagnostics})),rows});if(diverse)await fetch('/__pupil-report',{method:'POST',body:JSON.stringify({...report,partial:true})});
   }
-  track();report.interrupted=interrupted;report.foreground=!document.hidden&&document.hasFocus();report.passed=!errors.length&&!losses.length&&!interrupted;
+  track();report.partial=false;report.interrupted=interrupted;report.foreground=!document.hidden&&document.hasFocus();report.passed=!errors.length&&!losses.length&&!interrupted;
  }catch(e){report.passed=false;report.error=e.stack;}
  finally{
   document.removeEventListener('visibilitychange',track);window.removeEventListener('blur',track);for(const b of buffers)b.destroy();device?.destroy();button.disabled=false;

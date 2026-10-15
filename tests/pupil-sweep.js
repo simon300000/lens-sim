@@ -1,3 +1,4 @@
+import {prescriptionSummary,experimentVariants} from './pupil-diverse-cases.js';
 // Shared Node/browser parameter experiment. Legacy estimator is frozen at the
 // pre-change implementation; all acceptance and integrals use full f64 tracing.
 import {packLens} from '../src/optics/lens-state.js';
@@ -7,11 +8,12 @@ import {traceLens} from '../src/optics/optical-reference.js';
 import {sampleDimension} from '../src/spectral/sampler.js';
 export const sweepIds=['7artisans-af-135mm-f1-8-max','zeiss-otus-55mm-f1-4','canon-fl-50mm-f1-8','canon-ef-40mm-f2-8-stm','sony-fe-24mm-f1-4-gm'];
 const area=b=>(b[1]-b[0])*(b[3]-b[2]);
-export async function pupilSweep(load,{ids=sweepIds,bins=[128,256,512,1024],movingModes=[false,true],samples=16384,fine=192,progress=()=>{}}={}){
+export async function pupilSweep(load,{ids=sweepIds,bins=[128,256,512,1024],movingModes=[false,true],cases=null,samples=16384,fine=192,progress=()=>{}}={}){
  const results=[];
- for(const id of ids){
-  const lens=await load(id),p=packLens(lens,{sensorZMm:lens.sensorZMm}),legacy=legacyBuild(lens,p),variants=[];
-  for(const n of bins)for(const movingCenter of movingModes)variants.push({name:(movingCenter?'moving':'fixed')+n,table:buildPupilTable(lens,p,{bins:n,movingCenter}),sample:samplePupil});
+ for(const spec of (cases??ids.map(id=>({id,config:0,sensorMm:[36,24]})))){const {id}=spec;
+  const lens=await load(id,spec.config),p=packLens(lens,{sensorZMm:lens.sensorZMm,sensorMm:spec.sensorMm}),legacy=legacyBuild(lens,p),variants=[];
+  if(p.region.directional){results.push({id,...spec,directional:true,skipped:true,reason:"Native angular control; no area estimator comparison",prescription:prescriptionSummary(lens)});continue;}
+  for(const {bins:n,movingCenter} of (cases?experimentVariants(spec,true):bins.flatMap(n=>movingModes.map(movingCenter=>({bins:n,movingCenter})))))variants.push({name:(movingCenter?'moving':'fixed')+n,table:buildPupilTable(lens,p,{bins:n,movingCenter}),sample:samplePupil});
   const rows=[];
   // Independent heights include interior quarter-bin locations, not just the
   // endpoints/midpoints used during construction. Cover band and outer field.
@@ -47,7 +49,7 @@ export async function pupilSweep(load,{ids=sweepIds,bins=[128,256,512,1024],movi
    }
    progress(`${id} h=${h.toFixed(2)} nm=${nm}`);await new Promise(r=>setTimeout(r,0));
   }
-  results.push({id,sensorZMm:p.sensorZMm,region:p.region,builds:variants.map(v=>({variant:v.name,buildMs:v.table.buildMs,precomputeMs:v.table.precomputeMs,deriveMs:v.table.deriveMs,physicalCacheHit:v.table.physicalCacheHit,coldBuildMs:v.table.coldBuildMs,probes:v.table.probes,diagnostics:v.table.diagnostics})),rows});
+  results.push({id,...spec,prescription:prescriptionSummary(lens),fNumber:p.fNumber,sensorZMm:p.sensorZMm,region:p.region,builds:variants.map(v=>({variant:v.name,buildMs:v.table.buildMs,precomputeMs:v.table.precomputeMs,deriveMs:v.table.deriveMs,physicalCacheHit:v.table.physicalCacheHit,coldBuildMs:v.table.coldBuildMs,probes:v.table.probes,diagnostics:v.table.diagnostics})),rows});
  }
  return {date:new Date().toISOString(),samples,fine,results};
 }
