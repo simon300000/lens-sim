@@ -13,7 +13,7 @@ export const PUPIL_GLOBAL_MIX=.05;
 const PRIMARY=587.5618;
 const union=(a,b)=>[Math.min(a[0],b[0]),Math.max(a[1],b[1]),Math.min(a[2],b[2]),Math.max(a[3],b[3])];
 
-export function buildPupilTable(lens,packed,{enabled=true,bins=PUPIL_BINS,movingCenter=false}={}) {
+export function buildPupilTable(lens,packed,{enabled=true,bins=PUPIL_BINS,movingCenter=true}={}) {
   if(!Number.isInteger(bins)||bins<1||bins>PUPIL_MAX_BINS)throw new RangeError(`Pupil bins must be an integer from 1 to ${PUPIL_MAX_BINS}`);
   const {sensorZMm,stopRadiusMm,region}=packed;
   // Contact-plane configurations retain the angular sampler.

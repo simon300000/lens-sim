@@ -26,6 +26,7 @@ function estimate(lens,p,t,h,nm,N,seed=1,spotBox=null){
 
 test('pupil cache keys optics, not pose/light; fallback and mixture retain full support',()=>{
   assert.equal(buildPupilTable(otus,packed),table);
+  assert.equal(table.bins,128);assert.equal(table.movingCenter,true);assert.equal(table.globalMix,.05);
   assert.notEqual(buildPupilTable(otus,packLens(otus,{sensorZMm:packed.sensorZMm+.01})),table);
   assert.notEqual(buildPupilTable(otus,packLens(otus,{sensorZMm:packed.sensorZMm,fNumber:2})),table);
   assert.notEqual(buildPupilTable(otus,packed,{enabled:false}),table);
@@ -89,11 +90,11 @@ test('radiometry also agrees at a smaller stop and in a different lens layout',(
 
 test('configurable partitions share endpoints, validate midpoints and match the fixed GPU ABI',()=>{
   for(const bins of [128,256,512,1024]){
-    const t=buildPupilTable(otus,packed,{bins});
+    const t=buildPupilTable(otus,packed,{bins,movingCenter:false});
     assert.equal(t.rows.length,bins);assert.equal(t.nodes.length,bins+1);
     assert.equal(t.data[1],bins);assert.equal(t.data.byteLength,16+1024*32);
     assert.equal(t.diagnostics.endpointNodes,bins+1);assert.equal(t.diagnostics.midpointChecks,bins);
-    assert.equal(buildPupilTable(otus,packed,{bins}),t);
+    assert.equal(buildPupilTable(otus,packed,{bins,movingCenter:false}),t);
     for(let i=0;i<bins;i++)for(const b of [t.nodes[i],t.nodes[i+1]]){
       const row=t.rows[i];assert.ok(row[0]<=b[0]&&row[1]>=b[1]&&row[2]<=b[2]&&row[3]>=b[3]);
     }
@@ -106,8 +107,8 @@ test('configurable partitions share endpoints, validate midpoints and match the 
 
 
 test('moving-center proposal encloses shared endpoint/midpoint bounds with the actual height PDF',()=>{
- const fixed=buildPupilTable(otus,packed,{bins:128}),moving=buildPupilTable(otus,packed,{bins:128,movingCenter:true});
- assert.equal(moving.physicalCacheHit,true);assert.equal(moving.probes,fixed.probes);assert.equal(moving.precomputeMs,fixed.precomputeMs);
+ const fixed=buildPupilTable(otus,packed,{bins:128,movingCenter:false}),moving=buildPupilTable(otus,packed,{bins:128,movingCenter:true});
+ assert.equal(moving.nodes[0],fixed.nodes[0]);assert.equal(moving.probes,fixed.probes);assert.equal(moving.precomputeMs,fixed.precomputeMs);
  for(let i=0;i<128;i++)for(const [f,b]of [[0,moving.nodes[i]],[.5,moving.midpointNodes[i]],[1,moving.nodes[i+1]]]){
   const q=pupilBox(moving,[(i+f)*moving.maxHeight/128,0]);
   for(let j=0;j<4;j++)assert.ok(j%2===0?q[j]<=b[j]+1e-10:q[j]>=b[j]-1e-10);
