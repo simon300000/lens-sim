@@ -111,8 +111,9 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>){
       let uv=(vec2<f32>(f32(id.x),f32(imageY))+jitter)/vec2<f32>(render.size.xy);
       // A real sensor image is inverted. Stored output y=0 is the displayed top.
       let sensor=vec3<f32>(-(uv.x-.5)*optics.sensor.x,(uv.y-.5)*optics.sensor.y,optics.geometry.x);
-      let disk=sampleDisk(vec2<f32>(sampleDimension(globalPixel,index,2u,render.settings.x),sampleDimension(globalPixel,index,3u,render.settings.x)));
-      let reference=vec3<f32>(disk*optics.geometry.z,optics.geometry.y);
+      let pupil=sampleExitPupil(sensor.xy,vec2<f32>(sampleDimension(globalPixel,index,2u,render.settings.x),sampleDimension(globalPixel,index,3u,render.settings.x)));
+      let inSamplingDomain=pupil.inGlobal;
+      let reference=vec3<f32>(pupil.point,optics.geometry.y);
       let direction=normalize(reference-sensor);
       lambda=optics.wavelength.x+(optics.wavelength.y-optics.wavelength.x)*sampleDimension(globalPixel,index,4u,render.settings.x);
       // Physically blocked / TIR / numerical optical paths: zero contribution,
@@ -121,13 +122,16 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>){
       if(ray.status==1u){a.failures.x++;continue;}
       if(ray.status==2u){a.failures.y++;continue;}
       if(ray.status!=0u){a.failures.z++;continue;}
+      // The proposal rectangle can extend outside the original numerical
+      // domain. Keep that domain unchanged; never retry this zero attempt.
+      if(!inSamplingDomain){a.failures.x++;continue;}
       worldOrigin=(render.cameraToWorld*vec4<f32>(ray.p*.001,1)).xyz;
       worldDirection=normalize((render.cameraToWorld*vec4<f32>(ray.v,0)).xyz);
       let dz=optics.geometry.x-optics.geometry.y;
       let cosTheta=abs(direction.z);
-      // p_A=1/(pi Rref²) in mm^-2, d in mm. T=1. No successful-ray normalization.
+      // Full mixture area PDF in mm^-2, d in mm. T=1. No successful-ray normalization.
       // Fixed global radiometric calibration 4/pi makes ideal f/1 axial L=1 ->1.
-      weight=4.*optics.geometry.z*optics.geometry.z*pow(cosTheta,4.)/(dz*dz);
+      weight=(4./3.141592653589793)*pow(cosTheta,4.)/(dz*dz*pupil.pdf);
     }
     a.queries.z++;
     var rgb=render.environment.xyz;

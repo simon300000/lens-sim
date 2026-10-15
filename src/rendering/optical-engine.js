@@ -9,6 +9,8 @@ import reduceSource from '../optics/focus-reduce.wgsl?raw';
 import statisticsSource from './statistics.wgsl?raw';
 import { SPECTRAL_WGSL } from '../spectral/reconstruction.js';
 import { SAMPLING_WGSL } from '../spectral/sampler.js';
+import { buildPupilTable } from '../optics/pupil-sampling.js';
+import pupilSource from '../optics/pupil-sampling.wgsl?raw';
 import { packLens } from '../optics/lens-state.js';
 import { createComputeTimer } from './three-interop.js';
 import { imagePlan, sampleBudget, PIXEL_BYTES } from './sampling-plan.js';
@@ -29,14 +31,16 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   const beams=interop.storage(65536*32,'AF cached a/b beams (bounded maximum)');
   const summary=interop.storage(48,'AF reduced quadratic moments');
   const target=interop.storage(32,'AF actual chief-ray world target');
+  const pupil=interop.uniform(new Uint8Array(16+32*16),'Radial exit pupil proposal table');
   const pipelines={};
-  pipelines.sample=await interop.computePipeline(opticalSource+SCENE_INTERSECTOR_WGSL+SCENE_SHADING_WGSL+SPECTRAL_WGSL+SAMPLING_WGSL+integratorSource,'Real lens + BVH first hit + shading fused integrate');
+  pipelines.sample=await interop.computePipeline(opticalSource+SCENE_INTERSECTOR_WGSL+SCENE_SHADING_WGSL+SPECTRAL_WGSL+SAMPLING_WGSL+pupilSource+integratorSource,'Real lens + BVH first hit + shading fused integrate');
   pipelines.resolve=await interop.computePipeline(SPECTRAL_WGSL+resolveSource,'XYZ display-only resolve');
   pipelines.focus=await interop.computePipeline(opticalSource+SAMPLING_WGSL+focusSource,'AF physical forward beam trace');
   pipelines.target=await interop.computePipeline(opticalSource+SCENE_INTERSECTOR_WGSL+targetSource,'AF reference ray -> BVH first opaque surface');
   pipelines.reduce=await interop.computePipeline(reduceSource,'AF cross-workgroup quadratic reduction');
   pipelines.statistics=await interop.computePipeline(statisticsSource,'Attempt statistics reduction');
   const timer=createComputeTimer(interop);
+  let pupilTable;
   let surfaces,lut,tiles=[],tileCursor=0,roundBudget=0,roundTarget=0,image,packed,lens,groups={},spp=0,disposed=false,computeMs=null,statsPending=null,lastTiming=null;
   let dimensions={width:0,height:0},currentRevision=0,resizeRevision=0,focusBudget=2048;
   const pose=new THREE.Matrix4();
@@ -53,7 +57,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     const lensBindings=[uniformBinding(0,optics),uniformBinding(1,surfaces),uniformBinding(2,lut)];
     const sceneBindings=[...sceneResources.bindings(6),...lighting.bindings(11)];
     for(const tile of tiles){
-      tile.sample=group(pipelines.sample,[...lensBindings,uniformBinding(3,render),uniformBinding(4,tile.buffer),{binding:5,resource:image.gpu.createView()},...sceneBindings]);
+      tile.sample=group(pipelines.sample,[...lensBindings,uniformBinding(3,render),uniformBinding(4,tile.buffer),{binding:5,resource:image.gpu.createView()},...sceneBindings,uniformBinding(20,pupil)]);
       tile.resolve=group(pipelines.resolve,[uniformBinding(0,resolve),uniformBinding(1,tile.buffer),{binding:2,resource:image.gpu.createView()}]);
     }
     groups.target=group(pipelines.target,[...lensBindings,uniformBinding(3,camera),uniformBinding(4,target),...sceneResources.bindings(6).slice(0,3)]);
@@ -99,14 +103,18 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     return install(candidate);
   }
   resize(width);
+  function updatePupil(nextLens,next,state){
+    const table=buildPupilTable(nextLens,next,{enabled:state?.pupilSampling!==false});
+    if(table!==pupilTable){device.queue.writeBuffer(pupil,0,table.data);pupilTable=table;}
+  }
   function setLens(nextLens,state){
-    const next=packLens(nextLens,state);
+    const next=packLens(nextLens,state);updatePupil(nextLens,next,state);
     if(surfaces)interop.release(surfaces);if(lut)interop.release(lut);
     surfaces=interop.storage(next.surfaces,'Current lens analytic surfaces');lut=interop.storage(next.lut.values,'Current lens n(lambda) LUT');
     packed=next;lens=nextLens;device.queue.writeBuffer(optics,0,next.parameters);rebuildGroups();reset();return next;
   }
   function updateOptics(state){
-    const next=packLens(lens,state);packed=next;device.queue.writeBuffer(optics,0,next.parameters);reset();return next;
+    const next=packLens(lens,state);updatePupil(lens,next,state);packed=next;device.queue.writeBuffer(optics,0,next.parameters);reset();return next;
   }
   function setPose(sourceCamera){
     sourceCamera.updateMatrixWorld(true);pose.copy(sourceCamera.matrixWorld);device.queue.writeBuffer(camera,0,new Float32Array(pose.elements));
@@ -124,10 +132,11 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   return {
     get texture(){return image.texture;},get outputGPU(){return image.gpu;},
     get spp(){return spp;},get dimensions(){return {...dimensions};},get packed(){return packed;},get tileCount(){return tiles.length;},get roundComplete(){return tileCursor===0;},
+    get pupilTable(){return pupilTable;},
     get initializationMs(){return initializationMs;},
     get computeMs(){return computeMs;},get timestampSupported(){return timer.supported;},
     get lastTiming(){return lastTiming;},
-    get memoryBytes(){return dimensions.width*dimensions.height*(PIXEL_BYTES+8)+(surfaces?.size??0)+(lut?.size??0)+beams.size+48+32+64+192+16+96+64;},
+    get memoryBytes(){return dimensions.width*dimensions.height*(PIXEL_BYTES+8)+(surfaces?.size??0)+(lut?.size??0)+pupil.size+beams.size+48+32+64+192+16+96+64;},
     reset,resize,resizeChecked,setLens,updateOptics,setPose,bindScene,
     sample({batchSpp=1,targetSpp=64,seed=1,diagnostic='beauty',constantEnvironment=null,pinhole=null}={}){
       bindScene();
@@ -202,6 +211,6 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       return {sensorZMm:z,imageDistanceMm:z-lens.lastVertexZMm,beams:count,beamBudget:focusBudget,beforeRmsMm:Math.sqrt(merit(previousSensorZ)),afterRmsMm:Math.sqrt(merit(z)),rmsResolutionMm,quadratic:{A,B,C,originSensorZMm:referenceSensorZ},target:localTarget};
     },
     async readAccumulation(){const result=new Uint8Array(dimensions.width*dimensions.height*PIXEL_BYTES);let offset=0;for(const tile of tiles){const part=new Uint8Array(await interop.readBuffer(tile.buffer,tile.bytes));result.set(part,offset);offset+=part.length;}return result.buffer;},
-    dispose(){disposed=true;timer.dispose();for(const b of [optics,render,resolve,focus,camera,beams,summary,target,surfaces,lut,...tiles.map(t=>t.buffer)])if(b)interop.release(b);image?.texture.dispose();},
+    dispose(){disposed=true;timer.dispose();for(const b of [optics,render,resolve,focus,camera,beams,summary,target,surfaces,lut,pupil,...tiles.map(t=>t.buffer)])if(b)interop.release(b);image?.texture.dispose();},
   };
 }
