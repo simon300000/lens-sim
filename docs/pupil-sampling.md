@@ -8,8 +8,8 @@ by successful-ray counts.
 
 ## Proposal and estimator
 
-`pupil-sampling.js` defaults to 128 radial sensor-height bins, with a
-configurable 1–256-bin resolution for experiments. The 129 endpoint nodes are
+`pupil-sampling.js` defaults to moving-center 128 radial sensor-height bins, with a
+configurable 1–1024-bin resolution for experiments. The 129 endpoint nodes are
 shared by neighboring intervals. At each node, an aperture-free rear-to-stop
 solve proposes a seed and scale at 380, 587.5618 and 780 nm (primary wavelength
 only when dispersion is off). Every seed is revalidated through the complete
@@ -22,16 +22,23 @@ positions plus seed projections. Exponential expansion brackets a passing to
 failing boundary, followed by binary refinement. Subsequent sweeps revisit edges
 after the orthogonal extent changes. The margin is 2.5% of the guide scale or
 1.25% of the measured width, whichever is larger, plus an absolute float margin.
-Neighboring endpoint rectangles are unioned. At the interval midpoint, interpolated
-seeds are physically revalidated (with a guide fallback), included in the union,
-and its four edges are checked again and expanded where necessary. Empty or
-uncertain searches retain a full-domain proposal. Diagnostics expose probes,
-midpoint growth, numerical failures and fallback counts.
+Endpoints and midpoints now each receive an independent narrow-seed physical
+boundary search, with continuation hints from the previous height. The fixed
+proposal unions all three boxes per interval. The optional `movingCenter:true`
+proposal interpolates endpoint box centers by the actual sensor height, then
+uses a constant relative rectangle enclosing the endpoint and midpoint boxes
+in that moving frame. Widths do not interpolate or shrink. Both modes share
+exactly the same physically searched nodes and preserve the global mixture.
 
-The rectangle rotates with sensor position; coordinates do not interpolate or
-depend on scene geometry. This version uses uniform bins with midpoint validation;
-it does not implement adaptive subdivision. Increasing the number of bins still
-adds node and midpoint work, despite shared endpoints and warm search hints.
+The rectangle rotates with sensor position. `pupilBins` and `pupilMovingCenter`
+are accepted by the engine optics state for experiments; application defaults
+are moving-center128 (set `pupilMovingCenter:false` for fixed bounds). Current partitions are uniform, with midpoint validation,
+rather than adaptive subdivision. Physical nodes are cached by optics and bin
+count; changing only representation derives a new table without physical tracing.
+`precomputeMs` records shared node search, `deriveMs` records representation
+construction, `coldBuildMs` is their sum, and `physicalCacheHit` identifies reuse.
+Whole-table cache hits return the original object: measure caller wall time to
+time those hits rather than reading historical `buildMs` again.
 
 These finite probes are **not a proof of pupil coverage**. The rendering PDF is
 always a mixture, with a 5% original full-disc component and 95% uniform local
@@ -60,7 +67,7 @@ retains support everywhere in D through the global component. Within D,
 original sampler by 20×. Missed regions can therefore still cause large/rare
 weights, but cannot be silently clipped or renormalized away.
 
-A 4,112-byte uniform buffer (256-box capacity and runtime bin count) holds the table, avoiding another storage-buffer
+A 32,784-byte uniform buffer (1024 bounds, 1024 endpoint-center pairs, and a runtime bin count) holds the table, avoiding another storage-buffer
 binding and preserving the baseline WebGPU storage-buffer limit. The GPU does
 one bin lookup, rotation, mixture draw and density calculation per attempt;
 it performs no nonlinear aiming.
@@ -199,3 +206,36 @@ queue/readback wall time are separate fields. The fixed-ray test measures
 proposal/tracer throughput and variance; it does not establish whole-scene FPS.
 The production path is checked separately with
 `/tests/pupil-engine.html?report=1`, which saves a local correctness report.
+
+Final parameter tables, Safari/Windows measurements and caveats: [2026-10-16 report](benchmarks/pupil-iterative-2026-10-16.md).
+
+## Resolution and moving-center experiment
+
+The new uniform layout fits within the 65,536-byte uniform limit verified on
+Safari Technology Preview. `tests/pupil-layout.html` checks the CPU/GPU bound,
+point and PDF mapping, including rotated sensor positions and endpoint clamping.
+`node scripts/pupil-sweep.mjs` now compares fixed/moving128/256/512/1024 and saves
+`artifacts/pupil-resolution-cpu.json`. The same variants in
+`tests/pupil-benchmark.html` save `artifacts/pupil-resolution-browser.json`.
+These builds use full independently searched midpoint bounds, so their cold
+precompute cost is not directly comparable to the earlier edge-only midpoint
+implementation.
+
+`tests/pupil-render-benchmark.html` compares actual production BVH/material/spectral
+images at 48×32. A physical emissive stripe scene and finite defocused point use
+80/240 ms queue-complete render wall-time budgets and four seeds per variant.
+Table construction, warmup, reset, readback, and resolve are excluded from that
+budget. Reference images average two independent 16,384-spp seeds; a third
+fixed128 high-spp seed checks mean energy and image agreement. This measures
+same-render-time image error, not just successful-ray throughput. The report
+saves actual elapsed time, spp, MSE, reference noise and preview images to
+`artifacts/pupil-resolution-render.json`. Cold setup and amortized render-only
+costs must be considered separately when selecting a proposal.
+
+Resolution/moving-center parameter tables and actual same-time image-error results: [追加实验报告](benchmarks/pupil-resolution-2026-10-16.md).
+
+Cross-brand/structure validation (17 additional lenses, 18 configurations, 10 brands), including DOE/XODD/angular controls and Windows-authoritative performance: [跨品牌验证](benchmarks/pupil-diverse-2026-10-16.md).
+
+Default selection (2026-10-16, after cross-brand validation): moving center, 128 bins, 5% global mixture. Historical benchmark reports retain the defaults that applied when they were run.
+
+Numerical default-bounds preview: `node scripts/pupil-bounds-preview.mjs`, then `python scripts/plot-pupil-bounds.py` (Pillow). The plot compares fixed128 (orange) with the default moving128 (cyan) at five actual image heights; it preserves the native 1mm sensor gap and 5% global mixture.

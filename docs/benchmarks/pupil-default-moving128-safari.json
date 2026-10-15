@@ -1,0 +1,28 @@
+{
+  "kind": "default-pupil",
+  "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15",
+  "timingKind": "correctness only, no performance measurements",
+  "errors": [],
+  "passed": true,
+  "defaults": {
+    "movingCenter": true,
+    "bins": 128,
+    "globalMix": 0.05
+  },
+  "stats": {
+    "attemptedSamples": 393216,
+    "opticalBlockedRate": 0.36947377522786456,
+    "tirRate": 1.7801920572916668e-05,
+    "numericalErrorRate": 0,
+    "bvhErrorRate": 0,
+    "hitRate": 0,
+    "backgroundRate": 0,
+    "opticalPassRate": 0.6305084228515625,
+    "unsupportedRate": 0,
+    "transparencyLimitRate": 0,
+    "radianceInvalidRate": 0,
+    "reflectionOutsideRate": 0,
+    "sceneHitOfPassed": 0,
+    "backgroundOfPassed": 0
+  }
+}
