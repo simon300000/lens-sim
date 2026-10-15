@@ -26,3 +26,14 @@ body[data-night="true"] .identity{background:rgba(18,29,36,.42)}
 #loading-progress::-moz-progress-bar{background:#7c8969;border-radius:3px}
 #loading-detail,#loading-elapsed{margin:0;max-width:440px;text-align:center;font-size:11px;line-height:1.8;color:#7c846e;font-variant-numeric:tabular-nums}
 #loading.error #loading-progress{display:none}
+
+/* Keep camera controls legible over both bright and dark scene areas. */
+.view-hint{top:24px;right:24px;bottom:auto;display:block;width:310px;max-width:calc(100vw - 32px);padding:12px 15px;border:1px solid rgba(104,119,88,.23);border-radius:12px;background:rgba(239,236,222,.94);box-shadow:0 4px 18px rgba(24,32,20,.1);color:#3e4938;opacity:1;font-size:11px;letter-spacing:0;line-height:1.7}
+.camera-hint-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:6px;font-weight:600}
+.camera-hint-mouse{display:grid;grid-template-columns:1fr auto;column-gap:16px;row-gap:3px}
+.camera-hint-mouse>span:nth-child(even){color:#68735b;text-align:right}
+.camera-hint-touch{display:none;font-weight:400}
+body[data-night="true"] .view-hint{background:rgba(26,38,43,.94);border-color:rgba(184,205,183,.23);color:#e7e7d7}
+body[data-night="true"] .camera-hint-mouse>span:nth-child(even){color:#b7c5ae}
+@media(max-width:700px){.view-hint{top:auto;right:16px;bottom:176px;width:auto;max-width:calc(100vw - 32px);padding:9px 12px;font-size:10px}.camera-hint-heading{margin-bottom:3px}}
+@media(pointer:coarse){.camera-hint-mouse{display:none}.camera-hint-touch{display:block}.view-hint{width:auto}}
