@@ -1,13 +1,14 @@
 struct PupilTable {
   settings: vec4<f32>, // max image height, bin count, global fraction, enabled
-  boxes: array<vec4<f32>,32>,
+  boxes: array<vec4<f32>,256>,
 };
 @group(0) @binding(20) var<uniform> pupilTable: PupilTable;
 struct PupilSample { point:vec2<f32>, pdf:f32, inGlobal:bool };
 fn sampleExitPupil(sensor:vec2<f32>,uv:vec2<f32>)->PupilSample {
   let h=length(sensor);
   var axis=vec2<f32>(1,0);if(h>1e-8){axis=sensor/h;}
-  let bin=min(31u,u32(h/pupilTable.settings.x*32.0));
+  let bins=clamp(u32(pupilTable.settings.y),1u,256u);
+  let bin=min(bins-1u,u32(h/max(pupilTable.settings.x,1e-8)*f32(bins)));
   let b=pupilTable.boxes[bin];
   let area=(b.y-b.x)*(b.w-b.z);
   let radius=optics.geometry.z;

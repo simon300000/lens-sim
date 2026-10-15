@@ -8,17 +8,30 @@ by successful-ray counts.
 
 ## Proposal and estimator
 
-`pupil-sampling.js` builds 32 radial sensor-height bins. For each bin endpoint,
-a CPU f64 rear-to-stop solve locates a search box at 380, 587.5618 and 780 nm
-(primary wavelength only when dispersion is off). The solve temporarily removes
-apertures **only in its guide**. Each wavelength reuses the preceding image-height
-solution as its next initial guess, which avoids failed off-axis starts in wide
-and very fast lenses. A 12×12 grid in that box is verified by the full
-physical CPU tracer. Valid points are bounded by a rectangle, padded by two probe
-cells and at least 15% of its extent. Adjacent endpoint boxes are unioned and
-padded by one radial-bin width. A missing/degenerate guide or an empty probe
-falls back to a full-domain box. The rectangle rotates with sensor position.
-Its coordinates do not interpolate or depend on scene geometry.
+`pupil-sampling.js` defaults to 128 radial sensor-height bins, with a
+configurable 1–256-bin resolution for experiments. The 129 endpoint nodes are
+shared by neighboring intervals. At each node, an aperture-free rear-to-stop
+solve proposes a seed and scale at 380, 587.5618 and 780 nm (primary wavelength
+only when dispersion is off). Every seed is revalidated through the complete
+physical lens. The previous node supplies an initial guess, never acceptance.
+A bounded coarse search recovers a seed if the guide point is blocked.
+
+Starting from small rectangles around verified seeds, the algorithm independently
+grows left, right, bottom and top edges. Each edge tests 17 evenly spaced
+positions plus seed projections. Exponential expansion brackets a passing to
+failing boundary, followed by binary refinement. Subsequent sweeps revisit edges
+after the orthogonal extent changes. The margin is 2.5% of the guide scale or
+1.25% of the measured width, whichever is larger, plus an absolute float margin.
+Neighboring endpoint rectangles are unioned. At the interval midpoint, interpolated
+seeds are physically revalidated (with a guide fallback), included in the union,
+and its four edges are checked again and expanded where necessary. Empty or
+uncertain searches retain a full-domain proposal. Diagnostics expose probes,
+midpoint growth, numerical failures and fallback counts.
+
+The rectangle rotates with sensor position; coordinates do not interpolate or
+depend on scene geometry. This version uses uniform bins with midpoint validation;
+it does not implement adaptive subdivision. Increasing the number of bins still
+adds node and midpoint work, despite shared endpoints and warm search hints.
 
 These finite probes are **not a proof of pupil coverage**. The rendering PDF is
 always a mixture, with a 5% original full-disc component and 95% uniform local
@@ -47,7 +60,7 @@ retains support everywhere in D through the global component. Within D,
 original sampler by 20×. Missed regions can therefore still cause large/rare
 weights, but cannot be silently clipped or renormalized away.
 
-A 528-byte uniform buffer holds the table, avoiding another storage-buffer
+A 4,112-byte uniform buffer (256-box capacity and runtime bin count) holds the table, avoiding another storage-buffer
 binding and preserving the baseline WebGPU storage-buffer limit. The GPU does
 one bin lookup, rotation, mixture draw and density calculation per attempt;
 it performs no nonlinear aiming.
@@ -55,7 +68,7 @@ it performs no nonlinear aiming.
 ## Cache and integration
 
 Tables are cached by immutable lens/configuration identity, sensor Z, sensor
-size, stop radius, dispersion, original-domain radius, and sampling enablement.
+size, stop radius, dispersion, original-domain radius, sampling enablement, and bin count.
 Each lens retains at most eight tables. Pose, lighting, accumulation reset,
 resolution and target spp do not rebuild tables. Runtime changes upload only a
 changed table. A configuration explicitly marked as an angular-only domain disables area
@@ -164,3 +177,25 @@ point flux ratio 1.0054734 and image L1 0.2771949 match Chromium to numerical
 precision. This is a native-browser compatibility/correctness check; the
 six-lens timestamp benchmark above was run in Chromium, not Safari.
 [Safari TP result](../artifacts/dev/pupil-engine-safari-tp.json).
+
+## Iterative-bounds experiments (2026-10-16)
+
+`node scripts/pupil-sweep.mjs` saves `artifacts/pupil-sweep.json` and prints a
+compact summary. The frozen `tests/fixtures/pupil-sampling-legacy.js` reproduces
+the previous 32-bin proposal. Five native-gap lenses, five independent image
+heights and three wavelengths compare 32/64/128/256 iterative bins against that
+baseline. A dense f64 grid in the legacy search region measures observed omitted
+energy; additional independent full-disc probes search for detached support.
+The finite checks are evidence rather than a proof of complete support.
+
+`node scripts/pupil-dev-server.mjs` serves the foreground benchmark at
+`http://127.0.0.1:5174/tests/pupil-benchmark.html`. It records cold table builds,
+shader/pipeline compilation, and warmup-excluded physical-trace dispatches
+separately. It compares the same five proposals with three seeds, three image
+heights and three wavelengths. A POST to the local server saves
+`artifacts/pupil-browser-benchmark.json`. Hidden/unfocused runs, device loss and
+GPU validation errors invalidate performance results. Hardware timestamps and
+queue/readback wall time are separate fields. The fixed-ray test measures
+proposal/tracer throughput and variance; it does not establish whole-scene FPS.
+The production path is checked separately with
+`/tests/pupil-engine.html?report=1`, which saves a local correctness report.

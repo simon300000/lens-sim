@@ -9,7 +9,7 @@ import reduceSource from '../optics/focus-reduce.wgsl?raw';
 import statisticsSource from './statistics.wgsl?raw';
 import { SPECTRAL_WGSL } from '../spectral/reconstruction.js';
 import { SAMPLING_WGSL } from '../spectral/sampler.js';
-import { buildPupilTable } from '../optics/pupil-sampling.js';
+import { buildPupilTable, PUPIL_TABLE_BYTES } from '../optics/pupil-sampling.js';
 import pupilSource from '../optics/pupil-sampling.wgsl?raw';
 import { packLens } from '../optics/lens-state.js';
 import { createComputeTimer } from './three-interop.js';
@@ -31,7 +31,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   const beams=interop.storage(65536*32,'AF cached a/b beams (bounded maximum)');
   const summary=interop.storage(48,'AF reduced quadratic moments');
   const target=interop.storage(32,'AF actual chief-ray world target');
-  const pupil=interop.uniform(new Uint8Array(16+32*16),'Radial exit pupil proposal table');
+  const pupil=interop.uniform(new Uint8Array(PUPIL_TABLE_BYTES),'Radial exit pupil proposal table');
   const pipelines={};
   pipelines.sample=await interop.computePipeline(opticalSource+SCENE_INTERSECTOR_WGSL+SCENE_SHADING_WGSL+SPECTRAL_WGSL+SAMPLING_WGSL+pupilSource+integratorSource,'Real lens + BVH first hit + shading fused integrate');
   pipelines.resolve=await interop.computePipeline(SPECTRAL_WGSL+resolveSource,'XYZ display-only resolve');

@@ -86,3 +86,20 @@ test('radiometry also agrees at a smaller stop and in a different lens layout',(
     assert.ok(ref.energy>0);assert.ok(Math.abs(got.energy/ref.energy-1)<.04,`${id} f/${fNumber}: ${got.energy} vs ${ref.energy}`);
   }
 });
+
+test('configurable partitions share endpoints, validate midpoints and match the fixed GPU ABI',()=>{
+  for(const bins of [32,64,128,256]){
+    const t=buildPupilTable(otus,packed,{bins});
+    assert.equal(t.rows.length,bins);assert.equal(t.nodes.length,bins+1);
+    assert.equal(t.data[1],bins);assert.equal(t.data.byteLength,16+256*16);
+    assert.equal(t.diagnostics.endpointNodes,bins+1);assert.equal(t.diagnostics.midpointChecks,bins);
+    assert.equal(buildPupilTable(otus,packed,{bins}),t);
+    for(let i=0;i<bins;i++)for(const b of [t.nodes[i],t.nodes[i+1]]){
+      const row=t.rows[i];assert.ok(row[0]<=b[0]&&row[1]>=b[1]&&row[2]<=b[2]&&row[3]>=b[3]);
+    }
+    assert.equal(pupilBox(t,[t.maxHeight,0]),t.rows.at(-1));
+    assert.equal(pupilBox(t,[t.maxHeight*3,0]),t.rows.at(-1));
+    for(let i=0;i<t.rows.length;i++)for(let j=0;j<4;j++)assert.equal(t.data[4+i*4+j],Math.fround(t.rows[i][j]));
+  }
+  for(const bins of [0,257,1.5,NaN])assert.throws(()=>buildPupilTable(otus,packed,{bins}),RangeError);
+});
