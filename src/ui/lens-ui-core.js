@@ -165,7 +165,7 @@ export function createLensUI({ store, container } = {}) {
           h('button', { type: 'button', class: 'lu-btn', ref: 'resetButton', title: '清空当前累积，按现有参数重新采样', 'aria-label': '重置采样', text: '重置' })),
         h('p', { class: 'lu-hint', ref: 'sppHint', id: id('sppHint') },
           '颗粒来自波长与光圈的蒙特卡罗积分，约按 ', h('span', { class: 'lu-nowrap', text: '1/√spp' }),
-          ' 减弱；提高目标会接着累积。不含传感器噪声，不做降噪。'),
+          ' 减弱；可选择持续采样并随时暂停。相机分辨率需较多显存（最高约 3.2 GiB），按分块逐步更新。不含传感器噪声，不做降噪。'),
         h('div', { class: 'lu-warn', ref: 'cacheWarn', role: 'status', hidden: true },
           h('span', { ref: 'cacheWarnText' }),
           h('button', { type: 'button', class: 'lu-link', ref: 'cacheWarnView', text: '查看分布' }))),
@@ -435,7 +435,7 @@ export function createLensUI({ store, container } = {}) {
     const groups = brandGroups(lenses, availableOnly);
     if (brandFilter && brandFilter !== ALL_BRANDS && !groups.some((g) => g.brand === brandFilter)) brandFilter = null;
     const brand = brandFilter ?? ALL_BRANDS;
-    const key = JSON.stringify([lenses.map((l) => [l.id, l.name, l.available, l.reason, l.brand]), query, availableOnly, state.lensId, brand]);
+    const key = JSON.stringify([lenses.map((l) => [l.id, l.name, l.available, l.reason, l.brand, l.focalLengthMm]), query, availableOnly, state.lensId, brand]);
     if (key === lensOptionsKey) return;
     lensOptionsKey = key;
     const countOf = (g) => (availableOnly ? g.available : g.total);
@@ -517,7 +517,7 @@ export function createLensUI({ store, container } = {}) {
       refs[`rateText-${key}`].textContent = known ? formatRate(rate) : '—';
     }
     const rows = [
-      ['实际 / 目标', `${formatCount(sampling.spp)} / ${formatCount(sampling.targetSpp)} spp`],
+      ['实际 / 目标', `${formatCount(sampling.spp)} / ${sampling.targetSpp===0?'∞':formatCount(sampling.targetSpp)} spp`],
       ['每批', `${formatCount(sampling.batchSpp)} spp`],
       ['尝试路径', formatCount(d.attemptedSamples)],
       ['捕获耗时', formatMs(d.captureMs)],
@@ -641,15 +641,16 @@ export function createLensUI({ store, container } = {}) {
     refs.lensGroup.setAttribute('aria-busy', String(gates.lensLoading));
 
     // Sampling
-    const target = Math.max(1, Number(sampling.targetSpp) || 1);
+    const target = Math.max(0, Number(sampling.targetSpp) || 0);
     const spp = Math.max(0, Number(sampling.spp) || 0);
-    refs.progress.max = target;
-    refs.progress.value = Math.min(spp, target);
+    refs.progress.max = Math.max(1,target);
+    if(target===0)refs.progress.removeAttribute('value');else refs.progress.value = Math.min(spp, target);
+    refs.progress.setAttribute('aria-valuetext',samplingText(sampling));
     refs.sppText.textContent = samplingText(sampling);
     const sppValues = [...new Set([...SPP_PRESETS, target])].sort((a, b) => a - b);
     if (refs.sppSelect.getAttribute('data-key') !== String(sppValues)) {
       refs.sppSelect.setAttribute('data-key', String(sppValues));
-      refs.sppSelect.replaceChildren(...sppValues.map((v) => h('option', { value: v, text: `${v} spp` })));
+      refs.sppSelect.replaceChildren(...sppValues.map((v) => h('option', { value: v, text: v===0?'持续采样（不限 spp）':`${v} spp` })));
     }
     setSelect(refs.sppSelect, target);
     setDisabled(refs.sppSelect, !enabled('setTargetSpp'));

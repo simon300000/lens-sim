@@ -1,3 +1,5 @@
+import { CAMERA_WIDTHS } from '../rendering/sampling-plan.js';
+
 /** Pure formatting, stepping and gating rules for the lens panel (no DOM). */
 
 const finite = (value) => typeof value === 'number' && Number.isFinite(value);
@@ -18,8 +20,8 @@ export const ACTUAL_OUTPUT_LABELS = { hdr: 'HDR', 'sdr-tone-mapped': 'SDR 色调
 export const STATUS_LABELS = { loading: '加载中', ready: '就绪', error: '错误' };
 export const AF_LABELS = { idle: '待命', busy: '对焦中…', success: '已合焦', error: '对焦失败' };
 /** Multiples of 3 only: the engine snaps width to 3n so the 3:2 height stays an integer. */
-export const RESOLUTION_PRESETS = [240, 360, 480, 600, 720, 960];
-export const SPP_PRESETS = [1, 4, 16, 64, 256, 1024, 4096];
+export const RESOLUTION_PRESETS = [240, 360, 480, 600, 720, 960, 1200, 1800, 2400, 3000, 4500, ...CAMERA_WIDTHS];
+export const SPP_PRESETS = [0, 1, 4, 16, 64, 256, 1024, 4096];
 export const HIGH_CACHE_MISS = 0.1;
 
 export function stepsForFNumber([min, max] = [1.8, 22]) {
@@ -105,7 +107,7 @@ export const formatCount = (n) => (finite(n) ? Math.round(n).toLocaleString('en-
 
 /** Mirrors the engine: width rounds to a multiple of 3 (minimum 48), height is exactly 2/3 of it. */
 export const snapResolution = (width) => Math.max(48, Math.round(width / 3) * 3);
-export const resolutionLabel = (width) => { const w = snapResolution(width); return `${w}×${w * 2 / 3}`; };
+export const resolutionLabel = (width) => { const w = snapResolution(width); const pixels=w*w*2/3;return `${w}×${w * 2 / 3}${pixels>=1e6?` · ${(pixels/1e6).toFixed(1)} MP${w===9504?'（6100万级）':''}`:''}`; };
 
 /** Clamp nothing: return a message when the value is outside what the store declares valid. */
 export function validateFNumber(value, [min, max] = []) {
@@ -128,7 +130,7 @@ export function validateFocus(value) {
 }
 
 export function validateSpp(value) {
-  if (!Number.isInteger(value) || value < 1 || value > 4096) return '须为 1–4096 的整数';
+  if (!Number.isInteger(value) || value < 0 || value > 4096) return '须为 1–4096 的整数，或选择持续采样';
   return '';
 }
 
@@ -162,13 +164,14 @@ export function describeView(state) {
   if (state.mode !== 'lens') return { tone: 'raster', text: '光栅近似预览（非镜头成像）' };
   const { spp = 0, targetSpp = 0, paused = false } = state.sampling || {};
   if (!(spp > 0)) return { tone: 'busy', text: paused ? '镜头追迹 · 已暂停，尚无样本' : '镜头追迹 · 等待首批样本' };
-  const progress = `${formatCount(spp)}/${formatCount(targetSpp)} spp`;
+  const progress = targetSpp===0?`${formatCount(spp)} spp · 持续采样`:`${formatCount(spp)}/${formatCount(targetSpp)} spp`;
   if (paused) return { tone: 'lens', text: `镜头追迹 · ${progress} · 已暂停` };
-  return { tone: 'lens', text: `镜头追迹 · ${progress}${spp >= targetSpp ? ' · 完成' : ''}` };
+  return { tone: 'lens', text: `镜头追迹 · ${progress}${targetSpp>0&&spp >= targetSpp ? ' · 完成' : ''}` };
 }
 
 export function samplingText(sampling = {}) {
   const { spp = 0, targetSpp = 0, paused } = sampling;
+  if (targetSpp===0) return `${paused?'已暂停':'持续采样'} · ${formatCount(spp)} spp`;
   if (paused) return `已暂停 · ${formatCount(spp)} / ${formatCount(targetSpp)} spp`;
   if (spp >= targetSpp && targetSpp > 0) return `已完成 · ${formatCount(spp)} / ${formatCount(targetSpp)} spp`;
   return `${formatCount(spp)} / ${formatCount(targetSpp)} spp`;
@@ -221,7 +224,11 @@ export function filterLenses(lenses = [], { query = '', availableOnly = false, b
   const needle = query.trim().toLowerCase();
   return lenses.filter((lens) => (!availableOnly || lens.available !== false)
     && (brand === ALL_BRANDS || brandOf(lens) === brand)
-    && (!needle || `${lens.name} ${lens.id}`.toLowerCase().includes(needle)));
+    && (!needle || `${lens.name} ${lens.id}`.toLowerCase().includes(needle)))
+    .sort((a,b)=>{
+      const focal=l=>finite(l.focalLengthMm)&&l.focalLengthMm>0?l.focalLengthMm:Infinity;
+      return focal(a)-focal(b);
+    });
 }
 
 /** Keyboard F → AF-S, but never while typing, with modifiers, or on auto-repeat. */

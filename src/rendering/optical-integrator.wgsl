@@ -1,7 +1,7 @@
 struct RenderParameters {
   cameraToWorld: mat4x4<f32>,
   size: vec4<u32>, // width, height, batch spp, target attempted spp
-  settings: vec4<u32>, // seed, diagnostic mode, test constant environment, unused
+  settings: vec4<u32>, // seed, diagnostic mode, test constant environment, tile y offset
   environment: vec4<f32>, // RGB constant radiance for numerical GPU acceptance only
 };
 struct PixelAccum {
@@ -29,22 +29,24 @@ fn resolvePixel(a: PixelAccum)->vec4<f32>{
 }
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3<u32>){
-  if(id.x>=render.size.x||id.y>=render.size.y){return;}
+  let imageY=id.y+render.settings.w;
+  if(id.x>=render.size.x||imageY>=render.size.y){return;}
   let pixel=id.y*render.size.x+id.x;
   var a=accumulation[pixel];
-  let remaining=render.size.w-min(render.size.w,a.attempts);
+  let remaining=select(render.size.w-min(render.size.w,a.attempts),0xffffffffu-a.attempts,render.size.w==0u);
   let batch=min(render.size.z,remaining);
   for(var j=0u;j<4u;j++){
     if(j>=batch){break;}
     let index=a.attempts;
-    let jitter=vec2<f32>(sampleDimension(pixel,index,0u,render.settings.x),sampleDimension(pixel,index,1u,render.settings.x));
-    let uv=(vec2<f32>(id.xy)+jitter)/vec2<f32>(render.size.xy);
+    let globalPixel=imageY*render.size.x+id.x;
+    let jitter=vec2<f32>(sampleDimension(globalPixel,index,0u,render.settings.x),sampleDimension(globalPixel,index,1u,render.settings.x));
+    let uv=(vec2<f32>(f32(id.x),f32(imageY))+jitter)/vec2<f32>(render.size.xy);
     // A real sensor image is inverted. Stored output y=0 is the displayed top.
     let sensor=vec3<f32>(-(uv.x-.5)*optics.sensor.x,(uv.y-.5)*optics.sensor.y,optics.geometry.x);
-    let disk=sampleDisk(vec2<f32>(sampleDimension(pixel,index,2u,render.settings.x),sampleDimension(pixel,index,3u,render.settings.x)));
+    let disk=sampleDisk(vec2<f32>(sampleDimension(globalPixel,index,2u,render.settings.x),sampleDimension(globalPixel,index,3u,render.settings.x)));
     let reference=vec3<f32>(disk*optics.geometry.z,optics.geometry.y);
     let direction=normalize(reference-sensor);
-    let lambda=optics.wavelength.x+(optics.wavelength.y-optics.wavelength.x)*sampleDimension(pixel,index,4u,render.settings.x);
+    let lambda=optics.wavelength.x+(optics.wavelength.y-optics.wavelength.x)*sampleDimension(globalPixel,index,4u,render.settings.x);
     a.attempts++;
     let ray=traceOptics(sensor,direction,lambda,true);
     if(ray.status==1u){a.failures.x++;continue;}
@@ -74,5 +76,5 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>){
     a.xyz+=contribution;
   }
   accumulation[pixel]=a;
-  textureStore(lensImage,vec2<i32>(id.xy),resolvePixel(a));
+  textureStore(lensImage,vec2<i32>(i32(id.x),i32(imageY)),resolvePixel(a));
 }

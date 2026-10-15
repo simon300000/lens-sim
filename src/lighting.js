@@ -103,7 +103,7 @@ export function createDaylight(scene, renderer, {details,invalidate=()=>{}}={}) 
   const environmentScene=new THREE.Scene();
   environmentScene.add(new THREE.Mesh(sky.geometry,skyMaterial(parameters)));
   const pmrem=new THREE.PMREMGenerator(renderer);
-  let environmentTarget=null,environmentTimer=null,state=null;
+  let environmentTarget=null,state=null;
   function refreshEnvironment() {
     parameters.discs.value=0;
     environmentTarget=pmrem.fromScene(environmentScene,.04,.1,260,{size:64,renderTarget:environmentTarget});
@@ -166,11 +166,11 @@ export function createDaylight(scene, renderer, {details,invalidate=()=>{}}={}) 
     const fogRGB=parameters.horizon.value.clone().multiplyScalar(parameters.skyLuminance.value*.55);
     scene.fog.color.copy(fogRGB);
     scene.background.copy(fogRGB);
-    clearTimeout(environmentTimer);
-    if(immediate||!environmentTarget)refreshEnvironment();
-    else environmentTimer=setTimeout(refreshEnvironment,120);
-    invalidate();return state;
+    // Commit sky reflections with the new lighting, before its new exposure
+    // can render. A delayed daytime PMREM at night exposure whites out the frame.
+    refreshEnvironment();
+    return state;
   }
   return {update,refreshEnvironment,sun,moon:moonLight,moonMesh,sky,parameters,
-    getState:()=>state,dispose(){clearTimeout(environmentTimer);environmentTarget?.dispose();pmrem.dispose();}};
+    getState:()=>state,dispose(){environmentTarget?.dispose();pmrem.dispose();}};
 }
