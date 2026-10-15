@@ -4,9 +4,18 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { createGPUInterop } from './three-interop.js';
 import { createRasterCache } from './raster-cache.js';
 import { createOpticalEngine } from './optical-engine.js';
+import { hasSamplesRemaining, MAX_IMAGE_WIDTH } from './sampling-plan.js';
 import { createControlStore } from './control-store.js';
 import { apertureLimits, rearSamplingRegion } from '../optics/lens-state.js';
 import { displayOutputNode } from '../hdr-output.js';
+
+function catalogueFocalLengthMm(lens){
+  // Zooms use their short end; prefer the published focal length over small
+  // differences in the paraxial model between nominally identical lenses.
+  const nominal=Number.parseFloat(lens.spec?.focal)||Number(lens.name?.match(/(\d+(?:\.\d+)?)\s*(?:[-–—]\s*\d+(?:\.\d+)?)?\s*mm(?:\b|_)/i)?.[1]);
+  if(Number.isFinite(nominal)&&nominal>0)return nominal;
+  return Math.abs(lens.configurations?.find(c=>Number.isFinite(c.initial?.focalLengthMm))?.initial.focalLengthMm)||null;
+}
 
 /** Scheduling and state boundary. Scene, optics, display, accumulation revisions
  * are deliberately separate; only the first two can invalidate scene capture. */
@@ -17,7 +26,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
   let disposed=false,commandRevision=0,statisticsRevision=0,lastStatisticsSpp=-1,statisticsBusy=false,lastError=null;
   let displayPipeline=null,imageNode=null,bloomNode=null;
   const viewportAspect=uniform(innerWidth/innerHeight);
-  let diagnosticDirty=false;
+  let diagnosticDirty=false,sampleBusy=false;
   const update=patch=>store.update(patch);
   const state=()=>store.getState();
   function cancelFocus(){commandRevision++;const af=state().af;if(af.status==='busy')update({af:{...af,status:'idle',message:'参数改变，已取消过期对焦'}});}
@@ -26,7 +35,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
   function publishEngine(){
     if(!engine)return;const s=state();
     update({sampling:{...s.sampling,spp:engine.spp},diagnostics:{...s.diagnostics,captures:cache.captures,pipelineCompilations:interop.compilations,
-      captureMs:cache.captureMs,computeMs:engine.computeMs,timingSource:engine.timestampSupported?'GPU timestamp（光学） / CPU 提交耗时（捕获）':'无 timestamp：仅捕获 CPU 提交耗时',
+      captureMs:cache.captureMs,computeMs:engine.computeMs,timingSource:engine.timestampSupported?'GPU timestamp（单个采样分块） / CPU 提交耗时（捕获）':'无 timestamp：仅捕获 CPU 提交耗时',
       ...engine.dimensions,memoryBytes:engine.memoryBytes+(cache.captures>0?cache.target.width*cache.target.height*20:0),captureHorizontalFovDeg:cache.horizontalFov}});
   }
   function resetAccumulation(){cancelFocus();engine?.reset();clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision('accumulation');publishEngine();requestFrame();}
@@ -148,8 +157,8 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       case 'autofocus':await focusAt(null,true);break;
       case 'setAutoFocusOnRelease':update({af:{...s.af,autoOnRelease:Boolean(value)}});break;
       case 'setDispersion':applyOpticalChange({dispersion:Boolean(value)});break;
-      case 'setTargetSpp':finite(1,4096);if(!Number.isInteger(value))throw new Error('spp 必须为整数');update({sampling:{...s.sampling,targetSpp:value}});requestFrame();break;
-      case 'setResolution':finite(240,960);update({sampling:{...s.sampling,resolution:value}});engine.resize(interacting?240:value);bindImage();resetAccumulation();break;
+      case 'setTargetSpp':finite(0,4096);if(!Number.isInteger(value))throw new Error('spp 必须为整数');update({sampling:{...s.sampling,targetSpp:value}});requestFrame();break;
+      case 'setResolution':finite(240,MAX_IMAGE_WIDTH);await engine.resizeChecked(interacting?240:value);update({sampling:{...state().sampling,resolution:value}});bindImage();resetAccumulation();break;
       case 'setPaused':update({sampling:{...s.sampling,paused:Boolean(value)}});requestFrame();break;
       case 'reset':resetAccumulation();break;
       case 'setExposureEV':finite(-6,6);update({display:{...s.display,exposureEV:value}});displayChanged();break;
@@ -160,8 +169,11 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
     }
   });
   function scheduleRelease(){
-    clearTimeout(releaseTimer);releaseTimer=setTimeout(()=>{
-      interacting=false;if(engine?.resize(state().sampling.resolution)){bindImage();resetAccumulation();}
+    clearTimeout(releaseTimer);releaseTimer=setTimeout(async()=>{
+      interacting=false;
+      try{if(engine&&await engine.resizeChecked(state().sampling.resolution)){bindImage();resetAccumulation();}}
+      catch(error){if(!disposed)update({sampling:{...state().sampling,resolution:engine.dimensions.width},error:error.message});}
+      if(disposed)return;
       if(state().af.autoOnRelease&&state().status==='ready')focusAt(null,true).catch(()=>{});requestFrame();
     },240);
   }
@@ -177,15 +189,16 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       if(value){interacting=true;if(engine?.resize(240)){bindImage();resetAccumulation();}}
       else scheduleRelease();
     },
-    needsFrame(){const s=state();return !disposed&&!document.hidden&&s.mode==='lens'&&s.status==='ready'&&!s.sampling.paused&&s.af.status!=='busy'&&engine.spp<s.sampling.targetSpp;},
+    needsFrame(){const s=state();return !disposed&&!sampleBusy&&!document.hidden&&s.mode==='lens'&&s.status==='ready'&&!s.sampling.paused&&s.af.status!=='busy'&&hasSamplesRemaining(engine.spp,s.sampling.targetSpp);},
     frame(){
       const s=state();if(s.mode==='raster'){rasterPipeline.render();return;}
       if(!engine||s.status!=='ready')return; // never display raster as successful lens output
       try{
         ensureCapture();if(diagnosticDirty){engine.resolve(s.display.diagnostic);diagnosticDirty=false;}
-        if(!s.sampling.paused&&!document.hidden&&s.af.status!=='busy')engine.sample({batchSpp:interacting?1:s.sampling.batchSpp,targetSpp:s.sampling.targetSpp,seed:s.sampling.seed,diagnostic:s.display.diagnostic});
+        const submitted=!sampleBusy&&!s.sampling.paused&&!document.hidden&&s.af.status!=='busy'&&engine.sample({batchSpp:interacting?1:s.sampling.batchSpp,targetSpp:s.sampling.targetSpp,seed:s.sampling.seed,diagnostic:s.display.diagnostic});
         displayPipeline.render();publishEngine();
-        if(!statisticsBusy&&engine.spp!==lastStatisticsSpp&&(engine.spp>=s.sampling.targetSpp||engine.spp%32===0)){
+        if(submitted){sampleBusy=true;interop.device.queue.onSubmittedWorkDone().then(()=>{sampleBusy=false;if(!disposed)requestFrame();},error=>{sampleBusy=false;if(!disposed)update({status:'error',error:error.message});});}
+        if(!statisticsBusy&&engine.roundComplete&&engine.spp>0&&engine.spp!==lastStatisticsSpp&&((s.sampling.targetSpp>0&&engine.spp>=s.sampling.targetSpp)||engine.spp%32===0)){
           statisticsBusy=true;lastStatisticsSpp=engine.spp;const rev=statisticsRevision;
           engine.statistics().then(stats=>{if(stats&&rev===statisticsRevision){
             update({diagnostics:{...state().diagnostics,...stats}});
@@ -199,9 +212,22 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       manifest=await response.json();
       // Never clone the full library's configuration/provenance notes per spp.
       update({lenses:manifest.lenses.map(l=>({id:l.id,name:l.name,brand:l.brand??null,available:l.supported,reason:l.reason,
-        validation:l.validation,surfaceCount:l.surfaceCount})),source:manifest.source});
+        validation:l.validation,surfaceCount:l.surfaceCount,focalLengthMm:catalogueFocalLengthMm(l)})),source:manifest.source});
       engine=await createOpticalEngine({interop,cache,width:state().sampling.resolution});
       await loadLens(manifest.defaultId);displayGraph();displayChanged();publishEngine();
+      // Prepare the capture's MRT materials and the sensor display while the
+      // loading curtain is still up, rather than on the first lens-mode frame.
+      // Keep this real sample so switching modes can immediately show an image.
+      update({status:'loading'});
+      ensureCapture();
+      engine.sample({batchSpp:1,targetSpp:state().sampling.targetSpp,seed:state().sampling.seed,diagnostic:state().display.diagnostic});
+      diagnosticDirty=false;
+      displayPipeline.render();
+      await interop.device.queue.onSubmittedWorkDone();
+      // Startup still opens in raster mode; never expose the warmup lens frame.
+      rasterPipeline.render();
+      await interop.device.queue.onSubmittedWorkDone();
+      update({status:'ready'});publishEngine();
     },
     get diagnostics(){return {...state(),lastError,captureRevision:cache.revision,initializationMs:engine?.initializationMs};},
     dispose(){disposed=true;clearTimeout(releaseTimer);engine?.dispose();cache.dispose();displayPipeline?.dispose();interop.dispose();store.dispose();},

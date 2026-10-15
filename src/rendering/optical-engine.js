@@ -11,6 +11,7 @@ import { SPECTRAL_WGSL } from '../spectral/reconstruction.js';
 import { SAMPLING_WGSL } from '../spectral/sampler.js';
 import { packLens } from '../optics/lens-state.js';
 import { createComputeTimer } from './three-interop.js';
+import { imagePlan, sampleBudget } from './sampling-plan.js';
 
 const diagnosticIndex=mode=>({beauty:0,'cache-miss':1,status:2}[mode]??0);
 const uniformBinding=(binding,buffer)=>({binding,resource:{buffer}});
@@ -26,7 +27,6 @@ export async function createOpticalEngine({interop,cache,width=480}) {
   const beams=interop.storage(65536*32,'AF cached a/b beams (bounded maximum)');
   const summary=interop.storage(48,'AF reduced quadratic moments');
   const target=interop.storage(16,'AF actual chief-ray world target');
-  const statistics=interop.storage(32,'Attempt-weighted counters');
   const pipelines={};
   pipelines.sample=await interop.computePipeline(opticalSource+sceneSource+SPECTRAL_WGSL+SAMPLING_WGSL+integratorSource,'Real lens spectral fused integrate');
   pipelines.resolve=await interop.computePipeline(SPECTRAL_WGSL+resolveSource,'XYZ display-only resolve');
@@ -35,8 +35,8 @@ export async function createOpticalEngine({interop,cache,width=480}) {
   pipelines.reduce=await interop.computePipeline(reduceSource,'AF cross-workgroup quadratic reduction');
   pipelines.statistics=await interop.computePipeline(statisticsSource,'Attempt statistics reduction');
   const timer=createComputeTimer(interop);
-  let surfaces,lut,accumulation,image,packed,lens,groups={},spp=0,disposed=false,computeMs=null,statsPending=null,lastTiming=null;
-  let dimensions={width:0,height:0},currentRevision=0,focusBudget=2048;
+  let surfaces,lut,tiles=[],tileCursor=0,roundBudget=0,roundTarget=0,image,packed,lens,groups={},spp=0,disposed=false,computeMs=null,statsPending=null,lastTiming=null;
+  let dimensions={width:0,height:0},currentRevision=0,resizeRevision=0,focusBudget=2048;
   const pose=new THREE.Matrix4(),worldToClip=new THREE.Matrix4(),clipToWorld=new THREE.Matrix4();
 
   function group(pipeline,entries){return device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries});}
@@ -50,22 +50,47 @@ export async function createOpticalEngine({interop,cache,width=480}) {
     const textures=cache.textures();
     const lensBindings=[uniformBinding(0,optics),uniformBinding(1,surfaces),uniformBinding(2,lut)];
     const sceneBindings=[uniformBinding(3,scene),{binding:4,resource:textures.color.createView()},{binding:5,resource:textures.depth.createView()}];
-    groups.sample=group(pipelines.sample,[...lensBindings,...sceneBindings,uniformBinding(6,render),uniformBinding(7,accumulation),{binding:8,resource:image.gpu.createView()}]);
+    for(const tile of tiles){
+      tile.sample=group(pipelines.sample,[...lensBindings,...sceneBindings,uniformBinding(6,render),uniformBinding(7,tile.buffer),{binding:8,resource:image.gpu.createView()}]);
+      tile.resolve=group(pipelines.resolve,[uniformBinding(0,resolve),uniformBinding(1,tile.buffer),{binding:2,resource:image.gpu.createView()}]);
+    }
     groups.target=group(pipelines.target,[...lensBindings,...sceneBindings,uniformBinding(6,camera),uniformBinding(7,target)]);
     focusGroups();
-    groups.resolve=group(pipelines.resolve,[uniformBinding(0,resolve),uniformBinding(1,accumulation),{binding:2,resource:image.gpu.createView()}]);
-    groups.statistics=group(pipelines.statistics,[uniformBinding(0,accumulation),uniformBinding(1,statistics)]);
   }
   function reset(){
-    currentRevision++;spp=0;computeMs=null;lastTiming=null;
-    if(accumulation){const encoder=device.createCommandEncoder();encoder.clearBuffer(accumulation);device.queue.submit([encoder.finish()]);}
+    currentRevision++;spp=0;tileCursor=0;roundBudget=0;computeMs=null;lastTiming=null;
+    if(tiles.length){const encoder=device.createCommandEncoder();for(const tile of tiles)encoder.clearBuffer(tile.buffer);device.queue.submit([encoder.finish()]);}
+  }
+  function allocate(nextWidth){
+    const plan=imagePlan(nextWidth,device.limits),buffers=[];let output;
+    try{
+      for(const t of plan.tiles)buffers.push({...t,buffer:interop.storage(t.bytes,'Tiled XYZ and attempted-path counters')});
+      output=interop.storageImage(plan.width,plan.height);
+      return {plan,tiles:buffers,image:output};
+    }catch(error){for(const t of buffers)interop.release(t.buffer);output?.texture.dispose();throw error;}
+  }
+  function releaseCandidate(candidate){for(const t of candidate.tiles)interop.release(t.buffer);candidate.image.texture.dispose();}
+  function install(candidate){
+    for(const t of tiles)interop.release(t.buffer);image?.texture.dispose();
+    dimensions={width:candidate.plan.width,height:candidate.plan.height};tiles=candidate.tiles;image=candidate.image;
+    rebuildGroups();reset();return true;
   }
   function resize(nextWidth){
-    const w=Math.max(48,Math.round(nextWidth/3)*3),h=w*2/3;
-    if(w===dimensions.width)return false;
-    if(accumulation)interop.release(accumulation);image?.texture.dispose();
-    dimensions={width:w,height:h};accumulation=interop.storage(w*h*48,'f32 XYZ + u32 fixed attempts and statuses');
-    image=interop.storageImage(w,h);rebuildGroups();reset();return true;
+    resizeRevision++;
+    if(Math.max(48,Math.round(nextWidth/3)*3)===dimensions.width)return false;
+    return install(allocate(nextWidth));
+  }
+  async function resizeChecked(nextWidth){
+    const token=++resizeRevision;
+    if(Math.max(48,Math.round(nextWidth/3)*3)===dimensions.width)return false;
+    imagePlan(nextWidth,device.limits); // reject unsupported dimensions before GPU allocation
+    device.pushErrorScope('out-of-memory');device.pushErrorScope('validation');
+    let candidate,error;
+    try{candidate=allocate(nextWidth);}catch(e){error=e;}
+    const validation=await device.popErrorScope(),memory=await device.popErrorScope();
+    if(error||validation||memory||disposed){if(candidate)releaseCandidate(candidate);throw error||new Error(validation?.message||memory?.message||'渲染器已关闭');}
+    if(token!==resizeRevision){releaseCandidate(candidate);return false;}
+    return install(candidate);
   }
   resize(width);
   function setLens(nextLens,state){
@@ -99,32 +124,43 @@ export async function createOpticalEngine({interop,cache,width=480}) {
   const initializationMs=performance.now()-started;
   return {
     get texture(){return image.texture;},get outputGPU(){return image.gpu;},
-    get spp(){return spp;},get dimensions(){return {...dimensions};},get packed(){return packed;},
+    get spp(){return spp;},get dimensions(){return {...dimensions};},get packed(){return packed;},get tileCount(){return tiles.length;},get roundComplete(){return tileCursor===0;},
     get initializationMs(){return initializationMs;},
     get computeMs(){return computeMs;},get timestampSupported(){return timer.supported;},
     get lastTiming(){return lastTiming;},
-    get memoryBytes(){return dimensions.width*dimensions.height*56+(surfaces?.size??0)+(lut?.size??0)+beams.size+48+32+16+64+272+112+16+96+64;},
-    reset,resize,setLens,updateOptics,updateCapture,
+    get memoryBytes(){return dimensions.width*dimensions.height*56+(surfaces?.size??0)+(lut?.size??0)+beams.size+48+16+64+272+112+16+96+64;},
+    reset,resize,resizeChecked,setLens,updateOptics,updateCapture,
     sample({batchSpp=1,targetSpp=64,seed=1,diagnostic='beauty',constantEnvironment=null}={}){
-      if(!groups.sample)throw new Error('光栅缓存或镜头尚未准备');
-      const budget=Math.min(4,Math.max(1,batchSpp),Math.max(0,targetSpp-spp));if(!budget)return false;
+      if(!tiles[0]?.sample)throw new Error('光栅缓存或镜头尚未准备');
+      // One bounded tile per frame keeps large sensor sizes responsive to pause.
+      const budget=tileCursor?roundBudget:sampleBudget(spp,targetSpp,batchSpp);if(!budget)return false;
+      if(tileCursor===0)roundTarget=targetSpp;
+      roundBudget=budget;const tile=tiles[tileCursor];
       const bytes=new ArrayBuffer(112),f=new Float32Array(bytes),u=new Uint32Array(bytes);f.set(pose.elements);
-      u.set([dimensions.width,dimensions.height,budget,targetSpp,seed,diagnosticIndex(diagnostic),constantEnvironment?1:0,0],16);
+      u.set([dimensions.width,dimensions.height,budget,roundTarget,seed,diagnosticIndex(diagnostic),constantEnvironment?1:0,tile.y],16);
       f.set([...(constantEnvironment??[0,0,0]),0],24);device.queue.writeBuffer(render,0,bytes);
-      submit(pipelines.sample,groups.sample,Math.ceil(dimensions.width/8),Math.ceil(dimensions.height/8),{timed:true});spp+=budget;return true;
+      submit(pipelines.sample,tile.sample,Math.ceil(dimensions.width/8),Math.ceil(tile.height/8),{timed:true});
+      tileCursor++;if(tileCursor===tiles.length){tileCursor=0;spp+=budget;}return true;
     },
     resolve(diagnostic='beauty'){
-      if(!groups.resolve)return;
-      device.queue.writeBuffer(resolve,0,new Uint32Array([dimensions.width,dimensions.height,diagnosticIndex(diagnostic),0]));
-      submit(pipelines.resolve,groups.resolve,Math.ceil(dimensions.width/8),Math.ceil(dimensions.height/8));
+      for(const tile of tiles){if(!tile.resolve)return;
+        device.queue.writeBuffer(resolve,0,new Uint32Array([dimensions.width,dimensions.height,diagnosticIndex(diagnostic),tile.y]));
+        submit(pipelines.resolve,tile.resolve,Math.ceil(dimensions.width/8),Math.ceil(tile.height/8));
+      }
     },
     async statistics(){
-      if(statsPending)return statsPending;if(!groups.statistics)return null;const revision=currentRevision;
-      statsPending=(async()=>{try{submit(pipelines.statistics,groups.statistics);const data=new Uint32Array(await interop.readBuffer(statistics,32));
+      if(statsPending)return statsPending;if(!tiles[0]?.sample)return null;const revision=currentRevision;
+      const snapshot=tiles.slice();
+      statsPending=(async()=>{const totals=interop.storage(snapshot.length*256,'Tile statistics snapshot');try{const data=new Float64Array(8);
+        // Enqueue the entire snapshot before yielding, so subsequent frames
+        // cannot mix counters from different accumulation rounds.
+        for(let i=0;i<snapshot.length;i++)submit(pipelines.statistics,group(pipelines.statistics,[uniformBinding(0,snapshot[i].buffer),{binding:1,resource:{buffer:totals,offset:i*256,size:32}}]));
+        const part=new Float32Array(await interop.readBuffer(totals,snapshot.length*256));
+        for(let t=0;t<snapshot.length;t++)for(let i=0;i<8;i++)data[i]+=part[t*64+i];
         if(revision!==currentRevision)return null;const n=Math.max(1,data[4]);
         return {attemptedSamples:data[4],opticalBlockedRate:data[0]/n,tirRate:data[1]/n,numericalErrorRate:data[2]/n,
           cacheMissRate:data[3]/Math.max(1,data[7]),cacheMissAttemptRate:data[3]/n,hitRate:data[5]/n,backgroundRate:data[6]/n,opticalPassRate:data[7]/n};
-      }finally{statsPending=null;}})();return statsPending;
+      }finally{interop.release(totals);statsPending=null;}})();return statsPending;
     },
     async referenceTarget(){
       if(!groups.target)throw new Error('场景缓存不可用');submit(pipelines.target,groups.target);
@@ -159,7 +195,7 @@ export async function createOpticalEngine({interop,cache,width=480}) {
       const rmsResolutionMm=Math.max(1e-5,Math.sqrt((Math.abs(C)+Math.abs(2*B*delta)+Math.abs(A*delta*delta))*5e-5));
       return {sensorZMm:z,imageDistanceMm:z-lens.lastVertexZMm,beams:count,beamBudget:focusBudget,beforeRmsMm:Math.sqrt(merit(previousSensorZ)),afterRmsMm:Math.sqrt(merit(z)),rmsResolutionMm,quadratic:{A,B,C,originSensorZMm:referenceSensorZ},target:localTarget};
     },
-    async readAccumulation(){return interop.readBuffer(accumulation,dimensions.width*dimensions.height*48);},
-    dispose(){disposed=true;timer.dispose();for(const b of [optics,scene,render,resolve,focus,camera,beams,summary,target,statistics,surfaces,lut,accumulation])if(b)interop.release(b);image?.texture.dispose();},
+    async readAccumulation(){const result=new Uint8Array(dimensions.width*dimensions.height*48);let offset=0;for(const tile of tiles){const part=new Uint8Array(await interop.readBuffer(tile.buffer,tile.bytes));result.set(part,offset);offset+=part.length;}return result.buffer;},
+    dispose(){disposed=true;timer.dispose();for(const b of [optics,scene,render,resolve,focus,camera,beams,summary,target,surfaces,lut,...tiles.map(t=>t.buffer)])if(b)interop.release(b);image?.texture.dispose();},
   };
 }

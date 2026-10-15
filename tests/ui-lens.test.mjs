@@ -9,9 +9,9 @@ import {
 import { FakeEvent, createFakeDocument, input, key, toggle } from './ui-fake-dom.mjs';
 
 const LENSES = [
-  { id: 'zemax-55', name: 'Zemax 对照 55mm', available: true },
-  { id: 'canon-ef-50mm-f1-8-stm', name: 'Canon EF 50mm F1.8 STM', available: true },
-  { id: 'doe-lens', name: 'Canon EF 400mm F4 DO IS USM', available: false, reason: '含 DOE 面' },
+  { id: 'zemax-55', name: 'Zemax 对照 55mm', focalLengthMm: 55, available: true },
+  { id: 'canon-ef-50mm-f1-8-stm', name: 'Canon EF 50mm F1.8 STM', focalLengthMm: 50, available: true },
+  { id: 'doe-lens', name: 'Canon EF 400mm F4 DO IS USM', focalLengthMm: 400, available: false, reason: '含 DOE 面' },
 ];
 const READY = {
   status: 'ready', mode: 'raster', lenses: LENSES, lensId: 'zemax-55', configurationIndex: 0,
@@ -69,7 +69,8 @@ test('format: units, rates and validation messages', () => {
   assert.equal(formatRate(0.00001), '<0.01%');
   assert.equal(validateFNumber(1.2, [1.8, 22]), '最小 f/1.8');
   assert.equal(validateFNumber(5.6, [1.8, 22]), '');
-  assert.ok(validateSpp(0) && validateSpp(2.5) && validateSpp(5000));
+  assert.equal(validateSpp(0), ''); // zero selects continuous rendering
+  assert.ok(validateSpp(-1) && validateSpp(2.5) && validateSpp(5000));
   assert.equal(validateSpp(64), '');
 });
 
@@ -634,4 +635,29 @@ test('reticle CSS: fixed at the exact viewport centre, click-through, static, ou
   const reticleCss = css.split(/\r?\n/).filter((line) => /reticle/.test(line)).join(' ');
   assert.ok(!/animation|transition|@keyframes/.test(reticleCss), 'no animation');
   assert.ok(!/\.lens-ui[^-{]*\.lens-ui-reticle|\.lu-body[^{]*reticle/.test(css), 'not scoped under the panel');
+});
+
+
+test('continuous sampling is selectable, never complete, and remains pausable', async () => {
+  const { $, calls, store } = setup();
+  input($('sppSelect'), '0');
+  await flush();
+  assert.deepEqual(types(calls), [['setTargetSpp', 0]]);
+  store.update({sampling:{...store.getState().sampling,targetSpp:0,spp:5000}});
+  assert.match($('sppText').textContent,/持续采样.*5,000/);
+  assert.equal($('progress').getAttribute('value'),null);
+  assert.ok($('resSelect').options.some(o=>o.value==='6000'));
+  assert.ok($('resSelect').options.some(o=>o.value==='9504'));
+  assert.doesNotMatch(describeView({...store.getState(),mode:'lens'}).text,/完成/);
+  store.update({sampling:{...store.getState().sampling,paused:true}});
+  assert.match($('sppText').textContent,/已暂停/);
+  $('pauseButton').click();await flush();
+  assert.deepEqual(types(calls).at(-1),['setPaused',false]);
+});
+
+test('lens choices sort by increasing focal length after filtering without changing the catalogue', () => {
+  const original = [...LENSES, {id:'unknown',name:'Unknown',focalLengthMm:null}];
+  assert.deepEqual(filterLenses(original).map(l=>l.id), ['canon-ef-50mm-f1-8-stm','zemax-55','doe-lens','unknown']);
+  assert.deepEqual(filterLenses(original,{availableOnly:true,brand:'佳能 Canon'}).map(l=>l.id), ['canon-ef-50mm-f1-8-stm']);
+  assert.equal(original[0].id,'zemax-55');
 });

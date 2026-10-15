@@ -29,7 +29,8 @@ async function createScene(){
   if(!adapter)throw new Error('未找到可用的 WebGPU 设备。请检查浏览器硬件加速设置。');
   message.textContent='检测 HDR 画布支持';
   let hdr=await probeHDRCanvas(adapter);
-  const rendererOptions={antialias:true,alpha:false,powerPreference:'high-performance'};
+  const rendererOptions={antialias:true,alpha:false,powerPreference:'high-performance',
+    requiredLimits:{maxTextureDimension2D:adapter.limits.maxTextureDimension2D}};
   let renderer=new THREE.WebGPURenderer({...rendererOptions,...outputRendererOptions(hdr.supported)});
   await renderer.init();
   if(hdr.supported&&(!renderer.backend.isWebGPUBackend||!isHDRConfiguration(renderer.backend.context.getConfiguration?.()))){
@@ -125,7 +126,7 @@ async function createScene(){
     garden.water.material.emissiveNode=mirror.rgb.mul(fresnel).mul(2.2);
     garden.water.material.opacity=.35;
   }
-  let ready=false,framesNeeded=0,rendering=false;
+  let ready=false,framesNeeded=0,rendering=false,pendingTime=null;
   let timeRevision=0;
   let completionRevision=-1;
   let pipeline,hybrid;
@@ -133,6 +134,8 @@ async function createScene(){
   function wake(){if(!ready)return;framesNeeded=Math.max(framesNeeded,2);if(!rendering){rendering=true;requestAnimationFrame(frame);}}
   function invalidate(){hybrid?.invalidateScene();wake();}
   function frame(){
+    // Commit the entire time state before any scene pass can cache this frame.
+    if(pendingTime){const value=pendingTime;pendingTime=null;applyTime(value);}
     const revision=timeRevision,hour=sceneElement.dataset.hour;
     controls.update();if(hybrid)hybrid.frame();else pipeline.render();
     // Time completion is checked only on a new scene revision, never per optical batch.
@@ -159,9 +162,9 @@ async function createScene(){
     Object.assign(sceneElement.dataset,{hour:value.hour,date:value.date,sunAltitude:s.sun.altitude,moonAltitude:s.moon.altitude,
       sunLux:s.lighting.sunLux,moonLux:s.lighting.moonLux,sunKelvin:s.lighting.sunKelvin,moonPhase:s.moon.illuminatedFraction,
       exposure:renderer.toneMappingExposure,utc:s.utcISO});
-    invalidate();
+    wake(); // daylight refreshed and invalidated the scene in the same update
   }
-  timeControls=createTimeControls({onChange:applyTime});
+  timeControls=createTimeControls({onChange:value=>{pendingTime=value;wake();}});
   applyTime(timeControls.getValue(),true);
   pipeline=new THREE.RenderPipeline(renderer);
   // GTAO affects indirect light only. Direct Sun/Moon/lamp light stays governed
@@ -201,6 +204,7 @@ async function createScene(){
   // the loading curtain is up, instead of compiling them on the first slider move.
   const initialTime=timeControls.getValue();
   for(const hour of [0,5.5]){
+    await new Promise(requestAnimationFrame);
     applyTime({...initialTime,hour},true);
     pipeline.render();
     const canvasRange=hour===0&&pixelDiagnostics?captureCanvasRange(renderer):null;
@@ -211,6 +215,7 @@ async function createScene(){
         canvasAboveWhite:diagnostics.hdr.nightCanvas.aboveWhitePixels,canvasNonFinite:diagnostics.hdr.nightCanvas.nonFinite});
     }
   }
+  await new Promise(requestAnimationFrame);
   applyTime(initialTime,true);
   pipeline.render();
   await renderer.backend.device.queue.onSubmittedWorkDone();
@@ -252,6 +257,8 @@ async function createScene(){
   console.info('SANTEI scene ready',diagnostics);
   loading.classList.add('complete');
   addEventListener('pagehide',()=>{ready=false;lensUI.dispose();hybrid.dispose();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
-  invalidate();
+  // Initialization captured the current scene and prepared its first lens
+  // sample. Schedule display without throwing away that prepared state.
+  wake();
 }
 createScene().catch(error=>{console.error(error);loading.classList.add('error');message.textContent=error.message;});

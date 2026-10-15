@@ -108,3 +108,15 @@ Library-wide parsing/preflight does not certify every lens's visual quality or A
 ## Generated-asset packaging correction
 
 The initial implementation mistakenly tracked normalized `public/lenses/` output alongside the pinned source submodule. At the user's request these 460 generated assets were removed from version control, the directory was added to `.gitignore`, and npm `predev` / `pretest` / `prebuild` now regenerate it from the submodule. The generated license copy still ships in built output. No source data or submodule content was removed. A fresh independent source clone, explicitly checked to have no generated manifest before testing, passed automatic data generation, all 115 tests and production build; the manifest hash matched the earlier result and the clone remained clean. `dist/`, `node_modules/`, `artifacts/` and generated lens assets are not versioned.
+
+
+## 2026-10-15: continuous sampling, camera sizes and time transitions
+
+Supplemental hardware: macOS 27.0.1 (26A434), Safari Technology Preview 27.0 (22626.1.8.19.2), native WebGPU, extended rgba16float HDR canvas. The original V1 platform report above retains its original scope.
+
+- `sampling-gpu.html`: tiled vs single-buffer accumulation is bitwise identical at 96×64; beauty, cache-miss and status resolves agree. Continuous sampling reached 4120 spp, including every pixel's attempt counter.
+- Real allocation and full-image 1 spp tracing passed at 6000×4000 (9 tiles, 24,000,000 attempts) and 9504×6336 (22 tiles, 60,217,344 attempts). Numerical error rates and uncaptured GPU errors were zero. Accumulation/output/optics resources were 1,346,143,724 and 3,374,314,988 bytes respectively; these exclude the villa scene, renderer and display post-processing. Tests used constant RGB radiance to isolate optical tracing and tiling.
+- Full villa integration: continuous rendering paused at 81 spp without advancing during a 150 ms wait and resumed to 89 spp. A 6000×4000 render completed exactly 24,000,000 attempts, with zero numerical errors and no uncaptured GPU errors.
+- Full-scene first-frame readback after input transitions 12→0, 12→5.5 and 12→18 passed. Previously, 12→0 produced a peak 60.9375, minimum 3.6328125 and all 1,211,460 pixels above reference white. After the fix, the first night frame peaked at 7.171875, minimum 0.0059013, with 8,256 pixels above reference white (bright HDR sources) and zero nonfinite pixels. Dawn/dusk also retained finite shadow/background values.
+- Cause: the old environment refresh was delayed 120 ms, and a separate time-update animation callback could change exposure after scene/light nodes had already cached that animation frame. Time changes now commit before drawing the frame, with the environment, lights and exposure updated together.
+- `npm test`: 119 passing tests. Production build passed. The test run was functional acceptance, not a controlled performance benchmark.
