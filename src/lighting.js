@@ -3,6 +3,7 @@ import { uniform, mix, vec3, vec4, normalize, positionWorld, positionLocal, came
 import { computeCelestialState } from './astronomy.js';
 import { rng } from './kit.js';
 import { setLensRole } from './scene/lens-registry.js';
+import { LOCAL_LAMP_SHADOW_LAYER } from './scene/render-layers.js';
 
 // Every photometric source uses the same normalization. This keeps half-float
 // render targets finite while preserving the Sun/Moon/lamp brightness ratios.
@@ -91,6 +92,12 @@ export function createDaylight(scene, renderer, {details,invalidate=()=>{}}={}) 
   const moonLight=celestialLight(scene,'Physical Moon',2048);
   const bounce=new THREE.HemisphereLight('#ffffff','#ffffff',0);
   bounce.name='Low-order ground bounce';scene.add(bounce);
+  // Three r183 shares one LightsNode across a scene's cameras. The restricted
+  // lamp-shadow camera must see the same lights as the main/reflection cameras:
+  // otherwise its nested render replaces the shared light list with [], changing
+  // every receiver's shader key as lamps turn on/off. Light layer membership does
+  // not add any geometry to the local shadow pass or change main-camera lighting.
+  scene.traverse(object=>{if(object.isLight)object.layers.enable(LOCAL_LAMP_SHADOW_LAYER);});
   const parameters={
     zenith:uniform(new THREE.Color()),horizon:uniform(new THREE.Color()),ground:uniform(new THREE.Color('#34442b')),
     skyLuminance:uniform(.1),daylight:uniform(1),twilight:uniform(0),discs:uniform(1),

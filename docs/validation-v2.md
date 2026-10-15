@@ -123,3 +123,18 @@ BVH 与资源：提取在主线程（复制几何属性与对象矩阵；Node �
 * Codex 复核了 diff（只改允许范围、无渲染内部引用），集成后 `npm test` 通过，并在完整应用中截图确认新状态行与诊断视图。
 
 最终一次全套运行（同一 SwiftShader 环境，`node scripts/run-gpu-tests.mjs`）：scene-bvh-gpu、hybrid-chain、hybrid-optics、runtime-gpu、imaging-gpu、hidden-surface-gpu、shading-gpu、sampling-gpu、hdr-gpu、daylight-transition-gpu、perf-gpu **11/11 通过**（perf 页记录了 2 次上文所述的已知 Three 阴影纹理错误，单独列出）；`npm test` 122/122；`npm run build` 成功（BVH Worker 独立打包）。
+
+## 2026-10-15：Safari 时间切换的管线复用修复
+
+Three r183 的 `Lighting.getNode(scene)` 为同一场景的所有相机共用一个 `LightsNode`。庭院灯阴影相机只看局部建筑层（layer 1），原来的所有灯光都只在 layer 0。嵌套阴影绘制把共享灯光列表从 7 个灯清成空数组，使主场景材质的动态缓存键改变：实测一次晨光切换销毁 1,154 个绘制对象（其中 1,148 个因动态键失效），创建 202 条渲染管线。环境贴图、雾与上下文键均保持不变。
+
+修复把场景灯光同时加入局部阴影层，使主相机、反射相机和局部灯影相机保留一致的灯光列表。阴影相机仍只绘制局部建筑几何，不增加远处森林的阴影负担，不修改 Three 内部或关闭缓存失效检查。
+
+验证：
+
+- `npm test`：123 项通过，包括局部阴影/主相机灯光集合一致、森林仍被局部阴影层排除的回归断言。
+- `/tests/time-pipelines-gpu.html`：完整别墅，960×640，Safari Technology Preview；按 00:00、05:30、16:30 预热后，9 次日间、晨光、夜间与黄昏切换均为 **0 新增渲染管线**，无 GPU validation error。页面断言直接统计同步和异步 WebGPU render-pipeline 创建接口；已加入 GPU 测试脚本默认列表。
+- 正式应用路径：1324×907 视口、pixel ratio 1.5、HDR、光栅模式，通过实际 `timeControls.setHour` 调度 8 次时间切换，均为前台且有焦点，**0 新增管线、0 GPU 错误**。两次晨光 CPU 渲染提交为 62/60 ms，从输入至 GPU 队列完成的墙钟时间为 225/283 ms。其余切换为 175–288 ms；仍包含阴影、反射、AO 和主场景重绘成本。
+- 原始记录：`artifacts/time-pipelines-before.json`、`time-pipelines-after.json`（独立光栅诊断），`time-pipelines-app-before.json`、`time-pipelines-app-after.json`（完整应用）。CPU 阶段测量嵌套、不可相加；墙钟包含帧调度和 GPU 队列等待，不是 GPU timestamp。编译缓存未清空，不作冷启动或跨设备性能推断。
+
+同一提交还让样式从 HTML 提前加载、用轻量入口展示 10 个启动阶段与已用时间，并将镜头/配置载入时的默认光圈设为模型允许的最大开口（最小 f 值）。

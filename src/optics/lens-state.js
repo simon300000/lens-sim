@@ -100,7 +100,7 @@ export function normalizeAsphere(surface) {
 
 /** Fixed ABI: 96 bytes per surface: geometry/media/3 even-asphere vectors/bound. */
 export function packLens(lens,{fNumber,sensorZMm,sensorMm=[36,24],dispersion=true,samplingScale=1}={}) {
-  const limits=apertureLimits(lens),fno=fNumber??Math.max(limits.minFNumber,2.8);
+  const limits=apertureLimits(lens),fno=fNumber??limits.minFNumber;
   if(fno<limits.minFNumber-1e-5||fno>limits.maxFNumber+1e-5)throw new Error('光圈超出数据约束');
   const stopRadiusMm=Math.abs(limits.focalLengthMm*limits.pupilMagnification)/(2*fno);
   const lut=createGlassLUT(lens.glasses),buffer=new ArrayBuffer(lens.surfaces.length*96),f=new Float32Array(buffer),u=new Uint32Array(buffer);

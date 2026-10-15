@@ -125,7 +125,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       const next=nextAsset.configurations[index];if(!next)throw new Error(nextAsset.configurationStatus[index]?.reason||'配置不可用');
       const limits=apertureLimits(next);
       const focusDistanceM=next.objectDistanceMm===null?null:next.objectDistanceMm/1000;
-      const sensorZMm=next.sensorZMm,fNumber=Math.max(limits.minFNumber,2.8);
+      const sensorZMm=next.sensorZMm,fNumber=limits.minFNumber;
       const minimumGap=minimumImageDistance(next);
       const packed=engine.setLens(next,{fNumber,sensorZMm,dispersion:old.optics.dispersion});
       lens=next;statisticsRevision++;
@@ -261,7 +261,8 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
         }
       }catch(error){lastError=error.message;update({status:'error',error:error.message});console.error(error);}
     },
-    async initialize(){
+    async initialize({onProgress=async()=>{}}={}){
+      await onProgress(7,'提取场景几何，构建光追加速结构');
       update({scene:{status:'building',message:'提取场景几何并在 Worker 中构建 BVH'}});
       const build=sceneResources.build('initial').then(stats=>{update({scene:{...state().scene,status:'ready',message:`BVH 就绪：${stats.instances} 个实例 · ${stats.triangles} 个基础三角形`}});return stats;},
         error=>{update({scene:{...state().scene,status:'error',message:error.message}});throw error;});
@@ -269,12 +270,14 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       manifest=await response.json();
       update({lenses:manifest.lenses.map(l=>({id:l.id,name:l.name,brand:l.brand??null,available:l.supported,reason:l.reason,
         validation:l.validation,surfaceCount:l.surfaceCount,focalLengthMm:catalogueFocalLengthMm(l)})),source:manifest.source});
+      await onProgress(8,'编译真实镜组、光谱采样与自动对焦');
       engine=await createOpticalEngine({interop,sceneResources,lighting,width:state().sampling.resolution});
       await loadLens(manifest.defaultId);displayGraph();displayChanged();
       await build;
       update({status:'loading'});
       // Warm the lighting-resource refresh and first real lens sample while
       // the loading curtain is up; startup still opens in raster mode.
+      await onProgress(9,'预热镜头成像与首帧显示');
       lightingDirty=true;ensureLighting();
       engine.sample({batchSpp:1,targetSpp:state().sampling.targetSpp,seed:state().sampling.seed,diagnostic:state().display.diagnostic});
       diagnosticDirty=false;

@@ -1,4 +1,3 @@
-import './style.css';
 import * as THREE from 'three/webgpu';
 import { pass, mrt, normalView, vec4, builtinAOContext, screenUV, uniform, convertToTexture } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
@@ -11,19 +10,19 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { probeHDRCanvas,isHDRConfiguration,outputRendererOptions,displayOutputNode,captureCanvasRange } from './hdr-output.js';
 import { createHybridRuntime } from './rendering/hybrid-runtime.js';
 import { createLensUI } from './ui/lens-ui.js';
+import { startup } from './startup-progress.js';
 
-const loading=document.querySelector('#loading'), message=document.querySelector('#loading-message');
 const faults=[];
 window.addEventListener('error',event=>faults.push(event.message));
 window.addEventListener('unhandledrejection',event=>faults.push(String(event.reason)));
 
 async function createScene(){
   const startupStarted=performance.now();
+  await startup.stage(1,'检测 GPU 与 HDR 画布支持');
   const pixelDiagnostics=new URLSearchParams(location.search).get('gpu-diagnostics')==='1';
   if(!navigator.gpu)throw new Error('此浏览器尚未启用 WebGPU。请用支持 WebGPU 的 Chrome 或 Edge 打开本地地址。');
   const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});
   if(!adapter)throw new Error('未找到可用的 WebGPU 设备。请检查浏览器硬件加速设置。');
-  message.textContent='检测 HDR 画布支持';
   let hdr=await probeHDRCanvas(adapter);
   const rendererOptions={antialias:true,alpha:false,powerPreference:'high-performance',
     // The lens BVH and large sensor tiles are storage buffers; request what the
@@ -67,7 +66,7 @@ async function createScene(){
   }
   updateOutputStatus();displayHDR.addEventListener('change',updateOutputStatus);
 
-  message.textContent='铺设庭园，栽种花木';
+  await startup.stage(2,'铺设庭园，栽种花木');
   const {scene,garden,landscape,villa,vegetation,details}=buildSanteiScene();
   const portrait=innerWidth/innerHeight<.85;
   const camera=new THREE.PerspectiveCamera(portrait?48:40,innerWidth/innerHeight,.15,450);
@@ -101,6 +100,7 @@ async function createScene(){
     });}
     framesNeeded--;if(framesNeeded>0||hybrid?.needsFrame())requestAnimationFrame(frame);else rendering=false;
   }
+  await startup.stage(3,'初始化天空、日照与反射');
   const daylight=createDaylight(scene,renderer,{details,invalidate});
   let celestialState;
   const sceneElement=document.querySelector('#scene');
@@ -151,7 +151,6 @@ async function createScene(){
   scene.traverse(o=>{if(o.isMesh){diagnostics.meshes++;if(o.isInstancedMesh)diagnostics.instances+=o.count;diagnostics.triangles+=(o.geometry.index?.count||o.geometry.attributes.position.count)/3*(o.isInstancedMesh?o.count:1);}});
   for(const [name,item]of Object.entries({villa,vegetation,garden,landscape,details}))diagnostics.groups[name]=item?.metadata||item?.userData||(name==='vegetation'?item:{});
   window.__SANTEI__={scene,camera,renderer,controls,pipeline,diagnostics,garden,daylight,timeControls,scenePass};
-  message.textContent='预编译日月、晨光与反射';
   // Render on time/date changes and camera movement; never run an idle GPU loop.
   controls.addEventListener('change',()=>{hybrid?.cameraChanged();wake();});
   controls.addEventListener('start',()=>{hybrid?.setInteracting(true);wake();});
@@ -161,7 +160,7 @@ async function createScene(){
   // the loading curtain is up, instead of compiling them on the first slider move.
   const initialTime=timeControls.getValue();
   for(const hour of [0,5.5]){
-    await new Promise(requestAnimationFrame);
+    await startup.stage(hour===0?4:5,hour===0?'预编译夜景、月亮与灯光':'预编译晨光与阴影');
     applyTime({...initialTime,hour},true);
     pipeline.render();
     const canvasRange=hour===0&&pixelDiagnostics?captureCanvasRange(renderer):null;
@@ -172,11 +171,10 @@ async function createScene(){
         canvasAboveWhite:diagnostics.hdr.nightCanvas.aboveWhitePixels,canvasNonFinite:diagnostics.hdr.nightCanvas.nonFinite});
     }
   }
-  await new Promise(requestAnimationFrame);
+  await startup.stage(6,'预编译当前时刻的场景');
   applyTime(initialTime,true);
   pipeline.render();
   await renderer.backend.device.queue.onSubmittedWorkDone();
-  message.textContent='编译真实镜组、光谱采样与自动对焦';
   hybrid=await createHybridRuntime({renderer,scene,camera,rasterPipeline:pipeline,rasterBeauty:beauty,rasterGlare:glare,cameraExposure,hdr,environment:daylight,requestFrame:wake,
     onOutputState:mode=>{outputStatus.textContent=mode==='hdr'?'HDR':'SDR';sceneElement.dataset.outputMode=mode;}});
   const lensPanel=document.createElement('aside');lensPanel.id='lens-controls';document.body.appendChild(lensPanel);
@@ -199,7 +197,7 @@ async function createScene(){
       attemptedSamples:state.diagnostics.attemptedSamples,opticalPipelineCount:state.diagnostics.pipelineCompilations});
     diagnostics.hybrid=state;
   });
-  try{await hybrid.initialize();}catch(error){hybrid.store.update({status:'error',error:error.message});faults.push(error.message);console.error(error);}
+  try{await hybrid.initialize({onProgress:(step,label)=>startup.stage(step,label)});}catch(error){hybrid.store.update({status:'error',error:error.message});faults.push(error.message);console.error(error);}
   sceneElement.dataset.renderedHour=sceneElement.dataset.hour;
   sceneElement.dataset.gpuErrors=String(faults.length);
   document.querySelector('#time-controls').setAttribute('aria-busy','false');
@@ -215,10 +213,10 @@ async function createScene(){
   sceneElement.dataset.triangles=diagnostics.triangles;
   sceneElement.dataset.koi=garden.koi.length;
   console.info('SANTEI scene ready',diagnostics);
-  loading.classList.add('complete');
+  startup.complete();
   addEventListener('pagehide',()=>{ready=false;lensUI.dispose();hybrid.dispose();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
   // Initialization captured the current scene and prepared its first lens
   // sample. Schedule display without throwing away that prepared state.
   wake();
 }
-createScene().catch(error=>{console.error(error);loading.classList.add('error');message.textContent=error.message;});
+createScene().catch(error=>{console.error(error);startup.fail(error);});
