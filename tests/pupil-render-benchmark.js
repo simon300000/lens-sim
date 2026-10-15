@@ -32,10 +32,10 @@ button.onclick=async()=>{
   function thumbnail(rgb){const canvas=document.createElement('canvas');canvas.width=48;canvas.height=32;const ctx=canvas.getContext('2d'),a=ctx.createImageData(48,32);for(let i=0;i<rgb.length;i++){const v=Math.max(0,rgb[i]);a.data[Math.floor(i/3)*4+i%3]=255*(v/(1+v))**(1/2.2);}for(let i=3;i<a.data.length;i+=4)a.data[i]=255;ctx.putImageData(a,0,0);return canvas.toDataURL('image/png');}
   async function select(lens,v){engine.setLens(lens,{sensorZMm:lens.sensorZMm,pupilBins:v.bins,pupilMovingCenter:v.movingCenter});engine.bindScene();await device.queue.onSubmittedWorkDone();}
   async function warm(){for(let i=0;i<64;i+=4)engine.sample({batchSpp:4,targetSpp:64,seed:42});await device.queue.onSubmittedWorkDone();engine.reset();await device.queue.onSubmittedWorkDone();}
-  async function reference(seed){engine.reset();await device.queue.onSubmittedWorkDone();const started=performance.now();for(let i=0;i<16384;i+=4){engine.sample({batchSpp:4,targetSpp:16384,seed});if(i%128===0)await device.queue.onSubmittedWorkDone();}await device.queue.onSubmittedWorkDone();return {...await image(),renderMs:performance.now()-started,spp:engine.spp};}
+  async function reference(seed){engine.reset();await device.queue.onSubmittedWorkDone();const started=performance.now();for(let i=0;i<16384;i+=4){engine.sample({batchSpp:4,targetSpp:16384,seed});if(i%128===0)await device.queue.onSubmittedWorkDone();}await device.queue.onSubmittedWorkDone();const renderMs=performance.now()-started;return {...await image(),renderMs,spp:engine.spp};}
   async function trial(seed,budget){
-   engine.reset();await device.queue.onSubmittedWorkDone();const started=performance.now();let batches=0;
-   do{for(let i=0;i<16;i++){engine.sample({batchSpp:4,targetSpp:0,seed});batches++;}await device.queue.onSubmittedWorkDone();}while(performance.now()-started<budget);
+   engine.reset();await device.queue.onSubmittedWorkDone();const started=performance.now();let batches=0,batchCalls=8;
+   do{const chunkStart=performance.now();for(let i=0;i<batchCalls;i++){engine.sample({batchSpp:4,targetSpp:0,seed});batches++;}await device.queue.onSubmittedWorkDone();const elapsed=performance.now()-started,chunkMs=performance.now()-chunkStart;batchCalls=Math.max(1,Math.min(16,Math.floor((budget-elapsed)/Math.max(.01,chunkMs)*batchCalls)));}while(performance.now()-started<budget);
    const renderMs=performance.now()-started,spp=engine.spp,lastGpuBatchMs=engine.computeMs;track();const readStart=performance.now(),im=await image();
    return {...im,seed,budget,renderMs,spp,batches,lastGpuBatchMs,readbackMs:performance.now()-readStart};
   }
@@ -47,7 +47,7 @@ button.onclick=async()=>{
    const ref=a.rgb.map((x,i)=>(x+b.rgb[i])/2),referenceNoiseMSE=mean(a.rgb.map((x,i)=>(x-b.rgb[i])**2))/4;
    const normalization=mean(ref.map(x=>x*x)),rows=[],previews={reference:thumbnail(ref)};
    for(const budget of budgets)for(const seed of seeds){
-    const order=seed%3===2?[...variants].reverse():variants;
+    const order=seeds.indexOf(seed)%2?[...variants].reverse():variants;
     for(const v of order){
      progress.textContent=`${id} ${v.name} seed=${seed} ${budget}ms`;await select(lens,v);await warm();const row=await trial(seed,budget),mse=mean(row.rgb.map((x,i)=>(x-ref[i])**2));
      if(seed===seeds[0]&&budget===budgets.at(-1)&&['fixed128','fixed1024','moving128','moving1024'].includes(v.name))previews[v.name]=thumbnail(row.rgb);
