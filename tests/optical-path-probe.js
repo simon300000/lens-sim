@@ -83,6 +83,17 @@ export async function runOpticalPathProbe(interop){
     }
     addFixture(`catalog ${id} cfg0`,lens,rays,{packed});
   }
+  // Pinned Noct S28 rays: disjoint sag/cylinder intervals and a cylinder miss.
+  // These are physical misses, not failed numerical solves. Include an axial
+  // hit and an edge hit to ensure the conservative bound does not clip rays.
+  const noct=await loadLens('nikon-z-58mm-f0-95-noct-s');
+  const rearAsphere={...noct.surfaces[27],index:0,mediumBefore:'air',mediumAfter:'air'};
+  addFixture('Noct S28 physical misses',airLens([rearAsphere]),[
+    makeRay([3.227754412035264,-10.20743269177128,158.12413412796502],[-.9776382086592235,.17401968388867986,-.1180706677751448],550,true),
+    makeRay([19.55068530743874,-6.371049982955646,158.12413412796502],[.5515627268993667,.8062670439127602,-.21380367675864184],550,true),
+    makeRay([0,0,158.12413412796502],[0,0,-1],550,true),
+    makeRay([18.798,0,158.12413412796502],[0,0,-1],550,true),
+  ]);
   const summaries=[],allResults=new Map();let totalRays=0,totalPassed=0,peakMemoryBytes=0,maxPositionErrorMm=0,maxDirectionError=0,maxReciprocityPositionMm=0,maxReciprocityDirection=0;
   for(const fixture of cases){
     const resources=[];let scopePending=false;

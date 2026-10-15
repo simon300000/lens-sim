@@ -87,15 +87,19 @@ fn opticalConicRoots(s: OpticalSurface, p: vec3f, v: vec3f) -> vec3f {
   let t1 = cc/q;
   return vec3f(min(t0,t1),max(t0,t1),2.0);
 }
-// Returns (t, success). This bounded same-ray fallback is not sample rejection
-// or pupil resampling. It resolves a bracket on the primary sag sheet.
+// Returns (t, outcome): 1 hit, -1 proven physical miss, 0 unresolved.
+// This bounded same-ray fallback never rejects/resamples a pupil point.
+// It resolves a bracket on the primary sag sheet.
 fn opticalBracketAsphere(s: OpticalSurface, p: vec3f, v: vec3f, tolerance: f32) -> vec2f {
   if (abs(v.z)<1e-8) { return vec2f(0.0); }
   var radius=max(s.bounds.x,1.0);
-  if (s.geometry.w>0.0) { radius=min(radius,s.geometry.w); }
+  if (s.geometry.w>0.0) { radius=min(radius,s.geometry.w*(1.0+8e-6)+tolerance); }
   if (s.geometry.y!=0.0 && s.geometry.z > -1.0) {
     radius=min(radius,abs(s.geometry.y)/sqrt(1.0+s.geometry.z)*(1.0-2e-6));
   }
+  // Only a bound enclosing the full known aperture can prove physical blockage.
+  // A truncated conic/numerical domain must remain an unresolved failure.
+  let miss=select(0.0,-1.0,s.geometry.w>0.0 && radius>s.geometry.w);
   var base=s;
   base.media.z=0u;
   let edge=opticalSag(base,vec2f(radius,0.0));
@@ -117,11 +121,16 @@ fn opticalBracketAsphere(s: OpticalSurface, p: vec3f, v: vec3f, tolerance: f32) 
   let cc=dot(p.xy,p.xy)-radius*radius;
   if (a>1e-12) {
     let disc=b*b-4.0*a*cc;
-    if (disc<0.0) { return vec2f(0.0); }
+    if (disc<0.0) {
+      let margin=1e-5*max(b*b+abs(4.0*a*cc),1.0);
+      return vec2f(0.0,select(0.0,miss,disc < -margin));
+    }
     lo=max(lo,(-b-sqrt(disc))/(2.0*a));
     hi=min(hi,(-b+sqrt(disc))/(2.0*a));
   } else if (cc>0.0) { return vec2f(0.0); }
-  if (!(hi>=lo) || !(abs(hi)<1e25)) { return vec2f(0.0); }
+  if (!(abs(lo)<1e25) || !(abs(hi)<1e25)) { return vec2f(0.0); }
+  if (hi<lo-tolerance) { return vec2f(0.0,miss); }
+  if (hi<lo) { return vec2f(0.0); }
   var previousT=lo;
   var previousF=opticalResidual(s,p+lo*v);
   for (var j=0u;j<=64u;j++) {
@@ -185,6 +194,7 @@ fn opticalIntersect(s: OpticalSurface, p: vec3f, v: vec3f) -> OpticalHit {
       // Numerical failure is deliberately distinct from physical occlusion.
       // No different pupil point or wavelength is sampled to hide it.
       let bracket=opticalBracketAsphere(s,p,v,tolerance);
+      if (bracket.y<0.0) { return OpticalHit(p,v,1u); }
       if (bracket.y==0.0) { return OpticalHit(p,v,3u); }
       t=bracket.x;
     }

@@ -196,3 +196,26 @@ test('normalized GPU Horner preserves high-order coefficients below f32 range wi
   assert.throws(()=>normalizeAsphere(surface({aspheric:[1e-90]})),/无法.*f32/);
   assert.throws(()=>normalizeAsphere(surface({aspheric:[1e38]})),/无法.*f32/);
 });
+
+test('Noct native image planes classify rear-asphere misses as blockage in all four configurations',()=>{
+  const asset=JSON.parse(fs.readFileSync(new URL('../public/lenses/nikon-z-58mm-f0-95-noct-s.json',import.meta.url)));
+  const expectedPasses=[15,15,12,10];
+  for(const [cfg,lens] of asset.configurations.entries()){
+    const packed=packLens(lens,{sensorZMm:lens.sensorZMm}),counts=[0,0,0,0];
+    for(let pixel=0;pixel<96*64;pixel++)for(let k=0;k<8;k++){
+      const dim=d=>sampleDimension(pixel,k,d,0),disk=concentricDisk(dim(2),dim(3));
+      const origin=[-((pixel%96+dim(0))/96-.5)*36,((Math.floor(pixel/96)+dim(1))/64-.5)*24,packed.sensorZMm];
+      const pupil=[disk[0]*packed.region.radiusMm,disk[1]*packed.region.radiusMm,packed.region.zMm];
+      counts[traceLens(lens,origin,add(pupil,origin,-1),{stopRadiusMm:packed.stopRadiusMm}).status]++;
+    }
+    // Before the fix each configuration had 431 false numerical failures.
+    // Successful paths and the attempted-ray denominator must stay unchanged.
+    assert.deepEqual(counts,[expectedPasses[cfg],49152-expectedPasses[cfg],0,0],`cfg ${cfg}`);
+  }
+});
+
+test('unresolved asphere intersections with unknown apertures remain numerical failures',()=>{
+  const s=surface({radiusMm:10,aspheric:[1e-4],apertureRadiusMm:null});
+  assert.equal(intersectSurface(s,[20,0,-5],[0,0,1]).status,3);
+  assert.equal(intersectSurface({...s,apertureRadiusMm:20},[20,0,-5],[0,0,1]).status,3);
+});
