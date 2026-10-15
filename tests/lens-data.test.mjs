@@ -126,8 +126,8 @@ test('unknown clear aperture is warned and never promoted from sdDraw', () => {
   assert.ok(lens.warnings.some(w => w.includes('通光数据不完整')));
 });
 
-test('DOE/odd aspheres, unknown glasses and invalid configurations remain unavailable', () => {
-  for (const token of ['DOE 1 10 .01', 'ODD .01', 'XODD 10 .01']) {
+test('Legacy ODD, unknown glasses and invalid configurations remain unavailable', () => {
+  for (const token of ['ODD .01']) {
     const row = fixture({ tx: `50 3 N-BK7 10 0 ${token}\n-50 40 - 10` });
     const entry = inspectLensRecord(row, catalog);
     assert.equal(entry.supported, false);

@@ -84,7 +84,7 @@ test('default ABCD agrees with pinned upstream reference and only stop aperture 
   const packed=packLens(defaultLens,{fNumber:4});
   close(packed.stopRadiusMm,Math.abs(p.focalLengthMm*p.pupilMagnification)/8);
   const numbers=new Float32Array(packed.surfaces.buffer);
-  defaultLens.surfaces.forEach((s,i)=>close(numbers[i*24+3],s.apertureRadiusMm,1e-6));
+  defaultLens.surfaces.forEach((s,i)=>close(numbers[i*(packed.surfaces.byteLength/defaultLens.surfaces.length/4)+3],s.apertureRadiusMm,1e-6));
   assert.throws(()=>packLens(defaultLens,{fNumber:.5}),/光圈/);
   assert.ok(paraxialSensorZ(defaultLens,2)>paraxialSensorZ(defaultLens,20));
   assert.ok(paraxialSensorZ(defaultLens,20)>paraxialSensorZ(defaultLens,null));

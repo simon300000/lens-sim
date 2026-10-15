@@ -46,7 +46,7 @@ try{
   const empty=await runtime.interop.readTexture(runtime.engine.outputGPU);
   check(runtime.engine.spp===0&&empty.every((v,i)=>i%4===3||v===0),'paused reset displays stale image');
   const opticsBefore=JSON.stringify(store.getState().optics);let rejected=false;
-  try{await store.dispatch('setImageDistance',.05);}catch{rejected=true;}
+  try{await store.dispatch('setImageDistance',-1);}catch{rejected=true;}
   check(rejected&&JSON.stringify(store.getState().optics)===opticsBefore,'invalid optical update not transactional');
   // AF on the REAL scene: chief ray hits the blocker? No: it is at x=+-1. It hits the plane at 10 m.
   await store.dispatch('autofocus');
@@ -93,6 +93,13 @@ try{
   check(finiteNative.focusDistanceM===6.4&&Math.abs(finiteNative.imageDistanceMm-1)<1e-6,'finite configuration lost native image plane/conjugate');
   let focusFailure='';try{await store.dispatch('setFocusDistance',20);}catch(error){focusFailure=error.message;}
   check(focusFailure&&JSON.stringify(store.getState().optics)===JSON.stringify(finiteNative)&&store.getState().af.status==='error','invalid focus must visibly preserve native optical state');
+  await store.dispatch('selectLens','hasselblad-xcd-65mm-f2-8');
+  const contactNative=store.getState().optics;
+  check(contactNative.imageDistanceMm===0&&runtime.engine.packed.region.directional,'native zero-gap lens did not initialize');
+  await store.dispatch('setImageDistance',.026);
+  check(Math.abs(store.getState().optics.imageDistanceMm-.026)<1e-12,'short manual image distance is still restricted');
+  await store.dispatch('setImageDistance',0);
+  check(store.getState().optics.imageDistanceMm===0,'manual zero-gap image plane rejected');
   // Repeated lens switching / resize / pause: no GPU errors, no leaked tiles.
   const cycle=async()=>{await store.dispatch('selectLens','canon-fl-50mm-f1-8');await store.dispatch('setResolution',480);await store.dispatch('setResolution',240);await store.dispatch('setPaused',true);await store.dispatch('setPaused',false);runtime.frame();};
   await cycle();await runtime.interop.device.queue.onSubmittedWorkDone();
@@ -104,6 +111,6 @@ try{
   const result={passed:true,counters:res.counters,lightingRefreshes:light.refreshes,lightingStatus:light.status,scene:store.getState().scene.summary,
     afRealTarget:af.target,afMovedTarget:moved,manualFocus:{nearMm:near,farMm:far},smallApertureInfinity:infinity,
     nativeFiniteConfiguration:{focusDistanceM:finiteNative.focusDistanceM,imageDistanceMm:finiteNative.imageDistanceMm,failedFocusReason:focusFailure},
-    stats,liveBuffers:runtime.interop.liveBuffers,pipelines:runtime.interop.compilations,wakes,errors};
+    contactNativeConfiguration:contactNative,stats,liveBuffers:runtime.interop.liveBuffers,pipelines:runtime.interop.compilations,wakes,errors};
   out.textContent=JSON.stringify(result,null,2);document.body.dataset.passed='true';window.__runtimeTest={runtime,result};
 }catch(error){out.textContent=error.stack||String(error);document.body.dataset.passed='false';console.error(error);}

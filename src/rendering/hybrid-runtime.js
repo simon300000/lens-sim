@@ -59,9 +59,9 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
   }
   function resetAccumulation(kind='accumulation'){cancelFocus();engine?.reset();clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision(kind);publishEngine();requestFrame();}
   function minimumImageDistance(prescription){
-    let lo=.05,hi=Math.max(1,prescription.imageDistanceMm);
+    let lo=0,hi=Math.max(1,prescription.imageDistanceMm);
     const valid=gap=>{try{rearSamplingRegion(prescription,prescription.lastVertexZMm+gap);return true;}catch{return false;}};
-    if(valid(lo+.001))return lo+.001;
+    if(valid(0))return 0;
     while(!valid(hi)&&hi<2000)hi*=2;
     if(!valid(hi))throw new Error('无法确定像面调节范围');
     for(let i=0;i<20;i++){const mid=(lo+hi)/2;if(valid(mid))hi=mid;else lo=mid;}
@@ -130,7 +130,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       const packed=engine.setLens(next,{fNumber,sensorZMm,dispersion:old.optics.dispersion});
       lens=next;statisticsRevision++;
       update({status:'ready',error:null,lensId:id,configurationIndex:index,configurations:nextAsset.configurationStatus.map(c=>({...c,available:c.supported})),
-        warnings:[...(next.capabilityWarnings??[]),...next.warnings.filter(w=>/^(通光数据不完整|含 nd\/vd|380–780)/.test(w)),
+        warnings:[...(next.capabilityWarnings??[]),...next.warnings.filter(w=>/^(通光数据不完整|含 nd\/vd|DOE 按|380–780)/.test(w)),
           next.surfaces[next.stopIndex].apertureRadiusMm===null?`光阑半径由上游 ${next.apertureMode} 孔径参数与入瞳倍率标定，未采用绘图半径。`:'',
           packed.region.unknownAperture?'后面通光未知：使用明确的有限求交域，不能据此声称完整渐晕。':'',
           '经验渐晕仅存为元数据；当前只计算有依据的几何遮挡。'].filter(Boolean),

@@ -104,8 +104,8 @@ test('declared image height and untouched upstream warning/vignette metadata are
 
 test('unsupported types and invalid media cannot pass capability check even if a caller bypasses parser', () => {
   const lens = canonical();
-  lens.surfaces[0].type = 'DOE';
-  assert.match(preflightLens(lens).reason, /未支持的面型 DOE/);
+  lens.surfaces[0].type = 'UNKNOWN';
+  assert.match(preflightLens(lens).reason, /未支持的面型 UNKNOWN/);
   lens.surfaces[0].type = 'sphere';
   lens.surfaces[0].mediumBefore = 'unknown';
   assert.match(preflightLens(lens).reason, /介质引用无效/);
@@ -125,8 +125,8 @@ test('library capability count distinguishes parser acceptance from supported in
       else { rejected++; assert.ok(result.reason); }
     }
   }
-  assert.equal(parserAccepted, 1845);
-  assert.equal(preflightAccepted, 1820);
-  assert.equal(rejected, 25);
+  assert.equal(parserAccepted, 1975);
+  assert.equal(preflightAccepted, 1967);
+  assert.equal(rejected, 8);
   console.log(`Pinned library: ${parserAccepted} parsed, ${preflightAccepted} static-preflight accepted, ${rejected} initial-setup unavailable; not GPU image validation.`);
 });

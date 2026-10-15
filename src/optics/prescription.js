@@ -36,12 +36,34 @@ export function parsePrescriptionText(text) {
       }
     }
     if (tokens[cursor] !== undefined) conic = number(tokens[cursor++], `Conic line ${lineIndex + 1}`);
-    const unsupported = tokens.slice(cursor).find(x => /^(?:DOE|ODD|XODD)$/i.test(x));
+    const doeIndex=tokens.findIndex((token,index)=>index>=cursor&&/^DOE$/i.test(token));
+    let doe=null;
+    if(doeIndex>=0){
+      const tail=tokens.splice(doeIndex);
+      if(tail.length<4)throw new Error(`DOE requires order, positive normalization radius and phase coefficients at line ${lineIndex+1}`);
+      const order=number(tail[1], 'DOE order'), normalizationRadiusMm=number(tail[2], 'DOE radius');
+      if(!Number.isInteger(order)||!(normalizationRadiusMm>0))throw new Error(`Invalid DOE order/radius at line ${lineIndex+1}`);
+      const coefficients=tail.slice(3).map(x=>number(x,`DOE phase coefficient line ${lineIndex+1}`));
+      while(coefficients.length&&coefficients.at(-1)===0)coefficients.pop();
+      if(coefficients.length>12)throw new Error(`DOE above 12 phase terms is unsupported at line ${lineIndex+1}`);
+      doe={order,normalizationRadiusMm,coefficients};
+    }
+    const unsupported = tokens.slice(cursor).find(x => /^ODD$/i.test(x));
     if (unsupported) throw new Error(`Unsupported surface ${unsupported.toUpperCase()} at line ${lineIndex + 1}; no spherical substitution`);
-    const aspheric = tokens.slice(cursor).map(x => number(x, `Aspheric coefficient line ${lineIndex + 1}`));
-    while (aspheric.length && aspheric.at(-1) === 0) aspheric.pop();
-    if (aspheric.length > 12) throw new Error(`Even asphere above A26 is unsupported at line ${lineIndex + 1}`);
-    surfaces.push({ index: surfaces.length, radiusMm, thicknessMm, material, apertureRadiusMm, conic, aspheric });
+    let aspheric=[],xodd=null;
+    if (/^XODD$/i.test(tokens[cursor]??'')) {
+      const normalizationRadiusMm=number(tokens[++cursor], `XODD normalization radius line ${lineIndex+1}`);
+      if (!(normalizationRadiusMm>0 && Number.isFinite(normalizationRadiusMm))) throw new Error(`XODD requires positive finite normalization radius at line ${lineIndex+1}`);
+      const coefficients=tokens.slice(++cursor).map(x=>number(x, `XODD coefficient line ${lineIndex+1}`));
+      if (!coefficients.length || coefficients.length>28) throw new Error(`XODD requires A1 through at most A28 at line ${lineIndex+1}`);
+      // Keep all source coefficients, including zero tails: no lost terms.
+      xodd={normalizationRadiusMm,coefficients};
+    } else {
+      aspheric=tokens.slice(cursor).map(x=>number(x, `Aspheric coefficient line ${lineIndex+1}`));
+      while(aspheric.length && aspheric.at(-1)===0)aspheric.pop();
+      if(aspheric.length>12)throw new Error(`Even asphere above A26 is unsupported at line ${lineIndex+1}`);
+    }
+    surfaces.push({index:surfaces.length,radiusMm,thicknessMm,material,apertureRadiusMm,conic,aspheric,doe,...(xodd?{xodd}:{})});
   }
   if (!surfaces.length) throw new Error('Empty lens prescription');
   return surfaces;
@@ -83,7 +105,7 @@ export function adaptLensRecord(record, catalog, { configurationIndex = 0 } = {}
     surface.apertureRadiusMm ??= positiveRadius(record.sdAp?.[surface.index]);
     surface.apertureSource = surface.apertureRadiusMm ? (txAperture ? 'tx-explicit' : 'sdAp-explicit') : 'unknown';
     surface.drawRadiusMm = positiveRadius(record.sdDraw?.[surface.index]);
-    surface.type = surface.aspheric.length ? 'even-asphere' : surface.conic !== 0 ? 'conic' : surface.radiusMm === 0 ? 'plane' : 'sphere';
+    surface.type = surface.doe ? 'diffractive' : surface.xodd ? 'extended-odd-asphere' : surface.aspheric.length ? 'even-asphere' : surface.conic !== 0 ? 'conic' : surface.radiusMm === 0 ? 'plane' : 'sphere';
     if (surface.thicknessMm < 0) throw new Error(`Negative axial thickness at surface ${surface.index + 1}; folded/reflected or overlapping layout unsupported`);
     zMm += surface.thicknessMm;
     before = after;
@@ -92,7 +114,9 @@ export function adaptLensRecord(record, catalog, { configurationIndex = 0 } = {}
   const missing = surfaces.filter(s => s.apertureRadiusMm === null).map(s => s.index + 1);
   if (missing.length) warnings.push(`通光数据不完整：S${missing.join(', S')} 无已知物理半口径；sdDraw 仅用于保守求交边界，不作为挡光。`);
   if (Object.values(glasses).some(g => g.model)) warnings.push('含 nd/vd 模型玻璃；色散为上游 Conrady 近似。');
+  if(surfaces.some(s=>s.xodd))warnings.push('含 XODD 扩展奇次非球面：按原始 Rn 与 A1…AN 计算全部整数次幂；A1 非零的轴心无唯一法线。');
   warnings.push('380–780 nm 为本实现工作区间；上游目录表未提供各牌号有效波段，未据此声称厂商认证范围。');
+  if(surfaces.some(s=>s.doe))warnings.push('DOE 按指定级次的相位梯度进行几何追迹；源数据未提供衍射效率、其他级次能量或相干干涉模型。');
   const last = surfaces.at(-1);
   const objectDistanceMm = configuration && Object.hasOwn(configuration, 'obj') ? configuration.obj : record.objd ?? null;
   if (objectDistanceMm !== null && !(Number.isFinite(objectDistanceMm) && objectDistanceMm > 0)) throw new Error(`Invalid object distance for ${record.id}`);
