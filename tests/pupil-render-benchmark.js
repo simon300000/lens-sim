@@ -1,3 +1,4 @@
+import './pupil-test-focus.js';
 // Equal queue-complete render time through the full production BVH/material/
 // spectrum integrator. Table construction, compilation and readback are separate.
 import * as THREE from 'three/webgpu';
@@ -11,7 +12,7 @@ const mean=a=>a.reduce((s,x)=>s+x,0)/a.length;
 button.onclick=async()=>{
  button.disabled=true;let renderer,rig,device,interrupted=false;const errors=[],losses=[];
  const track=()=>{if(document.hidden||!document.hasFocus())interrupted=true;};
- const report={kind:'render-benchmark',date:new Date().toISOString(),browser:navigator.userAgent,width:48,height:32,scene:'32 physical emissive stripes plus finite defocused emissive point; full BVH/material/spectral path',timingKind:'equal queue-complete render wall time; excludes precompute, warmup, reset, readback and resolve',results:[],errors,losses};
+ const report={startForeground:!document.hidden&&document.hasFocus(),kind:'render-benchmark',date:new Date().toISOString(),browser:navigator.userAgent,width:48,height:32,scene:'32 physical emissive stripes plus finite defocused emissive point; full BVH/material/spectral path',timingKind:'equal queue-complete render wall time; excludes precompute, warmup, reset, readback and resolve',results:[],errors,losses};
  document.addEventListener('visibilitychange',track);window.addEventListener('blur',track);
  try{
   track();renderer=new THREE.WebGPURenderer();await renderer.init();renderer.setSize(96,64);device=renderer.backend.device;

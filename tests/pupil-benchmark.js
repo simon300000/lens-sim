@@ -1,3 +1,4 @@
+import './pupil-test-focus.js';
 import optical from '../src/optics/optical-core.wgsl?raw';
 import pupil from '../src/optics/pupil-sampling.wgsl?raw';
 import kernel from './pupil-gpu.wgsl?raw';
@@ -13,7 +14,7 @@ button.onclick=async()=>{
  button.disabled=true;let device;const buffers=[],errors=[],losses=[];let interrupted=false;
  const track=()=>{if(document.hidden||!document.hasFocus())interrupted=true;};
  document.addEventListener('visibilitychange',track);window.addEventListener('blur',track);
- const report={kind:'resolution-benchmark',browser:navigator.userAgent,date:new Date().toISOString(),results:[],errors,losses};
+ const report={startForeground:!document.hidden&&document.hasFocus(),kind:'resolution-benchmark',browser:navigator.userAgent,date:new Date().toISOString(),results:[],errors,losses};
  try{
   track();const adapter=await navigator.gpu.requestAdapter();if(!adapter)throw Error('No WebGPU adapter');
   const timestamp=adapter.features.has('timestamp-query');device=await adapter.requestDevice({requiredFeatures:timestamp?['timestamp-query']:[]});
