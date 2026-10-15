@@ -44,19 +44,24 @@ export function sagBounds(s,radius) {
   return [lo,hi,radius];
 }
 /** Same ray only: finite primary sag slab/cylinder, scan 64 intervals then
- * bisection 48 times. Returns null on no bracket; never resamples a ray. */
+ * bisection 48 times. Returns false for a proven physical miss, null for
+ * unresolved failure; never resamples a ray. */
 function bracketAsphere(s,p,d,epsilon) {
-  const bounds=sagBounds(s,s.apertureRadiusMm??Math.max((s.drawRadiusMm??0)*2,100));
+  const bounds=sagBounds(s,s.apertureRadiusMm>0?s.apertureRadiusMm*(1+8e-6)+epsilon:Math.max((s.drawRadiusMm??0)*2,100));
   if(!bounds||Math.abs(d[2])<1e-14)return null;
   let [zLo,zHi,radius]=bounds;
   let lo=Math.max(0,Math.min((s.zMm+zLo-p[2])/d[2],(s.zMm+zHi-p[2])/d[2])-epsilon);
   let hi=Math.max((s.zMm+zLo-p[2])/d[2],(s.zMm+zHi-p[2])/d[2])+epsilon;
+  const physicalBound=s.apertureRadiusMm>0&&radius>s.apertureRadiusMm;
   const a=d[0]**2+d[1]**2,b=2*(p[0]*d[0]+p[1]*d[1]),c=p[0]**2+p[1]**2-radius**2;
   if(a>1e-24){
-    const discriminant=b*b-4*a*c;if(discriminant<0)return null;
+    const discriminant=b*b-4*a*c;
+    if(discriminant<0)return physicalBound&&discriminant < -1e-12*Math.max(b*b+Math.abs(4*a*c),1)?false:null;
     lo=Math.max(lo,(-b-Math.sqrt(discriminant))/(2*a));hi=Math.min(hi,(-b+Math.sqrt(discriminant))/(2*a));
   }else if(c>0)return null;
-  if(!(hi>=lo&&Number.isFinite(hi)))return null;
+  if(!Number.isFinite(lo)||!Number.isFinite(hi))return null;
+  if(hi<lo-epsilon&&physicalBound)return false;
+  if(hi<lo)return null;
   const residual=t=>{const q=add(p,d,t),z=sag(s,q[0],q[1]);return z===null?null:q[2]-s.zMm-z;};
   let previousT=lo,previousF=residual(lo);
   for(let j=0;j<=64;j++){
@@ -101,6 +106,7 @@ export function intersectSurface(s,p,d) {
     }
     if(!converged){
       const bracketed=bracketAsphere(s,p,d,epsilon);
+      if(bracketed===false)return {status:1};
       if(bracketed===null)return {status:3};
       t=bracketed;
     }

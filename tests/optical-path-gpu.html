@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><meta charset="UTF-8"><title>Optical path GPU regression</title>
+<pre id="result">Running production optical kernel…</pre>
+<script type="module">
+import * as THREE from 'three/webgpu';
+import { createGPUInterop } from '../src/rendering/three-interop.js';
+import { runOpticalPathProbe } from './optical-path-probe.js';
+const out=document.querySelector('#result');
+let renderer,interop;
+try {
+  renderer=new THREE.WebGPURenderer();
+  await renderer.init();
+  interop=createGPUInterop(renderer);
+  const result=await runOpticalPathProbe(interop);
+  out.textContent=JSON.stringify(result,null,2);
+  document.body.dataset.passed='true';
+} catch(error) {
+  out.textContent=error.stack||String(error);
+  document.body.dataset.passed='false';
+} finally {
+  interop?.dispose();
+  renderer?.dispose();
+}
+</script></html>
