@@ -37,8 +37,8 @@ button.onclick=async()=>{
   async function warm(){for(let i=0;i<64;i+=4)engine.sample({batchSpp:4,targetSpp:64,seed:42});await device.queue.onSubmittedWorkDone();engine.reset();await device.queue.onSubmittedWorkDone();}
   async function reference(seed){engine.reset();await device.queue.onSubmittedWorkDone();const started=performance.now();for(let i=0;i<referenceSpp;i+=4){engine.sample({batchSpp:4,targetSpp:referenceSpp,seed});if(i%128===0)await device.queue.onSubmittedWorkDone();}await device.queue.onSubmittedWorkDone();const renderMs=performance.now()-started;return {...await image(),renderMs,spp:engine.spp};}
   async function trial(seed,budget){
-   engine.reset();await device.queue.onSubmittedWorkDone();const started=performance.now();let batches=0,batchCalls=8;
-   do{const chunkStart=performance.now();for(let i=0;i<batchCalls;i++){engine.sample({batchSpp:4,targetSpp:0,seed});batches++;}await device.queue.onSubmittedWorkDone();const elapsed=performance.now()-started,chunkMs=performance.now()-chunkStart;batchCalls=Math.max(1,Math.min(16,Math.floor((budget-elapsed)/Math.max(.01,chunkMs)*batchCalls)));}while(performance.now()-started<budget);
+   engine.reset();await device.queue.onSubmittedWorkDone();const started=performance.now();let batches=0,batchCalls=8;const sampleBatch=width>=192?1:4;
+   do{const chunkStart=performance.now();for(let i=0;i<batchCalls;i++){engine.sample({batchSpp:sampleBatch,targetSpp:0,seed});batches++;}await device.queue.onSubmittedWorkDone();const elapsed=performance.now()-started,chunkMs=performance.now()-chunkStart;batchCalls=Math.max(1,Math.min(16,Math.floor((budget-elapsed)/Math.max(.01,chunkMs)*batchCalls)));}while(performance.now()-started<budget);
    const renderMs=performance.now()-started,spp=engine.spp,lastGpuBatchMs=engine.computeMs;track();const readStart=performance.now(),im=await image();
    return {...im,seed,budget,renderMs,spp,batches,lastGpuBatchMs,readbackMs:performance.now()-readStart};
   }
