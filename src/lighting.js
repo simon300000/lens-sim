@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { uniform, mix, vec3, vec4, normalize, positionWorld, positionLocal, cameraPosition, cameraProjectionMatrix, cameraViewMatrix, dot, smoothstep, pow, max, normalWorld, normalLocal, mx_noise_float } from 'three/tsl';
 import { computeCelestialState } from './astronomy.js';
 import { rng } from './kit.js';
+import { setLensRole } from './scene/lens-registry.js';
 
 // Every photometric source uses the same normalization. This keeps half-float
 // render targets finite while preserving the Sun/Moon/lamp brightness ratios.
@@ -64,7 +65,8 @@ function stars(scene, parameters) {
   material.colorNode=vec3(1,1,1).mul(parameters.starLuminance);
   material.vertexNode=cameraProjectionMatrix.mul(cameraViewMatrix).mul(vec4(positionLocal.add(cameraPosition),1));
   const mesh=new THREE.Points(geometry,material);mesh.name='Procedural night stars';mesh.renderOrder=-5;
-  mesh.frustumCulled=false;
+  mesh.frustumCulled=false;setLensRole(mesh,'environment-stars');
+  mesh.userData.starRadius=218;
   scene.add(mesh);return mesh;
 }
 
@@ -80,7 +82,7 @@ function moon(scene, parameters) {
   const albedo=smoothstep(.28,.72,maria).mul(.32).add(.52).add(detail);
   material.colorNode=vec3(.95,.93,.86).mul(albedo).mul(lightFacing).mul(parameters.moonDiscLuminance);
   const mesh=new THREE.Mesh(new THREE.SphereGeometry(1,32,20),material);
-  mesh.name='Moon with true illuminated limb';mesh.frustumCulled=false;scene.add(mesh);return mesh;
+  mesh.name='Moon with true illuminated limb';mesh.frustumCulled=false;setLensRole(mesh,'environment-moon');scene.add(mesh);return mesh;
 }
 
 /** Accurate ephemerides + calibrated clear-sky rendering; no downloaded HDR. */
@@ -98,7 +100,7 @@ export function createDaylight(scene, renderer, {details,invalidate=()=>{}}={}) 
     moonDirection:uniform(new THREE.Vector3()),moonRadius:uniform(1),
   };
   const sky=new THREE.Mesh(new THREE.SphereGeometry(230,48,24),skyMaterial(parameters));
-  sky.name='Procedural atmosphere';sky.renderOrder=-10;scene.add(sky);
+  sky.name='Procedural atmosphere';sky.renderOrder=-10;setLensRole(sky,'environment-sky');scene.add(sky);
   const starsMesh=stars(scene,parameters),moonMesh=moon(scene,parameters);
   const environmentScene=new THREE.Scene();
   environmentScene.add(new THREE.Mesh(sky.geometry,skyMaterial(parameters)));
@@ -171,6 +173,7 @@ export function createDaylight(scene, renderer, {details,invalidate=()=>{}}={}) 
     refreshEnvironment();
     return state;
   }
-  return {update,refreshEnvironment,sun,moon:moonLight,moonMesh,sky,parameters,
+  return {update,refreshEnvironment,sun,moon:moonLight,moonMesh,starsMesh,sky,bounce,parameters,
+    get environmentTarget(){return environmentTarget;},
     getState:()=>state,dispose(){environmentTarget?.dispose();pmrem.dispose();}};
 }

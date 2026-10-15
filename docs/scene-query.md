@@ -1,80 +1,103 @@
-# Single-layer scene-radiance query
+# 场景查询：几何首交点 + 实时光照（V2）
 
-`scene-radiance.wgsl` is the bounded scene segment of the hybrid renderer. It does
-not trace the villa's triangles. Its inputs are an unexposed linear-HDR beauty
-texture and its aligned non-MSAA WebGPU depth texture from one capture version.
-The optical segment supplies a real displaced world-space ray origin, not just
-a direction. World distances are metres; lens-local millimetres must be converted
-at the optical/world boundary. The capture camera's `matrixWorldInverse`,
-`projectionMatrix * matrixWorldInverse`, and its inverse are column-major.
-WebGPU NDC z is [0,1]; texture row zero is at the top, so NDC y is negated once.
+镜头模式（B）不再查询任何屏幕颜色/深度图。每条通过真实镜组的出射光线：
 
-The implementation clips the finite world ray to the capture frustum, then
-steps its projection with perspective-correct `Q = worldPosition / clip.w` and
-`k = 1 / clip.w` interpolation. A depth slab crossing triggers eight bounded
-world-space secant refinements. A fronto-parallel layer has a linear depth gap,
-so the first secant evaluation recovers its intersection. The maximum is 128
-projected intervals plus eight refinements. At very large projected extent the
-bounded budget increases stride; subpixel features can be missed. The fixed
-depth tolerance (default 0.03 m) is a screen-space approximation, not an optical
-surface tolerance. Abrupt layer changes greater than max(0.15 m,5% depth) return
-cache miss rather than constructing a surface between unrelated depth samples.
-Colour is fetched from the same nearest texel as depth to avoid blending across
-occlusion boundaries. There is no UV clamp, hole filling, ray reissue or success
-normalization. The derivation of projective stepping follows
-[McGuire and Mara, JCGT 3(4), 2014](https://jcgt.org/published/0003/04/04/);
-this is an independently written variant, not copied source code.
+```
+像素/口径/波长采样 → 反向追迹真实镜组 → 世界射线
+  → SceneIntersector：两级 BVH 求最近有效交点（真实注册几何）
+  → SurfaceRadianceEvaluator：在该交点重建表面属性、按材质和灯光着色
+  → （有界）透明层沿同一射线继续
+  → 既有 RGB→光谱→XYZ 与 f32 累计
+```
 
-Texture coordinates occupy an open upper boundary. After homogeneous clipping,
-the exact entry point can round to UV=1 even though the later ray is covered.
-The query advances the same ray into the clipped segment by a numerical inset
-of `32 * f32_epsilon * max(1 m, |origin|, |entry|)`, bounded to 0.01% of the
-clipped interval; the exit is similarly inset when clipped. This retains the
-same optical ray, never clamps UV and never turns an actual side exit into
-background. A real Canon FL 50mm f/1.8 f/4 reverse-ray regression reproduced
-53 false boundary misses among 492 physical passes before this correction.
+光栅只负责：纯光栅导航视图、太阳/月亮/灯具阴影贴图、PMREM 环境、水面平面反射，以及最终显示。镜头 compute 在同一 `GPUDevice` 上直接读取这些纹理，不经 CPU。
 
-`SceneQueryParameters` is a 272-byte uniform struct, in this order:
+这不是完整路径追踪：没有场景多次漫反射、没有通用 GI、没有镜内鬼影或衍射。
 
-| Field | Meaning |
+## 模块
+
+| 模块 | 作用 |
 | --- | --- |
-| worldToClip, clipToWorld, worldToView | Three mat4, 192 bytes |
-| viewport | width, height, near metres, far metres |
-| trace | max distance metres, slab metres, pixels/step, max steps <=128 |
-| skyZenith, skyHorizon, skyGround | scene-linear RGB directional fallback, vec4 each |
+| `src/scene/lens-registry.js` | 显式注册：天空/月亮/星空为环境对象（不作遮挡几何）；程序材质描述符。不按名称猜测。 |
+| `src/scene/procedural-params.js` | 木纹、草地色变、水面的唯一常量来源；TSL 光栅图与生成的 WGSL 常量都读它。 |
+| `src/scene/scene-extract.js` | 场景 → 类型化数组（复制属性，不 detach Three 的几何）：每个 (geometry, group, drawRange) 一个 BLAS 源；每个 Mesh/实例一条实例记录；材质分类与不支持原因。 |
+| `src/scene/bvh-builder.js` | 分箱 SAH（16 bins，三轴），f64 构建、f32 向外取整的保守包围盒；BLAS 叶 ≤4 三角形，TLAS 叶恰好 1 个实例；打包 GPU 缓冲。 |
+| `src/scene/bvh-worker.js` | 在 Worker 中构建，按 key 缓存 BLAS 与源数据，实例变化只重建 TLAS。 |
+| `src/scene/scene-reference.js` | 仅测试用的 f64 暴力求交和打包 BVH 的 JS 遍历仿真。不是运行时后备。 |
+| `src/rendering/scene-intersector.wgsl` | 可移植 compute 两级遍历（不假定硬件 rayQuery / RT Core）。 |
+| `src/rendering/scene-shading.wgsl` | 材质、灯光、阴影、PMREM、天空/月亮/星空、雾、水面、透明合成。 |
+| `src/rendering/scene-resources.js` | BVH/材质表 GPU 生命周期、限额检查、变化检测。 |
+| `src/rendering/lighting-resources.js` | 唯一接触 Three 阴影/PMREM/反射渲染目标的桥接模块；版本与格式检查；灯光 uniform。 |
 
-The host declares `captureColor: texture_2d<f32>`,
-`captureDepth: texture_depth_2d`, and `sceneUniform: SceneQueryParameters`.
-The shader defines
-`queryScene(originWorld:vec3<f32>, directionWorld:vec3<f32>) -> SceneQueryResult`.
-The result contains `rgb`, `position`, and `status`:
+## BVH 组织与数值
 
-| Value | Status | Meaning |
+* **实例化**：同一几何的所有实例共享一个 BLAS；草叶、树叶、针叶、木板等不展开为重复三角形。TLAS 以每实例的世界 AABB 构建（含 4e-6×|坐标| 的填充，覆盖 f32 世界→物体矩阵的舍入），叶节点只含一个实例，所以密集植被不会出现一个叶子挂海量实例；完全重合的实例按数量对半分，深度仍受控。
+* **节点**：32 字节 `{lo, a, hi, b}`；叶子 `b = 0x80000000 | count`。TLAS 在前，BLAS 依次追加，索引已重定位。
+* **变换**：射线用存储的 3×4 世界→物体矩阵变换到实例局部，**不归一化**局部方向，因此 t 在世界和局部空间含义相同。法线用 `(W2O)ᵀ n`（逆转置）。正面判定 `dot(局部几何法线, 局部方向) < 0` 与世界空间判定恒等，对负缩放同样成立（测试覆盖）。注：Three 光栅对 InstancedMesh 只按 `matrixWorld` 的行列式翻转卷绕，实例矩阵为负行列式时其光栅剔除与本实现不同；当前场景实例的负行列式数量经提取统计为 0。
+* **最近交点**：遍历按子节点入口距离近先远后，并在出栈时剔除入口距离 > 当前最近 t 的节点；绝不在首个交点处提前返回。
+* **三角形**：watertight 射线三角形求交（Woop, Benthin, Wald, JCGT 2013，独立实现），共享边不漏；包围盒出口 t 乘 `1+2γ₃`（Ize 2013）。
+* **数值保护**：方向分量 |d|<1e-30 替换为 ±1e-30 以避免 0·∞；非有限输入射线、栈溢出（栈 64，构建时验证 TLAS 深度 + 最大 BLAS 深度 ≤ 64）、节点/实例/三角形越界、叶子计数异常、访问节点超过 1,048,576 次，都返回 `BVH_TRAVERSAL_ERROR`，绝不当作背景。运行时只要该错误率 > 0 就停止累计并显示。
+* **剔除规则**：FrontSide 只接受正面，BackSide 只接受背面，DoubleSide 两面都接受；背面命中的着色法线按 Three 的 `directionToFaceDirection` 翻转。
+
+## 状态
+
+| 代码 | 名称 | 含义 |
 | --- | --- | --- |
-| 4 | SCENE_HIT | Actual query ray's visible-layer depth-slab intersection |
-| 5 | SCENE_BACKGROUND | Entire in-frustum segment is clear depth; capture sky RGB |
-| 6 | SCENE_CACHE_MISS | Outside coverage, hidden layer, edge discontinuity, invalid or unresolved segment |
+| 1 | OPTICAL_BLOCKED | 镜组物理遮挡：零贡献，计入尝试，跳过场景求交 |
+| 2 | OPTICAL_TIR | 全反射：同上 |
+| 3 | OPTICAL_NUMERICAL_ERROR | 镜组数值失败 |
+| 4 | SCENE_HIT | 真实表面（可能经过透明层） |
+| 5 | SCENE_BACKGROUND | 无表面：解析环境（天空、太阳盘、星、月） |
+| 7 | SCENE_UNSUPPORTED | 命中未支持材质：贡献 0 并计数，不涂成灰色 |
+| 8 | BVH_TRAVERSAL_ERROR | 实现/数值错误（见上） |
+| 9 | TRANSPARENCY_LIMIT | 同一射线超过 6 个透明层：贡献 0 并计数，不用任意背景补色 |
 
-The existing sky material has `depthWrite:false` (`src/lighting.js`), so its
-background clear depth is 1. An in-cache background query preserves actual
-capture sky/star/solar colour. Missing coverage uses a deterministic linear-HDR
-zenith/horizon/ground approximation. It must be counted as missing coverage,
-never as optical blockage or a naturally black lens corner. A finite max-distance
-cutoff limits what can be queried, independently of actual image-circle size.
+另计：无效辐亮度（NaN/负值）、水面反射查找落在参考视野外（近似诊断）、穿过的透明层数。
 
-The host must expand the capture **frustum**, not only its texture resolution,
-and report uncovered rays. It must use matching capture revisions and reset
-optical accumulation when capture content changes. Wider/fisheye lenses may
-exceed this cache even with guard band. One central layer cannot recover surfaces
-hidden from the central capture, correct arbitrary ray-dependent mirror/water
-radiance or transparent layers, or promise accurate foreground occlusion blur.
-The pre-existing water/reflections are retained as central-view approximations.
-Normal data may be captured by the host for other purposes; this provider does
-not claim a normal-based material/light re-evaluation.
+## 材质（显式注册，覆盖当前场景）
 
-`scene-query-reference.js` is a small CPU f64 numerical test oracle, not an
-alternate user-facing renderer. `node --test tests/scene-query.test.mjs` checks
-near/far and y orientation, non-centred origins, independent depths, HDR values,
-discontinuities, background/miss separation, bounds and world camera transforms.
-GPU validation and capture scheduling are integration responsibilities and are
-not established by those CPU tests alone.
+当前场景经提取：443 个 Mesh、264,078 个实例、279 个 BLAS、103,879 个基础三角形（展开后 3,399,513）、127 种材质；全部为 `MeshStandardNodeMaterial`，另有 1 个 `MeshPhysicalNodeMaterial`（水）。53 个非索引几何、0 个多材质 groups、0 个负行列式、19 个顶点色材质、33 个实例色 InstancedMesh；**没有任何图片纹理、alphaTest 或 alpha 卡片**——叶片与草叶都是真实几何，保持原样。
+
+支持：基础色 × 顶点色（`vertexColors` 且几何有 color）× 实例色；自发光（color×intensity，含 HDR）；metalness/roughness（`max(0.0525)`）；Physical 的 ior/specular 与 clearcoat；FrontSide/BackSide/DoubleSide；透明混合（Normal blending）。
+
+程序材质：
+
+* **木纹**（`woodMat`）：在 `positionLocal`（InstancedMesh 为实例矩阵后的坐标，与 Three 的 InstanceNode 一致）上求 MaterialX Perlin 噪声、纹理颜色与粗糙度。光栅用屏幕导数（dFdx/dFdy）做表面梯度凹凸；compute 改为在交点求高度场的空间梯度：颗粒项解析求导，噪声项用噪声晶格单位 h = 1/1024 的中心差分（截断误差 ~1e-6），再按局部→世界的逆转置变换到世界并投影到表面：`N' = normalize(N − (g − N(N·g)))`，与 Mikkelsen 表面梯度公式等价。单位：高度为米。
+* **草地色变**：`noise(positionWorld × (2.5,1,2.5)) × 0.065 + 0.95`。
+* **水面**：程序波纹 → 切线空间法线（平面 uv=(x,−z)，T=+x，B=−z）；clearcoat；自发光 = 平面反射纹理 × Fresnel(wo) × 2.2；不透明度 0.35。
+
+MaterialX 噪声逐行移植（哈希、梯度、fade、trilerp、0.982 缩放），光栅/compute 对照误差 ~0.1%。未支持特性（非 Standard/Physical 类型、图片纹理、alphaTest/alphaHash、transmission/sheen/iridescence/anisotropy、非 Normal 混合、flatShading/wireframe、没有描述符的自定义节点）在提取报告和 UI 中列出。
+
+纹理过滤：场景没有图片纹理，因此不存在 albedo mip 选择问题。compute 中只对 PMREM（按粗糙度选 cubeUV 层，与 Three 相同）、平面反射（level 0，与光栅相同，反射目标无 mip）使用显式 `textureSampleLevel`。不把散景直径当作纹理 footprint。程序纹理在每条路径的真实交点处点采样，像素内与口径上的多次采样自然完成积分。
+
+## 光照
+
+* **直接光**：方向光（太阳、月亮）与点光源，Three r183 `PhysicalLightingModel` 的 Lambert + GGX（Smith 相关可见性、Schlick Fresnel、多重散射补偿、DFG LUT 逐值复制）；点光距离衰减与截止同 `getDistanceAttenuation`。默认不发场景阴影射线。
+* **阴影**：读取 Three 生成的阴影贴图。方向光：`light.shadow.matrix`（WebGPU z∈[0,1]），`normalBias` 沿着色法线偏移，`y → 1−y`，`z + bias`，视锥外为 1；PCFSoft 9 项公式在 compute 中写成等价的 4×4 可分离加权和（权重 1−f,1,1,f），同一比较采样器（less-equal，线性）。点光：立方体深度纹理（`CubeDepthTexture`，6 层），WebGPU 下方向 y 取反，`viewZToPerspectiveDepth + bias`，5 点 Vogel 盘；光栅用屏幕交错梯度噪声旋转，镜头路径用每样本无状态哈希旋转。启用阴影但有接收体时贴图缺失 → 显式错误，不静默变成无阴影。灯光 layers：点光阴影相机只渲染第 1 层（别墅、细节），由光栅决定，compute 只读结果。
+* **环境**：半球光 irradiance + PMREM（cubeUV 布局逐行移植，非普通 cubemap）的镜面 radiance 与 `π×` irradiance，漫反射/镜面分别按 Three 的公式拆分，不重复叠加。方向相关项用真实交点法线和实际 wo。
+* **AO**：GTAO 只用于光栅导航。镜头模式没有等价 AO，环境项不乘屏幕 AO（差异：凹角与接触处镜头图像的间接光比光栅亮）。不为此增加射线。
+* **几何粗糙度**：Three 用屏幕空间法线导数增加粗糙度（`getGeometryRoughness`），compute 路径没有像素导数，不实现；弯曲金属面的高光与光栅存在差异（对照测试：曲面金属球中位误差 6%，平面金属板 < 2%）。
+* **雾**：FogExp2 按真实路径长度 t 计算（光栅用视深）；光轴上相同，离轴略强。天空/星/月不加雾，与原材质一致。
+* **天空/太阳/月亮/星空**：注册为环境对象。天空按射线方向求原天空着色公式（含云噪声、太阳盘）；光栅天空是以原点为心、半径 230 m 的球，存在极小视差。月亮为解析球（原相机跟随网格，含月相、月海噪声、地平线不透明度）。星空：1100 颗星按方向栅格查找，每颗为固定角半径 4.6×10⁻⁴ rad 的圆盘，亮度等于光栅精灵值（光栅星是屏幕空间 1.25 px 精灵，没有物理角尺寸；该半径为 1080 px 高、40° 参考视野下的等面积值）。静止累计期间灯光/天空参数只在光照 revision 时写入，累计中不会漂移。
+
+## 透明与水面
+
+透明混合表面（水、玻璃、锦鲤鳍、竹水流、涟漪）沿**同一射线**由前到后合成：`L += T·a·C；T *= 1−a`，下一层 tMin = t + 1e-4 + 2e-6·t（排除同一表面及共享边上的重复）。最多 6 层，超限为 `TRANSPARENCY_LIMIT`。不模拟折射（水下物体位置为直线视线）。水面反射为**参考视点平面反射近似**：用主相机投影交点取反射纹理（与光栅相同的 `screenUV.flipX` + 波纹偏移），交点在主相机视野外时 clamp 采样并单独计数；它不是正确的反射光线追踪。
+
+## 调度与失效
+
+| 变化 | 镜头侧动作 |
+| --- | --- |
+| 几何拓扑 | 只重建该几何 BLAS + TLAS（Worker） |
+| 物体/实例变换、实例色、可见性 | 只重建 TLAS；BLAS 复用（主线程不再复制已缓存几何属性） |
+| 材质参数 | 只重写材质表 |
+| 灯光/时间 | 光栅刷新阴影/PMREM（daylight 已做）；镜头侧刷新灯光 uniform、材质表（自发光强度），清空累计；不动 BVH |
+| 相机姿态 | 一次资源刷新渲染（16×11 目标，像素不被读取；用于反射目标/姿态），清空累计；不动 BVH |
+| 镜头/对焦/光圈 | 只更新光学 uniform 并清空累计 |
+| 曝光、Bloom、HDR/SDR | 只重新显示 |
+
+静止累计时每批只提交镜头/首交点/着色 compute 和显示。AF-S 沿当前镜头参考主光线求 BVH 交点，规则：第一个**不透明**表面；透明层被穿过并计数；背景 → ∞；BVH 错误或透明层超限 → 失败且不改焦点；结果带 geometry/optics/camera revision，过期结果丢弃。
+
+## 已移除
+
+旧的单层 RGB/深度屏幕查询（`scene-radiance.wgsl`、`raster-cache.js`、`scene-query-reference.js` 及其测试）已删除，不保留为隐式后备；镜头 WGSL 中不存在屏幕颜色/深度纹理绑定。

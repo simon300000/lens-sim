@@ -22,7 +22,7 @@ The default remains `canon-fl-50mm-f1-8`, configuration 0. Preflight agrees exac
 
 ## Capture and aperture warnings
 
-The current capture implementation expands the **view frustum**, using `max(50°, 1.6 × nominal horizontal FOV + 10°)` up to a **140°** horizontal pinhole cap. Preflight estimates the nominal field from focal length and the 36×24 mm sensor. **229** accepted configurations exceed that requested guard-band range and receive an explicit `SCENE_CACHE_MISS` warning. This is only a paraxial estimate, not a traced image-circle or fisheye coverage proof; aberrated rays can still leave the cache. A cache miss is never reclassified as lens blockage or described as a natural black corner.
+V2 removed the screen-capture scene query: every optical path is intersected with the registered scene BVH, so there is no capture guard band, no capture-FOV warning and no `SCENE_CACHE_MISS` status (the former 229 capture-limited warnings no longer exist). A scene miss is `SCENE_BACKGROUND` (analytic sky); it is never reclassified as lens blockage or described as a natural black corner.
 
 When upstream `fmode` explicitly denotes image height (`height`), a declared maximum image height below the sensor half-diagonal yields a separate field-data warning. A declared angle is not silently interpreted as millimetres. This metadata does not apply an artificial image-circle crop.
 

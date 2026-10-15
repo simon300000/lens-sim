@@ -7,7 +7,7 @@ const F32_MIN_NORMAL = 1.1754943508222875e-38;
  * Uses the same scalar setup as packLens, but never allocates glass LUTs.
  */
 export function preflightLens(lens, options = {}) {
-  const { sensorMm = [36, 24], captureMaxHorizontalFovDeg = 140 } = options;
+  const { sensorMm = [36, 24] } = options;
   // The supplied configuration's final thickness is authoritative. Finite
   // native conjugates may include sensor cover glass and cannot be moved to an
   // arbitrary 20 m paraxial focus without crossing that fixed rear structure.
@@ -60,10 +60,6 @@ export function preflightLens(lens, options = {}) {
     const stopRadiusMm = Math.abs(limits.focalLengthMm * limits.pupilMagnification) / (2 * fNumber);
     for (const [field, value] of Object.entries({ sensorZMm, stopRadiusMm, radiusMm: region.radiusMm, areaPdf: region.areaPdf })) f32(value, field);
     if (!(region.radiusMm > 0 && region.areaPdf > 0 && stopRadiusMm > 0)) throw new Error('后部采样区域或光阑退化');
-    const nominalHorizontalFovDeg = 2 * Math.atan(sensorMm[0] / (2 * Math.abs(paraxial.focalLengthMm))) * 180 / Math.PI;
-    const requestedGuardFovDeg = Math.max(50, nominalHorizontalFovDeg * 1.6 + 10);
-    const captureLimited = requestedGuardFovDeg > captureMaxHorizontalFovDeg;
-    if (captureLimited) warnings.push(`捕获范围限制：近轴估计的保护视场 ${requestedGuardFovDeg.toFixed(1)}° 超过当前 ${captureMaxHorizontalFovDeg}° 水平缓存上限；画外查询记为 SCENE_CACHE_MISS，不能解释为镜头黑角。`);
     const extent = lens.metadata?.fieldExtent;
     if (lens.metadata?.fieldMode === 'height' && Number.isFinite(extent) && extent > 0 && extent < Math.hypot(...sensorMm) / 2 - .01) {
       warnings.push(`上游声明最大像高 ${extent} mm，小于 ${sensorMm.join('×')} mm 传感器半对角线；该记录未提供完整画幅像圈保证。`);
@@ -73,9 +69,7 @@ export function preflightLens(lens, options = {}) {
     warnings.push('此配置通过静态打包、近轴与采样域预检，尚不代表逐镜头 GPU 成像或所有物距/光圈已验证。');
     return { ...result, supported: true, reason: null, initialSensorZMm: sensorZMm,
       initial: { fNumber, sensorZMm, imageDistanceMm: sensorZMm - lens.lastVertexZMm, stopRadiusMm,
-        focalLengthMm: paraxial.focalLengthMm, samplingRadiusMm: region.radiusMm, samplingAreaPdf: region.areaPdf },
-      capture: { nominalHorizontalFovDeg, requestedGuardFovDeg, maximumHorizontalFovDeg: captureMaxHorizontalFovDeg, limited: captureLimited,
-        estimate: 'paraxial horizontal FOV, not traced image-circle coverage' } };
+        focalLengthMm: paraxial.focalLengthMm, samplingRadiusMm: region.radiusMm, samplingAreaPdf: region.areaPdf } };
   } catch (error) {
     return { ...result, reason: error.message };
   }

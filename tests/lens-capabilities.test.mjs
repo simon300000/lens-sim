@@ -83,11 +83,11 @@ test('missing physical aperture remains a warning, not fictitious clipping or un
   assert.ok(result.warnings.some(w => w.includes('不是已知物理通光范围')));
 });
 
-test('capture guard-band limits are warnings and never optical blockage', () => {
-  const result = preflightLens(canonical(), { captureMaxHorizontalFovDeg: 30 });
+test('preflight no longer carries screen-capture coverage warnings (scene queries use the BVH)', () => {
+  const result = preflightLens(canonical());
   assert.equal(result.supported, true);
-  assert.equal(result.capture.limited, true);
-  assert.ok(result.warnings.some(w => w.includes('SCENE_CACHE_MISS') && w.includes('不能解释为镜头黑角')));
+  assert.equal(result.capture, undefined);
+  assert.ok(!result.warnings.some(w => w.includes('SCENE_CACHE_MISS') || w.includes('捕获范围')));
 });
 
 test('declared image height and untouched upstream warning/vignette metadata are distinct', () => {
@@ -113,7 +113,7 @@ test('unsupported types and invalid media cannot pass capability check even if a
 
 test('library capability count distinguishes parser acceptance from supported initial GPU setup', async () => {
   const directory = new URL('../vendor/lens-bench/data/lenses/', import.meta.url);
-  let parserAccepted = 0, preflightAccepted = 0, rejected = 0, limited = 0;
+  let parserAccepted = 0, preflightAccepted = 0, rejected = 0;
   for (const file of (await fs.readdir(directory)).filter(f => f.endsWith('.json'))) {
     const record = JSON.parse(await fs.readFile(new URL(file, directory), 'utf8'));
     for (const status of inspectLensRecord(record, catalog).configurations) {
@@ -121,13 +121,12 @@ test('library capability count distinguishes parser acceptance from supported in
       parserAccepted++;
       const result = preflightLens(adaptLensRecord(record, catalog, { configurationIndex: status.index }));
       assert.equal(result.gpuValidated, false);
-      if (result.supported) { preflightAccepted++; if (result.capture.limited) limited++; }
+      if (result.supported) preflightAccepted++;
       else { rejected++; assert.ok(result.reason); }
     }
   }
   assert.equal(parserAccepted, 1845);
   assert.equal(preflightAccepted, 1820);
   assert.equal(rejected, 25);
-  assert.equal(limited, 229);
-  console.log(`Pinned library: ${parserAccepted} parsed, ${preflightAccepted} static-preflight accepted, ${rejected} initial-setup unavailable, ${limited} capture-limited warnings; not GPU image validation.`);
+  console.log(`Pinned library: ${parserAccepted} parsed, ${preflightAccepted} static-preflight accepted, ${rejected} initial-setup unavailable; not GPU image validation.`);
 });

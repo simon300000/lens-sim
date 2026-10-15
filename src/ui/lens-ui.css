@@ -195,6 +195,13 @@ body[data-night="true"] .lens-ui input[type="range"]::-moz-range-thumb{border-co
 .lu-warnings{list-style:none;margin:6px 0 0;padding:0;max-height:96px;overflow-y:auto}
 .lu-warnings li{position:relative;padding:3px 0 3px 14px;font-size:10px;line-height:1.4;color:var(--lu-warn)}
 .lu-warnings li::before{content:"!";position:absolute;left:0;top:3px;width:10px;height:10px;border-radius:50%;background:var(--lu-warn-bg);font:700 8px/10px sans-serif;text-align:center}
+/* V2: lens mode name, real scene/BVH preparation state and lens-image blockers */
+.lu-scene[data-scene="pending"],.lu-scene[data-scene="building"]{color:var(--lu-warn)}
+/* Ready is routine: keep it to one line (full message in the tooltip). Building/error text wraps and is never cut. */
+.lu-scene[data-scene="ready"]{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lu-scene-warn{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px}
+.lu-scene-warn li{display:block;margin:0;padding:5px 8px;font-size:10px;line-height:1.4;overflow-wrap:anywhere}
+.lu-details .lu-btn{margin:0 0 10px}
 
 /* Collapsible technical sections */
 .lu-details{border-bottom:1px solid var(--lu-line)}
@@ -210,7 +217,7 @@ body[data-night="true"] .lens-ui input[type="range"]::-moz-range-thumb{border-co
 .lu-rate-label{color:var(--lu-muted)}
 .lu-rate-bar{height:4px;border-radius:2px;background:var(--lu-line);overflow:hidden}
 .lu-rate-fill{display:block;height:100%;width:0;background:var(--lu-fill)}
-.lu-rate[data-rate="cacheMissRate"] .lu-rate-fill{background:var(--lu-warn)}
+.lu-rate:is([data-rate="unsupportedRate"],[data-rate="transparencyLimitRate"],[data-rate="bvhErrorRate"],[data-rate="radianceInvalidRate"]) .lu-rate-fill{background:var(--lu-warn)}
 .lu-rate-value{text-align:right;font-variant-numeric:tabular-nums}
 .lu-dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0 0 10px;font-size:10px}
 .lu-dl dt{color:var(--lu-muted)}

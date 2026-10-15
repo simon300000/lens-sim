@@ -14,7 +14,16 @@ export const RECOVERY_COMMANDS = new Set(['setMode', 'selectLens', 'selectConfig
 export const OPTICS_COMMANDS = new Set(['selectLens', 'selectConfiguration', 'setFNumber', 'setFocusDistance',
   'setImageDistance', 'autofocus', 'setDispersion']);
 
-export const DIAGNOSTIC_LABELS = { beauty: '成像', 'cache-miss': '缓存未命中', status: '路径状态' };
+export const DIAGNOSTIC_LABELS = { beauty: '成像', 'scene-error': '场景错误分布', status: '路径状态',
+  'geometry-depth': '几何深度', 'geometry-normal': '世界法线', 'geometry-material': '材质 ID' };
+/** These accumulate per-path debug values, so switching to/from them restarts accumulation (backend rule). */
+export const GEOMETRY_DIAGNOSTICS = ['geometry-depth', 'geometry-normal', 'geometry-material'];
+/** One-line colour keys, matching the backend's resolve/accumulate encodings (docs/ui-handoff.md V2). */
+export const DIAGNOSTIC_LEGENDS = {
+  'scene-error': 'R=BVH错误/透明层超限 · G=未支持材质 · B=水面反射出参考视野 · 黑=无',
+  status: 'R=数值失败 · G=镜头遮挡/全反射 · B=场景命中',
+  'geometry-depth': '亮=近 exp(-t/15 m)', 'geometry-normal': '世界法线×0.5+0.5', 'geometry-material': '材质 ID 哈希色',
+};
 export const OUTPUT_LABELS = { auto: '自动', sdr: 'SDR' };
 export const ACTUAL_OUTPUT_LABELS = { hdr: 'HDR', 'sdr-tone-mapped': 'SDR 色调映射', pending: '待定' };
 export const STATUS_LABELS = { loading: '加载中', ready: '就绪', error: '错误' };
@@ -22,7 +31,8 @@ export const AF_LABELS = { idle: '待命', busy: '对焦中…', success: '已�
 /** Multiples of 3 only: the engine snaps width to 3n so the 3:2 height stays an integer. */
 export const RESOLUTION_PRESETS = [240, 360, 480, 600, 720, 960, 1200, 1800, 2400, 3000, 4500, ...CAMERA_WIDTHS];
 export const SPP_PRESETS = [0, 1, 4, 16, 64, 256, 1024, 4096];
-export const HIGH_CACHE_MISS = 0.1;
+/** Fraction of paths that passed the lens; above this the transparency-layer cap is reported. */
+export const TRANSPARENCY_LIMIT_WARN = 0.001;
 
 export function stepsForFNumber([min, max] = [1.8, 22]) {
   if (!(finite(min) && finite(max) && min > 0 && max >= min)) return [];
@@ -95,7 +105,7 @@ export function formatRate(rate) {
   return `${percent.toFixed(percent < 10 ? 2 : 1)}%`;
 }
 
-export const formatMs = (ms) => (finite(ms) ? `${ms < 10 ? ms.toFixed(2) : ms.toFixed(1)} ms` : '未测量');
+export const formatMs = (ms) => (finite(ms) ? `${ms < 10 ? ms.toFixed(2) : ms.toFixed(1)} ms` : '—');
 
 export function formatBytes(bytes) {
   if (!finite(bytes) || bytes <= 0) return '—';
@@ -163,10 +173,48 @@ export function describeView(state) {
   if (state.status === 'error') return { tone: 'error', text: state.mode === 'lens' ? '镜头后端错误 · 非镜头成像' : '镜头后端错误 · 光栅近似' };
   if (state.mode !== 'lens') return { tone: 'raster', text: '光栅近似预览（非镜头成像）' };
   const { spp = 0, targetSpp = 0, paused = false } = state.sampling || {};
-  if (!(spp > 0)) return { tone: 'busy', text: paused ? '镜头追迹 · 已暂停，尚无样本' : '镜头追迹 · 等待首批样本' };
+  if (!(spp > 0)) {
+    // The backend cannot sample before the BVH is ready: say why instead of "waiting".
+    const scene = state.scene?.status;
+    if (scene === 'error') return { tone: 'error', text: '镜头追迹 · 场景准备失败，无样本' };
+    if (scene === 'pending' || scene === 'building') return { tone: 'busy', text: '镜头追迹 · 场景准备中，尚无样本' };
+    return { tone: 'busy', text: paused ? '镜头追迹 · 已暂停，尚无样本' : '镜头追迹 · 等待首批样本' };
+  }
   const progress = targetSpp===0?`${formatCount(spp)} spp · 持续采样`:`${formatCount(spp)}/${formatCount(targetSpp)} spp`;
   if (paused) return { tone: 'lens', text: `镜头追迹 · ${progress} · 已暂停` };
   return { tone: 'lens', text: `镜头追迹 · ${progress}${targetSpp>0&&spp >= targetSpp ? ' · 完成' : ''}` };
+}
+
+/** Real scene/BVH preparation state; there is no percentage, so none is shown. */
+export function describeScene(scene) {
+  const status = scene?.status || 'pending';
+  const message = scene?.message || '';
+  if (status === 'ready') {
+    const instances = scene?.summary?.instances;
+    return { status, text: finite(instances) ? `BVH 就绪 ${formatCount(instances)} 实例` : message || 'BVH 就绪' };
+  }
+  if (status === 'error') return { status, text: `场景准备失败：${message || '原因未提供'}` };
+  if (status === 'building') return { status, text: `场景准备：${message || '构建 BVH…'}` };
+  return { status, text: '场景准备：等待开始' };
+}
+
+/**
+ * Lens-image blockers and quality warnings from real backend values only.
+ * 'error' items stop the lens image (lighting, BVH); 'warn' items are counted zero contributions.
+ */
+export function sceneWarnings(state = {}) {
+  const items = [];
+  for (const text of state.scene?.lighting?.errors || []) items.push({ level: 'error', text: `光照资源错误：${text}` });
+  const unsupported = state.scene?.summary?.unsupported || [];
+  if (unsupported.length) items.push({ level: 'warn', text: `未支持材质（贡献为零）：${unsupported.join('、')}` });
+  const d = state.diagnostics || {};
+  if (d.attemptedSamples > 0 && finite(d.bvhErrorRate) && d.bvhErrorRate > 0) {
+    items.push({ level: 'error', text: `BVH 遍历错误 ${formatRate(d.bvhErrorRate)}（占通过镜头的光线，实现错误）` });
+  }
+  if (d.attemptedSamples > 0 && finite(d.transparencyLimitRate) && d.transparencyLimitRate > TRANSPARENCY_LIMIT_WARN) {
+    items.push({ level: 'warn', text: `透明层超过上限 ${formatRate(d.transparencyLimitRate)}（占通过镜头的光线，贡献为零）` });
+  }
+  return items;
 }
 
 export function samplingText(sampling = {}) {

@@ -33,7 +33,7 @@ npm run preview
 
 场景保持静态。光栅视图按需绘制；镜头视图可累计到目标 spp 后停止，或选择「持续采样（不限 spp）」一直累计；暂停或页面不可见时停止。不支持 WebGPU 时明确显示提示，不会悄悄切换到 WebGL。
 
-## 真实镜头混合渲染器 V1
+## 真实镜头渲染器 V2：几何首交点 + 实时光照
 
 侧边「镜头」面板保留 **A · 光栅近似** 导航/对照，选择 **B · 镜头追迹** 启用实际镜组。每次尝试从 36×24 mm 传感器采样一个像素位置、一个后部参考面圆盘位置和一个连续波长（380–780 nm），反向逐面折射；玻璃采用当前镜头的波长相关 n(λ) LUT，保留全反射、物理孔径裁切和真实通光损失。失败样本不会补发，f32 XYZ 之和始终除以全部尝试次数。不是最终图片的景深或 RGB 位移滤镜。
 
@@ -43,12 +43,12 @@ npm run preview
 - **AF-S / F** 沿实际参考光路取中心深度目标，在 GPU 正向追迹固定光束并归约最佳像面；手动距离与 AF 共用同一调焦状态。∞ 使用平行物方光束。
 - **像距** 是末面顶点至传感器的 mm 距离，可 ±0.01 mm 微调；固定镜组、传感器轴向调焦是首版的等效机构。
 - 可选择持续采样，超过 4096 spp 后仍沿原随机序列继续，保留暂停/继续。目标 spp 提高会继续原序列；曝光、Bloom、HDR/SDR 与诊断视图只改变显示，不重置成像。暂停/继续和重置只控制累计。传感器固定 3:2，通过 letterbox 适配窗口。
-- 分辨率从小尺寸预览扩展到 6000×4000（24 MP）、6720×4480、7362×4908、7953×5302、8256×5504、8688×5792 和 9504×6336（60.2 MP，6100 万级相机）。大图以行块存储并逐块采样，避免单个存储绑定超限；计数按全图完成的 spp 显示。最高尺寸累积和输出约需 3.2 GiB，受 GPU 纹理尺寸及可用内存限制；失败分配保留旧图。源场景仍受单层 RGB/深度捕获分辨率限制。
+- 分辨率从小尺寸预览扩展到 6000×4000（24 MP）、6720×4480、7362×4908、7953×5302、8256×5504、8688×5792 和 9504×6336（60.2 MP，6100 万级相机）。大图以行块存储并逐块采样，避免单个存储绑定超限；计数按全图完成的 spp 显示。每像素累计记录 64 字节（XYZ、尝试数与各状态计数），最高尺寸累计和输出约需 4.0 GiB（4.3 GB），受 GPU 纹理尺寸及可用内存限制；超出适配器限制的尺寸明确拒绝并保留旧图。场景细节不再受任何屏幕捕获分辨率限制：每条路径在真实几何交点处着色。
 - 交互时降到 240×160、1 spp/批，停止后恢复所选分辨率。参数在 buffer 中更新，不逐镜头重编译 shader。只有场景、相机或捕获范围改变才重新光栅捕获。
 
-一个 Three WebGPURenderer / GPUDevice 完成未曝光 HDR beauty + 对齐深度/法线捕获、融合 compute、f32 累计、最终显示。光栅缓存有扩大视锥的 guard band；每条实际出射光线以带 origin 的世界射线做有界、透视正确的深度求交。背景读取已有天空；`SCENE_CACHE_MISS` 使用明确的确定性环境近似并单独计数，不能算镜头挡光。超过光学通过光线的 10% 时界面提示场景查询不可靠，并可查看缺失掩码。显著数值错误会停止累计。
+一个 Three WebGPURenderer / GPUDevice：光栅负责导航视图、太阳/月亮/灯具阴影贴图、PMREM 环境和水面平面反射；镜头 compute 在同一设备上直接读取这些纹理。每条通过镜组的出射光线与**完整注册场景几何**（两级 BVH：每种几何一个共享 BLAS，每个实例一条 TLAS 记录；构建在 Worker 中进行）求最近有效交点，并在该交点按场景材质（含顶点/实例色、金属/粗糙度、程序木纹与凹凸、草地色变、水面）和 Three r183 的物理光照模型着色。透明混合层沿同一射线有界合成。天空、太阳盘、月亮与星空是显式注册的环境对象，按方向解析查询。镜头物理挡光/全反射计零贡献并计入尝试，直接跳过场景求交；场景背景、未支持材质、BVH 遍历错误、透明层超限各自单独计数，不会互相冒充。AF-S 沿当前镜头参考主光线取真实场景的第一个不透明交点。静止累计时只提交镜头 compute 与显示；相机移动只刷新一次光栅资源，不重建 BVH；对焦/光圈不重建 BVH 也不重画阴影。
 
-限制：这是单中心视点 RGB/深度的屏幕空间混合方法，无法恢复被遮挡表面，不是完整场景路径追踪或光场。水面/透明体/镜面仍沿用中心视角辐亮度；大光圈、前景遮挡边缘、超广角和画外查询有固有限制。RGB→非负光谱是保持颜色匹配的近似 metamer，不能恢复真实材质/灯具光谱；CIE 匹配函数采用有来源的解析近似。T=1 是理想几何透射，不是 T-stop；没有鬼影、镀膜、吸收、衍射、噪声或运动模糊。未知通光口径不会由 sdDraw 冒充；使用有限数值域的来源会显示。上游未提供各玻璃厂商认证的波段范围，380–780 nm 是已检查公式的工作区间。
+限制（明确的实时近似，不是完整路径追踪）：无场景多次漫反射/全局光照；阴影来自光栅阴影贴图（不发阴影射线）；镜头模式没有屏幕空间 AO；Three 的屏幕空间几何粗糙度不在 compute 中实现（弯曲金属高光略有差异）；水面反射是参考视点平面反射，透明层不模拟折射；雾按真实路径长度计算；星空用固定角半径的圆盘表示光栅精灵。RGB→非负光谱是保持颜色匹配的近似 metamer，不能恢复真实材质/灯具光谱；CIE 匹配函数采用有来源的解析近似。T=1 是理想几何透射，不是 T-stop；没有鬼影、镀膜、吸收、衍射、噪声或运动模糊。未知通光口径不会由 sdDraw 冒充；使用有限数值域的来源会显示。上游未提供各玻璃厂商认证的波段范围，380–780 nm 是已检查公式的工作区间。细节见 [场景查询](docs/scene-query.md) 与 [V2 验收记录](docs/validation-v2.md)。
 
 计算、采样测度、固定全局标定 `4/π`、坐标和来源见 [光学数学](docs/optics-math.md)、[光谱](docs/spectral.md)、[场景查询](docs/scene-query.md)。
 
@@ -70,22 +70,25 @@ npm run build
 
 ## 验证与 UI 分工
 
-UI 实际由本机 Claude Code **2.1.299（后续同一会话恢复为 2.1.300）/ claude-opus-5-5** 实现，交互会话 **7ab40175-5f8b-4e4a-a2cd-0418b2698331**；模型通过 CLI `/status` 与保存会话的 `message.model` 核对，未使用别名或其他模型。Codex 提供轻量状态/动作接口并负责核心、集成和真实 GPU 验收。Claude 修改 `src/ui/`、UI 测试及 [UI 实现记录](docs/ui-implementation.md)，并依据实际页面截图在同一会话修订；用户在该会话直接要求的 HTML/时间标签清理也已保留。未修改 shader、光学、GPU 生命周期或共享入口。最终 115 项测试、生产构建和独立克隆验证通过。
+V2 的 UI 小改由本机 Claude Code 2.1.300 以显式 `claude-opus-5-5` 在独立会话 **fbd71847-7724-452e-b4fb-49bf965b236f** 中完成（两轮，第二轮依据真实浏览器截图），只修改 `src/ui/`、UI 测试和 [UI 实现记录](docs/ui-implementation.md)；BVH、着色、光学、GPU 生命周期与共享入口由 Codex 负责。V1 的 UI 来自会话 7ab40175-5f8b-4e4a-a2cd-0418b2698331（见 V1 记录）。
 
 ```powershell
 npm test
 npm run build
 ```
 
-开发服务器还提供实际 WebGPU 验收页（不会以 mock 替代）：
+开发服务器还提供实际 WebGPU 验收页（不会以 mock 替代）；`node scripts/run-gpu-tests.mjs` 用 Playwright Chromium 依次运行并把结果写入 `artifacts/`，`node scripts/app-smoke.mjs` 跑完整应用：
 
-- `/tests/hybrid-chain.html`：共享 device 的几何捕获 → compute → HDR 显示。
-- `/tests/hybrid-optics.html?lens=canon-fl-50mm-f1-8`：GPU/CPU 光路互易、连续光谱、固定尝试、跨批次、孔径与 PDF 能量、HDR、AF。
-- `/tests/runtime-gpu.html`：累计失效、暂停重置、AF 过期结果、显示隔离与捕获复用。
-- `/tests/imaging-gpu.html`：多个深度的条纹、非对称标记、有限发光点及各目标轮流对焦。
-- `/tests/hdr-gpu.html`：原有 HDR/SDR 输出回归。
+- `/tests/scene-bvh-gpu.html`：GPU 两级 BVH 对照 f64 暴力求交（最近交点、实例、primitive、重心、正反面、隐藏表面）。
+- `/tests/hidden-surface-gpu.html`：前景细杆后的隐藏背景、与光栅分辨率无关、对焦扫描、散景随光圈变化。
+- `/tests/shading-gpu.html`：光栅 vs compute 着色（材质、阴影、PMREM、木纹、草地、水面、天空、雾）。
+- `/tests/hybrid-chain.html`：Three 生成的阴影/PMREM → 同一 device 的 compute → HDR 显示。
+- `/tests/hybrid-optics.html?lens=canon-fl-50mm-f1-8`：光路互易、连续光谱、固定尝试、跨批次、孔径与 PDF 能量、HDR、AF。
+- `/tests/runtime-gpu.html`：失效规则（几何/材质/光照/相机/光学/显示）、TLAS/BLAS 最小重建、AF 真实交点、无泄漏。
+- `/tests/imaging-gpu.html`、`/tests/sampling-gpu.html`、`/tests/hdr-gpu.html`、`/tests/daylight-transition-gpu.html`：原有回归。
+- `/tests/perf-gpu.html`：完整别墅的 BVH 构建、资源刷新与每批 GPU 时间。
 
-实际平台、数值结果、耗时来源和未验项目见 [V1 验收记录](docs/validation-v1.md)。浏览器兼容入口 `window.__SANTEI__` 保留，并扩展 `.hybrid` / `.diagnostics.hybrid`。
+实际平台、数值、耗时来源和未验项目见 [V2 验收记录](docs/validation-v2.md)（V1 见 [V1 验收记录](docs/validation-v1.md)）。浏览器兼容入口 `window.__SANTEI__` 保留，并扩展 `.hybrid` / `.diagnostics.hybrid`。
 
 ## 昼夜与天文
 
@@ -115,12 +118,12 @@ npm test
 
 ## 文件
 
-`src/main.js` 管理 WebGPU、相机、反射、环境遮蔽与初始化；`kit.js` 提供建模工具和程序化木纹。建筑、花园、植物和山林分别位于 `villa.js`、`garden.js`、`vegetation.js`、`landscape.js`。`astronomy.js` 计算天文与光照状态，`lighting.js` 驱动天空、光源和环境反射，`time-controls.js` 提供时间面板，`details.js` 添加构造细节及夜灯。
+`src/main.js` 管理 WebGPU、相机、环境遮蔽与初始化，`src/scene/santei-scene.js` 组装场景（水面反射与草地色变在 `src/scene/procedural-materials.js`，常量在 `procedural-params.js`）；镜头场景查询在 `src/scene/`（注册、提取、BVH 构建/Worker）与 `src/rendering/`（`scene-intersector.wgsl`、`scene-shading.wgsl`、`scene-resources.js`、`lighting-resources.js`）；`kit.js` 提供建模工具和程序化木纹。建筑、花园、植物和山林分别位于 `villa.js`、`garden.js`、`vegetation.js`、`landscape.js`。`astronomy.js` 计算天文与光照状态，`lighting.js` 驱动天空、光源和环境反射，`time-controls.js` 提供时间面板，`details.js` 添加构造细节及夜灯。
 
 浏览器中 `window.__SANTEI__.diagnostics` 提供后端、模型数量和构建状态，供开发检查。
 
 ### 启动预热与时间切换
 
-加载阶段准备镜头的场景捕获、首个样本及显示管线，随后恢复默认光栅视图，首次切换复用已准备的结果。时间拖动每动画帧合并一次更新，在帧开始、任何场景 pass 绘制之前提交全部时间状态；天空环境反射与照明、曝光同步提交，避免新夜间曝光混用旧白天环境导致全屏过曝。
+加载阶段在 Worker 中构建场景 BVH，并准备光照资源刷新、首个镜头样本及显示管线，随后恢复默认光栅视图，首次切换复用已准备的结果。时间拖动每动画帧合并一次更新，在帧开始、任何场景 pass 绘制之前提交全部时间状态；天空环境反射与照明、曝光同步提交，避免新夜间曝光混用旧白天环境导致全屏过曝。
 
 `/tests/sampling-gpu.html` 验证分块与未分块的逐位采样一致性、各诊断显示、持续采样超过 4096 spp、24 MP 与 6100 万级图像的完整像素计数及 GPU 错误。`/tests/daylight-transition-gpu.html` 验证正午到夜间、晨光及傍晚的第一帧亮度。运行前需 `npm run build:lenses`。

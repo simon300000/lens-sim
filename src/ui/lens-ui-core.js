@@ -4,8 +4,8 @@
  * the renderer, the camera or optics math.
  */
 import {
-  ACTUAL_OUTPUT_LABELS, AF_LABELS, DIAGNOSTIC_LABELS, HIGH_CACHE_MISS, OUTPUT_LABELS, RESOLUTION_PRESETS,
-  SPP_PRESETS, STATUS_LABELS, snapResolution, describeFocus, ALL_BRANDS, brandOf, brandGroups, computeGates, describeView, errorMessage, filterLenses, formatBytes, formatCount,
+  ACTUAL_OUTPUT_LABELS, AF_LABELS, DIAGNOSTIC_LABELS, DIAGNOSTIC_LEGENDS, GEOMETRY_DIAGNOSTICS, OUTPUT_LABELS, RESOLUTION_PRESETS,
+  SPP_PRESETS, STATUS_LABELS, snapResolution, describeFocus, describeScene, sceneWarnings, ALL_BRANDS, brandOf, brandGroups, computeGates, describeView, errorMessage, filterLenses, formatBytes, formatCount,
   formatEV, formatFNumber, formatFocus, formatMm, formatMs, formatRate, isAutofocusShortcut, isCommandEnabled,
   lensOptionLabel, nearestStep, resolutionLabel, samplingText, stepsForFNumber, stepsForFocus, validateFNumber,
   validateFocus, validateImageDistance,
@@ -16,6 +16,7 @@ const COMMAND_LABELS = {
   setFocusDistance: '对焦距离', setImageDistance: '像距', autofocus: 'AF-S', setAutoFocusOnRelease: '松手自动对焦',
   setTargetSpp: '目标 spp', setResolution: '分辨率', setPaused: '暂停/继续', reset: '重置采样',
   setDispersion: '色散', setExposureEV: '显示曝光', setBloom: 'Bloom', setDiagnostic: '诊断视图', setOutput: '输出',
+  rebuildScene: '重新扫描场景',
 };
 /** Slider-like commands coalesce to the latest value while one is in flight. */
 const COALESCED = new Set(['setFNumber', 'setFocusDistance', 'setImageDistance', 'setExposureEV', 'setTargetSpp',
@@ -25,11 +26,10 @@ const IMAGE_NUDGE_MM = 0.01;
 
 const LIMITATIONS = [
   '镜头：按实际处方逆向折射追迹；每条尝试路径取一个连续波长，失败路径记为零、不补样；XYZ 以 f32 累积。',
-  '场景：输入是现有 RGB 线性光栅与单层深度，属屏幕空间近似，并非完整场景路径追踪；RGB→光谱为近似重建。',
+  '场景：通过镜头的每条路径与真实场景几何（BVH）求最近交点，并在交点处用实时光照着色；不做多次反弹全局光照。RGB→光谱为近似重建。',
   '未模拟：镀膜与透过率（T=1）、鬼影、衍射、传感器噪声。f 值为几何光圈，不是 T 值。',
-  '单层深度无法表现被遮挡的前景，前景焦外与遮挡边缘不完整；不是光场。',
   '对焦：固定镜组，整体移动传感器（无内对焦）；距离自物方第一面顶点起算。',
-  '水面反射仍为中心视角近似。未知玻璃、DOE、奇次/特殊面的镜头标为不可用。',
+  '未知玻璃、DOE、奇次/特殊面的镜头标为不可用。',
 ];
 
 let instances = 0;
@@ -101,7 +101,10 @@ export function createLensUI({ store, container } = {}) {
       h('div', { class: 'lu-alert', ref: 'fatal', role: 'alert', hidden: true }),
       h('ul', { class: 'lu-errors', ref: 'errors', 'aria-live': 'assertive', 'aria-label': '命令失败' }),
 
-      radios('mode', '画面', [['raster', 'A · 光栅近似', '现有 RGB 光栅画面，不经过镜头'], ['lens', 'B · 镜头追迹', '按镜头处方追迹并累积']]),
+      radios('mode', '画面', [['raster', 'A · 光栅近似', '现有 RGB 光栅画面，不经过镜头'], ['lens', 'B · 镜头追迹', '按镜头处方追迹，场景取几何首交点并实时着色']]),
+      // One compact line: lens mode name + real scene/BVH state (errors and building stay visible here).
+      h('p', { class: 'lu-hint lu-scene', ref: 'sceneStatus', role: 'status' }),
+      h('ul', { class: 'lu-scene-warn', ref: 'sceneWarn', 'aria-live': 'polite', 'aria-label': '场景与光照警告', hidden: true }),
 
       // Most-used actions stay above the fold: AF-S, pause and the real sample count.
       h('div', { class: 'lu-quick', ref: 'quick', role: 'group', 'aria-label': '常用操作' },
@@ -165,10 +168,7 @@ export function createLensUI({ store, container } = {}) {
           h('button', { type: 'button', class: 'lu-btn', ref: 'resetButton', title: '清空当前累积，按现有参数重新采样', 'aria-label': '重置采样', text: '重置' })),
         h('p', { class: 'lu-hint', ref: 'sppHint', id: id('sppHint') },
           '颗粒来自波长与光圈的蒙特卡罗积分，约按 ', h('span', { class: 'lu-nowrap', text: '1/√spp' }),
-          ' 减弱；可选择持续采样并随时暂停。相机分辨率需较多显存（最高约 3.2 GiB），按分块逐步更新。不含传感器噪声，不做降噪。'),
-        h('div', { class: 'lu-warn', ref: 'cacheWarn', role: 'status', hidden: true },
-          h('span', { ref: 'cacheWarnText' }),
-          h('button', { type: 'button', class: 'lu-link', ref: 'cacheWarnView', text: '查看分布' }))),
+          ' 减弱；可选择持续采样并随时暂停。相机分辨率需较多显存（最高约 4.0 GiB），按分块逐步更新。不含传感器噪声，不做降噪。')),
 
       h('section', { class: 'lu-group', ref: 'displayGroup', 'aria-labelledby': id('h-display') },
         h('h3', { id: id('h-display'), text: '显示' }),
@@ -180,25 +180,34 @@ export function createLensUI({ store, container } = {}) {
         h('div', { class: 'lu-row lu-row-split' },
           check('bloom', 'Bloom'),
           h('div', { class: 'lu-cell' }, label('diagSelect', '视图'),
-            h('select', { ref: 'diagSelect', id: id('diagSelect') },
-              Object.entries(DIAGNOSTIC_LABELS).map(([value, text]) => h('option', { value, text }))))),
+            h('select', { ref: 'diagSelect', id: id('diagSelect'), 'aria-describedby': id('diagHint') },
+              ['beauty', 'scene-error', 'status'].map((value) => h('option', { value, text: DIAGNOSTIC_LABELS[value] })),
+              h('optgroup', { label: '几何/法线/材质诊断（重新累计）' },
+                GEOMETRY_DIAGNOSTICS.map((value) => h('option', { value, text: `${DIAGNOSTIC_LABELS[value]}（重新累计）` })))))),
+        hint('diagHint'),
         radios('output', '输出', [['auto', OUTPUT_LABELS.auto, '显示链路支持时输出 HDR'], ['sdr', OUTPUT_LABELS.sdr, '强制 SDR 色调映射']]),
         hint('outputHint')),
 
       h('details', { class: 'lu-details', ref: 'diagDetails' },
         h('summary', { text: '技术诊断' }),
         h('div', { class: 'lu-rates', ref: 'rates' }),
-        h('dl', { class: 'lu-dl', ref: 'diagList' })),
+        h('dl', { class: 'lu-dl', ref: 'diagList' }),
+        h('ul', { class: 'lu-warnings', ref: 'lightingWarnings', 'aria-label': '光照资源提示', hidden: true }),
+        h('button', { type: 'button', class: 'lu-btn', ref: 'rebuildButton', title: '重新扫描已登记的场景对象，最小更新 BVH/材质（调试用）', text: '重新扫描场景' })),
       h('details', { class: 'lu-details' },
         h('summary', { text: '物理范围与局限' }),
-        h('ul', { class: 'lu-limits' }, LIMITATIONS.map((text) => h('li', { text })))),
+        h('ul', { class: 'lu-limits' }, LIMITATIONS.map((text) => h('li', { text }))),
+        h('p', { class: 'lu-rate-heading', ref: 'approxHead', hidden: true }),
+        h('ul', { class: 'lu-limits', ref: 'approxList', hidden: true })),
       h('p', { class: 'lu-foot' }, h('kbd', { text: 'F' }), ' AF-S（不在输入框时）', h('span', { 'aria-hidden': 'true', text: ' · ' }), h('kbd', { text: 'Esc' }), ' 收起面板')),
     h('div', { class: 'visually-hidden', ref: 'announcer', 'aria-live': 'polite' }));
 
-  // Denominators differ: scene-cache misses are per ray that passed the optics, the rest per attempted ray.
+  // Denominators differ: scene-side rates are per ray that passed the optics, the rest per attempted ray.
   const RATE_GROUPS = [
-    ['占尝试光线', [['opticalPassRate', '通过镜头'], ['opticalBlockedRate', '镜筒/光阑遮挡'], ['tirRate', '全内反射'], ['numericalErrorRate', '数值失败']]],
-    ['占通过镜头的光线', [['cacheMissRate', '场景缓存未命中']]],
+    ['占尝试光线', [['opticalPassRate', '通过镜头'], ['opticalBlockedRate', '镜筒/光阑遮挡'], ['tirRate', '全内反射'], ['numericalErrorRate', '数值失败'],
+      ['hitRate', '场景命中'], ['backgroundRate', '背景'], ['radianceInvalidRate', '辐亮度无效']]],
+    ['占通过镜头的光线', [['sceneHitOfPassed', '场景命中'], ['backgroundOfPassed', '背景'], ['unsupportedRate', '未支持材质'],
+      ['transparencyLimitRate', '透明层超限'], ['bvhErrorRate', 'BVH 遍历错误'], ['reflectionOutsideRate', '水面反射出参考视野']]],
   ];
   const RATE_ROWS = RATE_GROUPS.flatMap(([, rows]) => rows);
   for (const [heading, rows] of RATE_GROUPS) {
@@ -350,7 +359,7 @@ export function createLensUI({ store, container } = {}) {
   on(refs.resSelect, 'change', () => run('setResolution', Number(refs.resSelect.value)));
   on(refs.pauseButton, 'click', () => run('setPaused', !state.sampling?.paused));
   on(refs.resetButton, 'click', () => run('reset'));
-  on(refs.cacheWarnView, 'click', () => run('setDiagnostic', 'cache-miss'));
+  on(refs.rebuildButton, 'click', () => run('rebuildScene'));
 
   markDirty(refs.evRange);
   on(refs.evRange, 'input', () => {
@@ -511,29 +520,63 @@ export function createLensUI({ store, container } = {}) {
     for (const [key] of RATE_ROWS) {
       const rate = d[key];
       const provided = typeof rate === 'number' && Number.isFinite(rate);
-      refs[`rateRow-${key}`].hidden = !provided && key === 'opticalPassRate'; // optional backend field
+      refs[`rateRow-${key}`].hidden = !provided; // shown once the backend provides the field
       const known = provided && d.attemptedSamples > 0;
       refs[`rate-${key}`].style.setProperty('width', known ? `${Math.min(100, Math.max(0, rate * 100))}%` : '0%');
       refs[`rateText-${key}`].textContent = known ? formatRate(rate) : '—';
     }
+    const summary = state.scene?.summary;
+    const lighting = state.scene?.lighting;
+    const lights = lighting?.lights;
+    const revisionKeys = ['geometry', 'material', 'lighting', 'camera', 'optics', 'display', 'accumulation'];
     const rows = [
       ['实际 / 目标', `${formatCount(sampling.spp)} / ${sampling.targetSpp===0?'∞':formatCount(sampling.targetSpp)} spp`],
       ['每批', `${formatCount(sampling.batchSpp)} spp`],
       ['尝试路径', formatCount(d.attemptedSamples)],
-      ['捕获耗时', formatMs(d.captureMs)],
-      ['计算耗时', formatMs(d.computeMs)],
+      ['计算耗时（GPU，单分块）', formatMs(d.computeMs)],
+      ['光照刷新（CPU 提交）', `${formatMs(d.lightingRefreshMs)} · ${formatCount(d.lightingRefreshes)} 次`],
       ['计时来源', d.timingSource || '—'],
       ['累积缓冲', d.width && d.height ? `${d.width} × ${d.height}` : '—'],
       ['显存', formatBytes(d.memoryBytes)],
-      ['场景捕获', formatCount(d.captures)],
+      ['场景实例', summary ? formatCount(summary.instances) : '—'],
+      ['基础三角形', summary ? formatCount(summary.uniqueTriangles) : '—'],
+      ['BVH 节点 / 深度', summary ? `${formatCount(summary.bvhNodes)} / TLAS ${formatCount(summary.tlasDepth)} · BLAS ≤${formatCount(summary.maxBlasDepth)}` : '—'],
+      ['BVH 显存', summary ? formatBytes(summary.gpuBytes) : '—'],
+      ['BVH 构建', summary ? `${formatMs(summary.buildWallMs)}${summary.worker ? ' · Worker' : ' · 主线程'}` : '—'],
+      ['光源 方向/点/半球', lights ? `${formatCount(lights.directional)} / ${formatCount(lights.point)} / ${formatCount(lights.hemisphere)}` : '—'],
       ['管线编译', formatCount(d.pipelineCompilations)],
       ['随机种子', formatCount(sampling.seed)],
-      ['修订 场景/光学/显示/累积', state.revisions ? ['scene', 'optics', 'display', 'accumulation'].map((k) => state.revisions[k] ?? '—').join(' / ') : '—'],
+      ['修订 几何/材质/光照/相机/光学/显示/累积', state.revisions ? revisionKeys.map((k) => state.revisions[k] ?? '—').join(' / ') : '—'],
     ];
     const key = JSON.stringify(rows);
     if (refs.diagList.getAttribute('data-key') === key) return;
     refs.diagList.setAttribute('data-key', key);
     refs.diagList.replaceChildren(...rows.flatMap(([term, value]) => [h('dt', { text: term }), h('dd', { text: value })]));
+  }
+
+  function renderList(el, items, item) {
+    const key = JSON.stringify(items);
+    if (el.getAttribute('data-key') === key) return;
+    el.setAttribute('data-key', key);
+    el.replaceChildren(...items.map(item));
+    el.hidden = items.length === 0;
+  }
+
+  function renderScene() {
+    const model = state.renderModel;
+    const scene = describeScene(state.scene);
+    refs.sceneStatus.textContent = model?.label ? `B：${model.label} · ${scene.text}` : scene.text;
+    if (state.scene?.message) refs.sceneStatus.setAttribute('title', state.scene.message);
+    else refs.sceneStatus.removeAttribute('title');
+    refs.sceneStatus.setAttribute('data-scene', scene.status);
+    refs.sceneStatus.classList.toggle('lu-invalid', scene.status === 'error');
+    renderList(refs.sceneWarn, sceneWarnings(state), ({ level, text }) => h('li', { class: level === 'error' ? 'lu-error' : 'lu-warn', 'data-level': level, text }));
+    renderList(refs.lightingWarnings, state.scene?.lighting?.warnings || [], (text) => h('li', { text: `光照：${text}` }));
+    const approximations = Array.isArray(model?.approximations) ? model.approximations : [];
+    refs.approxHead.textContent = model?.label ? `${model.label} 的近似` : '';
+    refs.approxHead.hidden = approximations.length === 0;
+    renderList(refs.approxList, approximations, (text) => h('li', { text }));
+    setDisabled(refs.rebuildButton, !isCommandEnabled('rebuildScene', state, pending) || state.scene?.status === 'building');
   }
 
   function render() {
@@ -666,11 +709,6 @@ export function createLensUI({ store, container } = {}) {
     refs.pauseButton.setAttribute('aria-pressed', String(Boolean(sampling.paused)));
     setDisabled(refs.pauseButton, !enabled('setPaused'));
     setDisabled(refs.resetButton, !enabled('reset'));
-    const highMiss = d.attemptedSamples > 0 && d.cacheMissRate >= HIGH_CACHE_MISS;
-    refs.cacheWarn.hidden = !highMiss;
-    refs.cacheWarnText.textContent = highMiss ? `场景缓存未命中偏高：${formatRate(d.cacheMissRate)}（占通过镜头的光线）` : '';
-    refs.cacheWarnView.hidden = display.diagnostic === 'cache-miss';
-    setDisabled(refs.cacheWarnView, !enabled('setDiagnostic'));
 
     // Display
     const ev = Number.isFinite(display.exposureEV) ? display.exposureEV : 0;
@@ -686,12 +724,15 @@ export function createLensUI({ store, container } = {}) {
     setDisabled(refs.bloom, !enabled('setBloom'));
     setSelect(refs.diagSelect, display.diagnostic || 'beauty');
     setDisabled(refs.diagSelect, !enabled('setDiagnostic'));
+    refs.diagHint.textContent = display.diagnostic && display.diagnostic !== 'beauty'
+      ? `${DIAGNOSTIC_LEGENDS[display.diagnostic] ? `${DIAGNOSTIC_LEGENDS[display.diagnostic]} · ` : ''}不经曝光/Bloom${GEOMETRY_DIAGNOSTICS.includes(display.diagnostic) ? ' · 切换几何类视图会重新累计' : ''}` : '';
     for (const radio of radioInputs('output')) {
       radio.checked = radio.value === (display.output || 'auto');
       setDisabled(radio, !enabled('setOutput'));
     }
     refs.outputHint.textContent = `实际输出：${ACTUAL_OUTPUT_LABELS[display.actualOutput] || display.actualOutput || '待定'}`;
 
+    renderScene();
     renderDiagnostics(d, sampling);
 
     // Centre AF-S area: the 36×24 sensor is letterboxed about the viewport centre, which is where AF-S

@@ -1,14 +1,10 @@
 import './style.css';
 import * as THREE from 'three/webgpu';
-import { pass, mrt, output, normalView, mix, vec2, vec3, vec4, positionWorld, sin, cos, normalMap, builtinAOContext, screenUV, reflector, dot, normalize, cameraPosition, pow, uniform, mx_noise_float, materialColor, convertToTexture } from 'three/tsl';
+import { pass, mrt, normalView, vec4, builtinAOContext, screenUV, uniform, convertToTexture } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { buildVilla } from './villa.js';
-import { buildVegetation } from './vegetation.js';
-import { buildGarden } from './garden.js';
-import { buildLandscape } from './landscape.js';
-import { buildDetails } from './details.js';
+import { buildSanteiScene } from './scene/santei-scene.js';
 import { createDaylight } from './lighting.js';
 import { createTimeControls } from './time-controls.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
@@ -30,7 +26,10 @@ async function createScene(){
   message.textContent='检测 HDR 画布支持';
   let hdr=await probeHDRCanvas(adapter);
   const rendererOptions={antialias:true,alpha:false,powerPreference:'high-performance',
-    requiredLimits:{maxTextureDimension2D:adapter.limits.maxTextureDimension2D}};
+    // The lens BVH and large sensor tiles are storage buffers; request what the
+    // adapter actually offers instead of relying on the 128/256 MiB defaults.
+    requiredLimits:{maxTextureDimension2D:adapter.limits.maxTextureDimension2D,
+      maxStorageBufferBindingSize:adapter.limits.maxStorageBufferBindingSize,maxBufferSize:adapter.limits.maxBufferSize}};
   let renderer=new THREE.WebGPURenderer({...rendererOptions,...outputRendererOptions(hdr.supported)});
   await renderer.init();
   if(hdr.supported&&(!renderer.backend.isWebGPUBackend||!isHDRConfiguration(renderer.backend.context.getConfiguration?.()))){
@@ -68,9 +67,8 @@ async function createScene(){
   }
   updateOutputStatus();displayHDR.addEventListener('change',updateOutputStatus);
 
-  const scene=new THREE.Scene();
-  scene.background=new THREE.Color('#e1e5d5');
-  scene.fog=new THREE.FogExp2('#dce3d5',.0065);
+  message.textContent='铺设庭园，栽种花木';
+  const {scene,garden,landscape,villa,vegetation,details}=buildSanteiScene();
   const portrait=innerWidth/innerHeight<.85;
   const camera=new THREE.PerspectiveCamera(portrait?48:40,innerWidth/innerHeight,.15,450);
   camera.position.set(21,13,27);
@@ -84,55 +82,14 @@ async function createScene(){
   controls.enablePan=true;controls.panSpeed=.7;controls.rotateSpeed=.55;
   controls.update();
 
-  message.textContent='铺设庭园，栽种花木';
-  const garden=buildGarden(scene);
-  const landscape=buildLandscape(scene,garden.pondOutline);
-  const villa=buildVilla(scene);
-  const vegetation=buildVegetation(scene);
-  const details=buildDetails(scene,{garden,villa,vegetation,landscape});
-  // Both paper lanterns need wall/roof occlusion. Their shadow cameras see the
-  // local joinery layer, keeping the entire remote forest out of six cube faces.
-  villa.group.traverse(o=>{if(o.isMesh)o.layers.enable(1);});
-  details.group.traverse(o=>{if(o.isMesh)o.layers.enable(1);});
-  for(const lamp of details.lamps.slice(0,2)){
-    lamp.light.castShadow=true;
-    lamp.light.shadow.mapSize.set(512,512);
-    lamp.light.shadow.camera.near=.08;lamp.light.shadow.camera.far=11;
-    lamp.light.shadow.camera.layers.set(1);
-    lamp.light.shadow.bias=-.00008;lamp.light.shadow.normalBias=.025;
-  }
-  details.metadata.shadowedLamps=2;
-  // Terrain can occlude low Sun/Moon rays. Dense tree silhouettes also cast
-  // shadows; the individual distant needles keep their cheaper static shading.
-  landscape.root.traverse(o=>{
-    if(o.isMesh&&(o.name.startsWith('Atmospheric mountain')||o.geometry.type==='IcosahedronGeometry'))o.castShadow=true;
-    if(o.isMesh&&o.name.includes('Meadow')){
-      const variation=mx_noise_float(positionWorld.mul(vec3(2.5,1,2.5))).mul(.065).add(.95);
-      o.material.colorNode=materialColor.mul(variation);
-    }
-  });
-  if(garden.water){
-    const p=positionWorld;
-    const ripples=sin(p.x.mul(3.5).add(p.z.mul(2.3))).mul(.018).add(cos(p.x.mul(5).sub(p.z.mul(4.1))).mul(.012));
-    garden.water.material.normalNode=normalMap(vec3(ripples.add(.5),ripples.mul(.7).add(.5),1));
-    garden.water.material.metalness=0;
-    garden.water.material.roughness=.115;
-    const mirror=reflector({resolutionScale:.45,bounces:false,generateMipmaps:false});
-    mirror.target.rotation.x=-Math.PI/2;
-    garden.water.add(mirror.target);
-    mirror.uvNode=mirror.uvNode.add(vec2(ripples.mul(.016),ripples.mul(.01)));
-    const view=normalize(cameraPosition.sub(positionWorld));
-    const fresnel=pow(dot(view,vec3(0,1,0)).clamp(0,1).oneMinus(),5).mul(.98).add(.02);
-    garden.water.material.emissiveNode=mirror.rgb.mul(fresnel).mul(2.2);
-    garden.water.material.opacity=.35;
-  }
   let ready=false,framesNeeded=0,rendering=false,pendingTime=null;
   let timeRevision=0;
   let completionRevision=-1;
   let pipeline,hybrid;
   const cameraExposure=uniform(1);
   function wake(){if(!ready)return;framesNeeded=Math.max(framesNeeded,2);if(!rendering){rendering=true;requestAnimationFrame(frame);}}
-  function invalidate(){hybrid?.invalidateScene();wake();}
+  // Daylight refreshes shadows/PMREM itself; the lens bridge only repacks lights.
+  function invalidate(){hybrid?.lightingChanged();wake();}
   function frame(){
     // Commit the entire time state before any scene pass can cache this frame.
     if(pendingTime){const value=pendingTime;pendingTime=null;applyTime(value);}
@@ -196,7 +153,7 @@ async function createScene(){
   window.__SANTEI__={scene,camera,renderer,controls,pipeline,diagnostics,garden,daylight,timeControls,scenePass};
   message.textContent='预编译日月、晨光与反射';
   // Render on time/date changes and camera movement; never run an idle GPU loop.
-  controls.addEventListener('change',()=>{if(hybrid)hybrid.cameraChanged();else invalidate();wake();});
+  controls.addEventListener('change',()=>{hybrid?.cameraChanged();wake();});
   controls.addEventListener('start',()=>{hybrid?.setInteracting(true);wake();});
   controls.addEventListener('end',()=>{hybrid?.setInteracting(false);wake();});
   addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);hybrid?.resize();wake();});
@@ -220,7 +177,7 @@ async function createScene(){
   pipeline.render();
   await renderer.backend.device.queue.onSubmittedWorkDone();
   message.textContent='编译真实镜组、光谱采样与自动对焦';
-  hybrid=await createHybridRuntime({renderer,scene,camera,rasterPipeline:pipeline,rasterBeauty:beauty,rasterGlare:glare,cameraExposure,hdr,requestFrame:wake,
+  hybrid=await createHybridRuntime({renderer,scene,camera,rasterPipeline:pipeline,rasterBeauty:beauty,rasterGlare:glare,cameraExposure,hdr,environment:daylight,requestFrame:wake,
     onOutputState:mode=>{outputStatus.textContent=mode==='hdr'?'HDR':'SDR';sceneElement.dataset.outputMode=mode;}});
   const lensPanel=document.createElement('aside');lensPanel.id='lens-controls';document.body.appendChild(lensPanel);
   const lensUI=createLensUI({store:hybrid.store,container:lensPanel});
@@ -228,13 +185,16 @@ async function createScene(){
   window.__SANTEI__.captureOutputRange=()=>{hybrid.frame();return captureCanvasRange(renderer);};
   hybrid.store.subscribe(state=>{
     Object.assign(sceneElement.dataset,{lensMode:state.mode,lensStatus:state.status,lensId:state.lensId,
-      lensSpp:state.sampling.spp,lensTargetSpp:state.sampling.targetSpp,captureCount:state.diagnostics.captures,
-      opticsRevision:state.revisions.optics,sceneRevision:state.revisions.scene,displayRevision:state.revisions.display,
+      lensSpp:state.sampling.spp,lensTargetSpp:state.sampling.targetSpp,lensRenderModel:state.renderModel.id,
+      sceneStatus:state.scene.status,sceneInstances:state.scene.summary?.instances??'',sceneBvhNodes:state.scene.summary?.bvhNodes??'',
+      opticsRevision:state.revisions.optics,geometryRevision:state.revisions.geometry,lightingRevision:state.revisions.lighting,
+      cameraRevision:state.revisions.camera,displayRevision:state.revisions.display,lightingRefreshes:state.diagnostics.lightingRefreshes,
       lensConfiguration:state.configurationIndex,focusDistanceM:state.optics.focusDistanceM??'infinity',
       imageDistanceMm:state.optics.imageDistanceMm,samplingPaused:String(state.sampling.paused),batchSpp:state.sampling.batchSpp,
-      afStatus:state.af.status,lensError:state.error||'',cacheMissRate:state.diagnostics.cacheMissRate,
+      afStatus:state.af.status,lensError:state.error||'',bvhErrorRate:state.diagnostics.bvhErrorRate,unsupportedRate:state.diagnostics.unsupportedRate,
+      transparencyLimitRate:state.diagnostics.transparencyLimitRate,
       opticalNumericalErrorRate:state.diagnostics.numericalErrorRate,opticalWidth:state.diagnostics.width,opticalHeight:state.diagnostics.height,
-      opticalComputeMs:state.diagnostics.computeMs??'',captureSubmitMs:state.diagnostics.captureMs??'',opticalMemoryBytes:state.diagnostics.memoryBytes,
+      opticalComputeMs:state.diagnostics.computeMs??'',lightingRefreshMs:state.diagnostics.lightingRefreshMs??'',opticalMemoryBytes:state.diagnostics.memoryBytes,
       opticalBlockedRate:state.diagnostics.opticalBlockedRate,opticalTirRate:state.diagnostics.tirRate,
       attemptedSamples:state.diagnostics.attemptedSamples,opticalPipelineCount:state.diagnostics.pipelineCompilations});
     diagnostics.hybrid=state;
