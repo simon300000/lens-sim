@@ -11,6 +11,7 @@ import { probeHDRCanvas,isHDRConfiguration,outputRendererOptions,displayOutputNo
 import { createHybridRuntime } from './rendering/hybrid-runtime.js';
 import { createLensUI } from './ui/lens-ui.js';
 import { startup } from './startup-progress.js';
+import { installCameraWheelTravel, installCameraLookAround } from './camera-controls.js';
 
 const faults=[];
 window.addEventListener('error',event=>faults.push(event.message));
@@ -77,8 +78,9 @@ async function createScene(){
   controls.enableDamping=true;
   controls.dampingFactor=.07;
   controls.minDistance=5;controls.maxDistance=62;
-  controls.minPolarAngle=.22;controls.maxPolarAngle=Math.PI*.485;
+  controls.minPolarAngle=.01;controls.maxPolarAngle=Math.PI-.01;
   controls.enablePan=true;controls.panSpeed=.7;controls.rotateSpeed=.55;
+  const disposeLookAround=installCameraLookAround(controls);
   controls.update();
 
   let ready=false,framesNeeded=0,rendering=false,pendingTime=null;
@@ -155,6 +157,7 @@ async function createScene(){
   controls.addEventListener('change',()=>{hybrid?.cameraChanged();wake();});
   controls.addEventListener('start',()=>{hybrid?.setInteracting(true);wake();});
   controls.addEventListener('end',()=>{hybrid?.setInteracting(false);wake();});
+  const disposeWheelTravel=installCameraWheelTravel(controls,renderer.domElement);
   addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);hybrid?.resize();wake();});
   // Warm the visible Moon/stars, lamp shadows and unlit predawn variants while
   // the loading curtain is up, instead of compiling them on the first slider move.
@@ -214,7 +217,7 @@ async function createScene(){
   sceneElement.dataset.koi=garden.koi.length;
   console.info('SANTEI scene ready',diagnostics);
   startup.complete();
-  addEventListener('pagehide',()=>{ready=false;lensUI.dispose();hybrid.dispose();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
+  addEventListener('pagehide',()=>{ready=false;disposeWheelTravel();disposeLookAround();lensUI.dispose();hybrid.dispose();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
   // Initialization captured the current scene and prepared its first lens
   // sample. Schedule display without throwing away that prepared state.
   wake();

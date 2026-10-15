@@ -12,7 +12,11 @@
   </head>
   <body>
     <main id="scene" aria-label="山间别墅三维场景"></main>
-    <div class="view-hint" aria-label="操作提示"><span id="output-status" class="output-status" aria-label="输出动态范围">HDR</span><svg width="16" height="20" viewBox="0 0 16 20" fill="none" aria-hidden="true"><rect x="3.5" y="1.5" width="9" height="14" rx="4.5" stroke="currentColor"/><path d="M8 4v3M5 18h6" stroke="currentColor" stroke-linecap="round"/></svg><span>拖动环视<span class="hint-divider">·</span>滚轮靠近</span></div>
+    <aside class="view-hint" aria-label="相机操作提示">
+      <div class="camera-hint-heading"><span>相机操作</span><span id="output-status" class="output-status" aria-label="输出动态范围">HDR</span></div>
+      <div class="camera-hint-mouse"><span>左键拖动</span><span>原地转头</span><span>右键 / Shift + 左键拖动</span><span>平移</span><span>滚轮向上 / 向下</span><span>前进 / 后退</span></div>
+      <div class="camera-hint-touch">单指拖动原地转头 · 双指移动平移 · 双指捏合缩放</div>
+    </aside>
     <section id="time-controls" class="time-controls" aria-label="庭院日照时间">
       <div class="time-heading">
         <div class="time-current"><label for="time-slider">时光</label><output id="time-output" for="time-slider">16:30</output><span id="time-period" class="time-period">午后</span></div>
