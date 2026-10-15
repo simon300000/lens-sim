@@ -91,8 +91,26 @@ try{
   await store.dispatch('selectLens','7artisans-af-135mm-f1-8-max');await store.dispatch('selectConfiguration',1);
   const finiteNative=store.getState().optics;
   check(finiteNative.focusDistanceM===6.4&&Math.abs(finiteNative.imageDistanceMm-1)<1e-6,'finite configuration lost native image plane/conjugate');
-  let focusFailure='';try{await store.dispatch('setFocusDistance',20);}catch(error){focusFailure=error.message;}
+  let focusFailure='';try{await store.dispatch('setFocusDistance',.1);}catch(error){focusFailure=error.message;}
   check(focusFailure&&JSON.stringify(store.getState().optics)===JSON.stringify(finiteNative)&&store.getState().af.status==='error','invalid focus must visibly preserve native optical state');
+  const nativeSensor=runtime.engine.packed.sensorZMm,nativeSurfaces=Array.from(runtime.engine.packed.surfaces),nativeStop=runtime.engine.packed.stopRadiusMm;
+  const motionPipelines=runtime.interop.compilations,motionBuilds=builds();
+  await store.dispatch('setFocusDistance',20);
+  check(store.getState().af.status==='success'&&store.getState().optics.focusModel.includes('cfgs.thi'),'configuration motion was not used');
+  check(runtime.engine.packed.sensorZMm===nativeSensor,'configuration focus moved sensor');
+  check(JSON.stringify(Array.from(runtime.engine.packed.surfaces))!==JSON.stringify(nativeSurfaces),'configuration focus did not upload moved surfaces');
+  check(Math.abs(runtime.engine.packed.stopRadiusMm-nativeStop)<1e-5,'focus changed physical stop opening');
+  await store.dispatch('autofocus');check(store.getState().af.lastResult.source==='cfgs.thi / cfgs.obj','AF did not use group motion');
+  const configurationMotion=store.getState().af.lastResult;
+  await store.dispatch('selectLens','sony-fe-16-35mm-f2-8-gm-ii');
+  const camSensor=runtime.engine.packed.sensorZMm;
+  await store.dispatch('setFocusDistance',null);const camInfinity=Array.from(runtime.engine.packed.surfaces);
+  await store.dispatch('setFocusDistance',1);
+  check(store.getState().af.lastResult.source==='zoomcam.focus'&&runtime.engine.packed.sensorZMm===camSensor,'explicit table focus moved sensor / used fallback');
+  check(JSON.stringify(Array.from(runtime.engine.packed.surfaces))!==JSON.stringify(camInfinity),'explicit table did not upload moved surfaces');
+  const tableMotion=store.getState().af.lastResult;
+  check(runtime.interop.compilations===motionPipelines&&builds()===motionBuilds,'focus motion rebuilt pipelines or BVH');
+  await store.dispatch('setMode','lens');runtime.frame();await runtime.interop.device.queue.onSubmittedWorkDone();
   await store.dispatch('selectLens','hasselblad-xcd-65mm-f2-8');
   const contactNative=store.getState().optics;
   check(contactNative.imageDistanceMm===0&&runtime.engine.packed.region.directional,'native zero-gap lens did not initialize');
@@ -100,6 +118,7 @@ try{
   check(Math.abs(store.getState().optics.imageDistanceMm-.026)<1e-12,'short manual image distance is still restricted');
   await store.dispatch('setImageDistance',0);
   check(store.getState().optics.imageDistanceMm===0,'manual zero-gap image plane rejected');
+
   // Repeated lens switching / resize / pause: no GPU errors, no leaked tiles.
   const cycle=async()=>{await store.dispatch('selectLens','canon-fl-50mm-f1-8');await store.dispatch('setResolution',480);await store.dispatch('setResolution',240);await store.dispatch('setPaused',true);await store.dispatch('setPaused',false);runtime.frame();};
   await cycle();await runtime.interop.device.queue.onSubmittedWorkDone();
@@ -110,7 +129,7 @@ try{
   await runtime.interop.readTexture(runtime.engine.outputGPU);check(errors.length===0,'GPU validation: '+errors.join('\n'));
   const result={passed:true,counters:res.counters,lightingRefreshes:light.refreshes,lightingStatus:light.status,scene:store.getState().scene.summary,
     afRealTarget:af.target,afMovedTarget:moved,manualFocus:{nearMm:near,farMm:far},smallApertureInfinity:infinity,
-    nativeFiniteConfiguration:{focusDistanceM:finiteNative.focusDistanceM,imageDistanceMm:finiteNative.imageDistanceMm,failedFocusReason:focusFailure},
+    nativeFiniteConfiguration:{focusDistanceM:finiteNative.focusDistanceM,imageDistanceMm:finiteNative.imageDistanceMm,failedFocusReason:focusFailure},configurationMotion,tableMotion,
     contactNativeConfiguration:contactNative,stats,liveBuffers:runtime.interop.liveBuffers,pipelines:runtime.interop.compilations,wakes,errors};
   out.textContent=JSON.stringify(result,null,2);document.body.dataset.passed='true';window.__runtimeTest={runtime,result};
 }catch(error){out.textContent=error.stack||String(error);document.body.dataset.passed='false';console.error(error);}

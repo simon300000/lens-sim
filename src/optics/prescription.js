@@ -3,6 +3,7 @@
  * The material on a tx row is the medium AFTER that interface.
  */
 import { AIR, resolveGlass, refractiveIndex } from './glass.js';
+import { buildFocusMotion } from './focus-motion.js';
 
 const numeric = token => /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?$/.test(token);
 const positiveRadius = value => Number.isFinite(value) && value > 0 ? value : null;
@@ -84,6 +85,7 @@ export function adaptLensRecord(record, catalog, { configurationIndex = 0 } = {}
   if (!Number.isInteger(configurationIndex) || configurationIndex < 0 || configurationIndex >= configurations.length) throw new Error(`Invalid configuration ${configurationIndex} for ${record.id}`);
   const configuration = configurations[configurationIndex];
   const surfaces = parsePrescriptionText(record.tx);
+  const focusMotion = buildFocusMotion(record, surfaces, configurationIndex);
   applyOverrides(surfaces, configuration?.thi, 'thicknessMm');
   applyOverrides(surfaces, configuration?.rdy, 'radiusMm');
   const stopIndex = record.stop - 1;
@@ -124,7 +126,7 @@ export function adaptLensRecord(record, catalog, { configurationIndex = 0 } = {}
     schemaVersion: 1, id: record.id, name: record.name, configurationIndex,
     configurationTitle: configuration?.title ?? 'Default',
     configurations: configurations.map((c, index) => ({ index, title: c?.title ?? 'Default' })),
-    surfaces, glasses, stopIndex, apertureMode, apertureValue,
+    surfaces, glasses, stopIndex, apertureMode, apertureValue, focusMotion,
     sensorZMm: zMm, imageDistanceMm: last.thicknessMm, lastVertexZMm: last.zMm,
     objectDistanceMm,
     sensorMm: [36, 24], wavelengthRangeNm: [380, 780],

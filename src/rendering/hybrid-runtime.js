@@ -8,6 +8,7 @@ import { createLightingResources, STAR_ANGULAR_RADIUS } from './lighting-resourc
 import { hasSamplesRemaining, MAX_IMAGE_WIDTH } from './sampling-plan.js';
 import { createControlStore } from './control-store.js';
 import { apertureLimits, rearSamplingRegion } from '../optics/lens-state.js';
+import { focusedPrescription } from '../optics/focus-motion.js';
 import { displayOutputNode } from '../hdr-output.js';
 
 function catalogueFocalLengthMm(lens){
@@ -30,7 +31,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
   const store=createControlStore(),interop=createGPUInterop(renderer);
   const sceneResources=createSceneResources({interop,scene,camera,starAngularRadius:STAR_ANGULAR_RADIUS,useWorker});
   const lighting=createLightingResources({interop,renderer,scene,camera,environment});
-  let lens=null,manifest=null,engine=null,baseExposure=cameraExposure.value,interacting=false,pointerActive=false,releaseTimer;
+  let lens=null,baseLens=null,manifest=null,engine=null,baseExposure=cameraExposure.value,interacting=false,pointerActive=false,releaseTimer;
   let disposed=false,commandRevision=0,statisticsRevision=0,lastStatisticsSpp=-1,statisticsBusy=false,lastError=null;
   let displayPipeline=null,imageNode=null,bloomNode=null,lightingDirty=true,sceneBuild=null;
   const viewportAspect=uniform(innerWidth/innerHeight),rawDisplay=uniform(0);
@@ -128,21 +129,22 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       const sensorZMm=next.sensorZMm,fNumber=limits.minFNumber;
       const minimumGap=minimumImageDistance(next);
       const packed=engine.setLens(next,{fNumber,sensorZMm,dispersion:old.optics.dispersion});
-      lens=next;statisticsRevision++;
+      lens=next;baseLens=next;statisticsRevision++;
       update({status:'ready',error:null,lensId:id,configurationIndex:index,configurations:nextAsset.configurationStatus.map(c=>({...c,available:c.supported})),
         warnings:[...(next.capabilityWarnings??[]),...next.warnings.filter(w=>/^(通光数据不完整|含 nd\/vd|DOE 按|380–780)/.test(w)),
           next.surfaces[next.stopIndex].apertureRadiusMm===null?`光阑半径由上游 ${next.apertureMode} 孔径参数与入瞳倍率标定，未采用绘图半径。`:'',
           packed.region.unknownAperture?'后面通光未知：使用明确的有限求交域，不能据此声称完整渐晕。':'',
           '经验渐晕仅存为元数据；当前只计算有依据的几何遮挡。'].filter(Boolean),
         limits:{fNumber:[limits.minFNumber,limits.maxFNumber],imageDistanceMm:[Math.min(minimumGap,next.imageDistanceMm),Math.max(200,Math.abs(limits.focalLengthMm)*4)]},
-        optics:{...old.optics,fNumber,focusDistanceM,focusDistanceKnown:true,imageDistanceMm:sensorZMm-next.lastVertexZMm,focalLengthMm:limits.focalLengthMm},
+        optics:{...old.optics,fNumber,focusDistanceM,focusDistanceKnown:true,imageDistanceMm:sensorZMm-next.lastVertexZMm,focalLengthMm:limits.focalLengthMm,
+          focusModel:next.focusMotion?`镜组移动 · ${next.focusMotion.source}`:'固定镜组 · 传感器轴向调焦'},
         af:{...old.af,status:'idle',message:'上游原始像面与物距；可使用 AF-S 对当前目标调焦'}});
       clearMetrics();revision('optics');bindImage();publishEngine();requestFrame();
     }catch(error){if(token===commandRevision){update({status:lens?'ready':'error',error:error.message});}throw error;}
   }
   async function focusAt(distanceM,autofocus=false){
     const token=++commandRevision,revisions=state().revisions;
-    const old=state();update({af:{...old.af,status:'busy',message:autofocus?'沿实际参考主光线求取真实场景交点':'追迹固定光束并求最佳像面'}});
+    const old=state();update({af:{...old.af,status:'busy',message:autofocus?'沿实际参考主光线求取真实场景交点':baseLens.focusMotion?'按上游对焦资料移动镜组':'追迹固定光束并求最佳像面'}});
     try{
       let target,hit=null;
       if(autofocus){
@@ -150,6 +152,25 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
         engine.setPose(camera);hit=await engine.referenceTarget();target=hit.infinity?[0,0,-1e7]:hit.local;distanceM=hit.infinity?null:hit.distanceM;
       }
       else target=[0,0,-(distanceM===null?1e7:distanceM*1000)];
+      if(token!==commandRevision)return;
+      if(baseLens.focusMotion){
+        const moved=focusedPrescription(baseLens,distanceM),next=moved.lens,limits=apertureLimits(next);
+        // Hold the physical stop opening while the entrance pupil / EFL change.
+        const fNumber=Math.max(limits.minFNumber,Math.min(limits.maxFNumber,
+          Math.abs(limits.focalLengthMm*limits.pupilMagnification)/(2*engine.packed.stopRadiusMm)));
+        const minimumGap=minimumImageDistance(next);
+        engine.setLens(next,{fNumber,sensorZMm:next.sensorZMm,dispersion:old.optics.dispersion});
+        lens=next;
+        cancelFocus();
+        update({optics:{...state().optics,fNumber,focusDistanceM:moved.focusDistanceM,focusDistanceKnown:true,
+          imageDistanceMm:next.imageDistanceMm,focalLengthMm:limits.focalLengthMm,
+          focusModel:`镜组移动 · ${baseLens.focusMotion.source}`},
+          limits:{fNumber:[limits.minFNumber,limits.maxFNumber],imageDistanceMm:[Math.min(minimumGap,next.imageDistanceMm),Math.max(200,Math.abs(limits.focalLengthMm)*4)]},
+          af:{...state().af,status:'success',message:`按 ${baseLens.focusMotion.source} 移动镜组 · 像面固定${moved.clamped?' · 已限制到资料最近对焦距离':''}${moved.extrapolated?' · 超出表格节点，沿末段外推':''}${hit?.transparentLayers?` · 穿过 ${hit.transparentLayers} 层透明面`:''}`,
+            lastResult:{source:baseLens.focusMotion.source,focusDistanceM:moved.focusDistanceM,sensorZMm:next.sensorZMm,extrapolated:moved.extrapolated,clamped:moved.clamped,target:hit}}});
+        clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision('optics');publishEngine();requestFrame();
+        return;
+      }
       const result=await engine.focusPoint(target,{infinity:distanceM===null});
       const now=state();
       if(token!==commandRevision||revisions.geometry!==now.revisions.geometry||revisions.optics!==now.revisions.optics||revisions.camera!==now.revisions.camera)return;
