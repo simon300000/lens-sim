@@ -104,13 +104,13 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   }
   resize(width);
   function updatePupil(nextLens,next,state){
-    const table=buildPupilTable(nextLens,next,{enabled:state?.pupilSampling!==false});
+    const table=buildPupilTable(nextLens,next,{enabled:state?.pupilSampling!==false,bins:state?.pupilBins,movingCenter:state?.pupilMovingCenter});
     if(table!==pupilTable){device.queue.writeBuffer(pupil,0,table.data);pupilTable=table;}
   }
   function setLens(nextLens,state){
     const next=packLens(nextLens,state);
     // Build the proposal before replacing any live GPU resources.
-    const nextPupil=buildPupilTable(nextLens,next,{enabled:state?.pupilSampling!==false});
+    const nextPupil=buildPupilTable(nextLens,next,{enabled:state?.pupilSampling!==false,bins:state?.pupilBins,movingCenter:state?.pupilMovingCenter});
     const nextSurfaces=interop.storage(next.surfaces,'Current lens analytic surfaces');let nextLut;
     try{
       nextLut=interop.storage(next.lut.values,'Current lens n(lambda) LUT');

@@ -1,0 +1,71 @@
+// Equal queue-complete render time through the full production BVH/material/
+// spectrum integrator. Table construction, compilation and readback are separate.
+import * as THREE from 'three/webgpu';
+import {createLensRig,stripedPanel,emissivePanel} from './gpu-fixtures.js';
+import {xyzToRGB} from '../src/spectral/reconstruction.js';
+import {sweepIds} from './pupil-sweep.js';
+const button=document.querySelector('#run'),progress=document.querySelector('#progress'),output=document.querySelector('#result');
+const variants=[128,256,512,1024].flatMap(bins=>[false,true].map(movingCenter=>({name:(movingCenter?'moving':'fixed')+bins,bins,movingCenter})));
+const mean=a=>a.reduce((s,x)=>s+x,0)/a.length;
+button.onclick=async()=>{
+ button.disabled=true;let renderer,rig,device,interrupted=false;const errors=[],losses=[];
+ const track=()=>{if(document.hidden||!document.hasFocus())interrupted=true;};
+ const report={kind:'render-benchmark',date:new Date().toISOString(),browser:navigator.userAgent,width:48,height:32,scene:'32 physical emissive stripes plus finite defocused emissive point; full BVH/material/spectral path',timingKind:'equal queue-complete render wall time; excludes precompute, warmup, reset, readback and resolve',results:[],errors,losses};
+ document.addEventListener('visibilitychange',track);window.addEventListener('blur',track);
+ try{
+  track();renderer=new THREE.WebGPURenderer();await renderer.init();renderer.setSize(96,64);device=renderer.backend.device;
+  device.addEventListener('uncapturederror',e=>errors.push(e.error.message));device.lost.then(e=>{if(e.reason!=='destroyed')losses.push(e.message);});
+  const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(40,1.5,.01,100);camera.updateMatrixWorld();
+  stripedPanel(scene,{z:-1,w:2,h:2,color:[1,.7,.4],stripes:32,dim:.08});
+  emissivePanel(scene,{x:.12,y:.04,z:-.7,w:.03,h:.03,color:[5,2,1]});
+  const compileStart=performance.now();progress.textContent='编译生产场景积分器…';
+  rig=await createLensRig({renderer,scene,camera,width:48});report.compileAndSceneInitMs=performance.now()-compileStart;report.enginePipelineInitMs=rig.engine.initializationMs;
+  const {engine,interop}=rig;report.timestamp=engine.timestampSupported;report.limits={maxUniformBufferBindingSize:device.limits.maxUniformBufferBindingSize};
+  const options=new URLSearchParams(location.search),ids=options.has('lens')?[options.get('lens')]:sweepIds;
+  const budgets=options.has('budget')?[Number(options.get('budget'))]:[80,240],seeds=[11,29,47,71];report.budgets=budgets;report.seeds=seeds;
+  async function image(){
+   const raw=await engine.readAccumulation(),f=new Float32Array(raw),u=new Uint32Array(raw),rgb=[];let attempts=0,passed=0;
+   for(let i=0;i<f.length;i+=16){attempts+=u[i+3];passed+=u[i+10];rgb.push(...xyzToRGB(Array.from(f.slice(i,i+3)).map(x=>x/Math.max(1,u[i+3]))));}
+   if(!rgb.every(Number.isFinite))throw Error('Nonfinite production RGB');
+   return {rgb,attempts,passRate:passed/attempts};
+  }
+  function thumbnail(rgb){const canvas=document.createElement('canvas');canvas.width=48;canvas.height=32;const ctx=canvas.getContext('2d'),a=ctx.createImageData(48,32);for(let i=0;i<rgb.length;i++){const v=Math.max(0,rgb[i]);a.data[Math.floor(i/3)*4+i%3]=255*(v/(1+v))**(1/2.2);}for(let i=3;i<a.data.length;i+=4)a.data[i]=255;ctx.putImageData(a,0,0);return canvas.toDataURL('image/png');}
+  async function select(lens,v){engine.setLens(lens,{sensorZMm:lens.sensorZMm,pupilBins:v.bins,pupilMovingCenter:v.movingCenter});engine.bindScene();await device.queue.onSubmittedWorkDone();}
+  async function warm(){for(let i=0;i<64;i+=4)engine.sample({batchSpp:4,targetSpp:64,seed:42});await device.queue.onSubmittedWorkDone();engine.reset();await device.queue.onSubmittedWorkDone();}
+  async function reference(seed){engine.reset();await device.queue.onSubmittedWorkDone();const started=performance.now();for(let i=0;i<16384;i+=4){engine.sample({batchSpp:4,targetSpp:16384,seed});if(i%128===0)await device.queue.onSubmittedWorkDone();}await device.queue.onSubmittedWorkDone();return {...await image(),renderMs:performance.now()-started,spp:engine.spp};}
+  async function trial(seed,budget){
+   engine.reset();await device.queue.onSubmittedWorkDone();const started=performance.now();let batches=0;
+   do{for(let i=0;i<16;i++){engine.sample({batchSpp:4,targetSpp:0,seed});batches++;}await device.queue.onSubmittedWorkDone();}while(performance.now()-started<budget);
+   const renderMs=performance.now()-started,spp=engine.spp,lastGpuBatchMs=engine.computeMs;track();const readStart=performance.now(),im=await image();
+   return {...im,seed,budget,renderMs,spp,batches,lastGpuBatchMs,readbackMs:performance.now()-readStart};
+  }
+  for(const id of ids){
+   const lens=(await(await fetch(`/lenses/${id}.json`)).json()).configurations[0],builds=[];
+   for(const v of variants){progress.textContent=`预计算 ${id} ${v.name}`;await new Promise(r=>setTimeout(r,0));const started=performance.now();await select(lens,v);const t=engine.pupilTable;builds.push({variant:v.name,selectWallMs:performance.now()-started,buildMs:t.buildMs,precomputeMs:t.precomputeMs,deriveMs:t.deriveMs,coldBuildMs:t.coldBuildMs,physicalCacheHit:t.physicalCacheHit,probes:t.probes});await warm();}
+   await select(lens,variants.find(x=>x.name==='moving1024'));await warm();
+   progress.textContent=`${id} 独立高采样参考 A…`;const a=await reference(101);progress.textContent=`${id} 独立高采样参考 B…`;const b=await reference(303);
+   const ref=a.rgb.map((x,i)=>(x+b.rgb[i])/2),referenceNoiseMSE=mean(a.rgb.map((x,i)=>(x-b.rgb[i])**2))/4;
+   const normalization=mean(ref.map(x=>x*x)),rows=[],previews={reference:thumbnail(ref)};
+   for(const budget of budgets)for(const seed of seeds){
+    const order=seed%3===2?[...variants].reverse():variants;
+    for(const v of order){
+     progress.textContent=`${id} ${v.name} seed=${seed} ${budget}ms`;await select(lens,v);await warm();const row=await trial(seed,budget),mse=mean(row.rgb.map((x,i)=>(x-ref[i])**2));
+     if(seed===seeds[0]&&budget===budgets.at(-1)&&['fixed128','fixed1024','moving128','moving1024'].includes(v.name))previews[v.name]=thumbnail(row.rgb);
+     delete row.rgb;rows.push({variant:v.name,...row,mse,relativeRMSE:Math.sqrt(mse/normalization)});
+    }
+   }
+   // A high-spp independent seed check at fixed128 tests for estimator drift.
+   await select(lens,variants[0]);progress.textContent=`${id} 固定128高采样能量复核…`;const fixedReference=await reference(509);
+   const energyRatio=mean(fixedReference.rgb)/mean(ref),referenceAgreementRMSE=Math.sqrt(mean(fixedReference.rgb.map((x,i)=>(x-ref[i])**2))/normalization);
+   report.results.push({id,sensorZMm:lens.sensorZMm,builds,reference:{spp:32768,seeds:[101,303],referenceNoiseMSE,normalization,meanRGB:mean(ref),renderMs:a.renderMs+b.renderMs,fixed128EnergyRatio:energyRatio,fixed128RelativeRMSE:referenceAgreementRMSE},rows,previews});
+   const div=document.createElement('div');div.textContent=id;for(const [name,url]of Object.entries(previews)){const img=document.createElement('img');img.src=url;img.width=192;img.height=128;img.title=name;div.appendChild(img);}document.querySelector('#images').appendChild(div);
+  }
+  track();report.interrupted=interrupted;report.foreground=!document.hidden&&document.hasFocus();report.passed=!errors.length&&!losses.length&&!interrupted;
+ }catch(e){report.passed=false;report.error=e.stack;}
+ finally{
+  document.removeEventListener('visibilitychange',track);window.removeEventListener('blur',track);
+  if(rig){rig.engine.dispose();rig.sceneResources.dispose();rig.lighting.dispose();rig.interop.dispose();}renderer?.dispose();button.disabled=false;
+  output.textContent=JSON.stringify(report,null,2);document.body.dataset.passed=String(report.passed);progress.textContent=report.passed?'完成（前台，无 GPU API 错误）':'失败／中断';await fetch('/__pupil-report',{method:'POST',body:JSON.stringify(report)});
+ }
+};
+if(new URLSearchParams(location.search).has('autorun'))button.click();

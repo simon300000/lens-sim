@@ -7,11 +7,11 @@ import {traceLens} from '../src/optics/optical-reference.js';
 import {sampleDimension} from '../src/spectral/sampler.js';
 export const sweepIds=['7artisans-af-135mm-f1-8-max','zeiss-otus-55mm-f1-4','canon-fl-50mm-f1-8','canon-ef-40mm-f2-8-stm','sony-fe-24mm-f1-4-gm'];
 const area=b=>(b[1]-b[0])*(b[3]-b[2]);
-export async function pupilSweep(load,{ids=sweepIds,bins=[32,64,128,256],samples=16384,fine=192,progress=()=>{}}={}){
+export async function pupilSweep(load,{ids=sweepIds,bins=[128,256,512,1024],movingModes=[false,true],samples=16384,fine=192,progress=()=>{}}={}){
  const results=[];
  for(const id of ids){
-  const lens=await load(id),p=packLens(lens,{sensorZMm:lens.sensorZMm}),legacy=legacyBuild(lens,p),variants=[{name:'legacy32',table:legacy,sample:legacySample}];
-  for(const n of bins)variants.push({name:'iterative'+n,table:buildPupilTable(lens,p,{bins:n}),sample:samplePupil});
+  const lens=await load(id),p=packLens(lens,{sensorZMm:lens.sensorZMm}),legacy=legacyBuild(lens,p),variants=[];
+  for(const n of bins)for(const movingCenter of movingModes)variants.push({name:(movingCenter?'moving':'fixed')+n,table:buildPupilTable(lens,p,{bins:n,movingCenter}),sample:samplePupil});
   const rows=[];
   // Independent heights include interior quarter-bin locations, not just the
   // endpoints/midpoints used during construction. Cover band and outer field.
@@ -34,7 +34,7 @@ export async function pupilSweep(load,{ids=sweepIds,bins=[32,64,128,256],samples
     if(x*x+y*y<=R*R&&ray(x,y).status===0)globalGood.push([x,y]);
    }
    for(const v of variants){
-    const box=v.table.rows[Math.min(v.table.rows.length-1,Math.floor(fraction*v.table.rows.length))];
+    const box=pupilBox(v.table,[h,0]);
     const outside=([x,y])=>x<box[0]||x>box[1]||y<box[2]||y>box[3];
     let pass=0,energy=0,sum2=0;
     for(let i=0;i<samples;i++){
@@ -47,7 +47,7 @@ export async function pupilSweep(load,{ids=sweepIds,bins=[32,64,128,256],samples
    }
    progress(`${id} h=${h.toFixed(2)} nm=${nm}`);await new Promise(r=>setTimeout(r,0));
   }
-  results.push({id,sensorZMm:p.sensorZMm,region:p.region,builds:variants.map(v=>({variant:v.name,buildMs:v.table.buildMs,probes:v.table.probes,diagnostics:v.table.diagnostics})),rows});
+  results.push({id,sensorZMm:p.sensorZMm,region:p.region,builds:variants.map(v=>({variant:v.name,buildMs:v.table.buildMs,precomputeMs:v.table.precomputeMs,deriveMs:v.table.deriveMs,physicalCacheHit:v.table.physicalCacheHit,coldBuildMs:v.table.coldBuildMs,probes:v.table.probes,diagnostics:v.table.diagnostics})),rows});
  }
  return {date:new Date().toISOString(),samples,fine,results};
 }

@@ -4,15 +4,16 @@ import { traceLens } from './optical-reference.js';
 import { concentricDisk } from '../spectral/sampler.js';
 
 const cache=new WeakMap();
+const physicalCache=new WeakMap();
 export const PUPIL_BINS=128;
 // Fixed uniform capacity keeps one GPU layout for all benchmark resolutions.
-export const PUPIL_MAX_BINS=256;
-export const PUPIL_TABLE_BYTES=16+PUPIL_MAX_BINS*16;
+export const PUPIL_MAX_BINS=1024;
+export const PUPIL_TABLE_BYTES=16+PUPIL_MAX_BINS*32;
 export const PUPIL_GLOBAL_MIX=.05;
 const PRIMARY=587.5618;
 const union=(a,b)=>[Math.min(a[0],b[0]),Math.max(a[1],b[1]),Math.min(a[2],b[2]),Math.max(a[3],b[3])];
 
-export function buildPupilTable(lens,packed,{enabled=true,bins=PUPIL_BINS}={}) {
+export function buildPupilTable(lens,packed,{enabled=true,bins=PUPIL_BINS,movingCenter=false}={}) {
   if(!Number.isInteger(bins)||bins<1||bins>PUPIL_MAX_BINS)throw new RangeError(`Pupil bins must be an integer from 1 to ${PUPIL_MAX_BINS}`);
   const {sensorZMm,stopRadiusMm,region}=packed;
   // Contact-plane configurations retain the angular sampler.
@@ -21,12 +22,15 @@ export function buildPupilTable(lens,packed,{enabled=true,bins=PUPIL_BINS}={}) {
   const sensorMm=[p[12],p[13]],dispersion=new Uint32Array(packed.parameters.buffer,packed.parameters.byteOffset,16)[3]!==0;
   const key=JSON.stringify([sensorZMm,stopRadiusMm,...sensorMm,region.zMm,region.radiusMm,dispersion,enabled,bins]);
   let entries=cache.get(lens);if(!entries){entries=new Map();cache.set(lens,entries);}
-  if(entries.has(key))return entries.get(key);
+  const resultKey=`${key}/${movingCenter}`;
+  if(entries.has(resultKey))return entries.get(resultKey);
+  let physicalEntries=physicalCache.get(lens);if(!physicalEntries){physicalEntries=new Map();physicalCache.set(lens,physicalEntries);}
+  const cachedPhysical=physicalEntries.get(key);
   const started=performance.now(),maxHeight=Math.hypot(...sensorMm)/2,R=region.radiusMm;
   const full=[-R,R,-R,R],data=new Float32Array(PUPIL_TABLE_BYTES/4);
   data.set([maxHeight,bins,PUPIL_GLOBAL_MIX,enabled?1:0]);
   const wavelengths=dispersion?[380,PRIMARY,780]:[PRIMARY];
-  const rows=[],nodes=[],nodeStates=[];let probes=0,passed=0;
+  const rows=[],centers=[],samples=[];let probes=0,passed=0;
   const diagnostics={guideProbes:0,seedProbes:0,edgeProbes:0,midpointProbes:0,refinementProbes:0,seedFallbacks:0,midpointExpansions:0,midpointSeedFallbacks:0,uncertainFallbacks:0,iterationLimits:0,numericalErrors:0,endpointNodes:enabled?bins+1:0,midpointChecks:enabled?bins:0};
   // Aperture-free rear-to-stop tracing only proposes a seed and a scale.
   // Every acceptance test below traces the unmodified complete physical lens.
@@ -149,74 +153,81 @@ export function buildPupilTable(lens,packed,{enabled=true,bins=PUPIL_BINS}={}) {
   }
   const snapshot=()=>({probes,errors:diagnostics.numericalErrors,limits:diagnostics.iterationLimits});
   let previous=null;
-  if(enabled){
-    for(let i=0;i<=bins;i++){
-      const before=snapshot(),h=maxHeight*i/bins,{probe,any}=atHeight(h),seeds=[],seedByNm=new Map(),scales=[R*.01,R*.01];
+  if(!cachedPhysical&&enabled){
+    // Search endpoints and midpoints independently. Both proposal modes reuse
+    // these physically tested bounds, including midpoint edge refinement.
+    for(let i=0;i<=2*bins;i++){
+      const midpoint=i%2===1,seedKind=midpoint?'midpointProbes':'seedProbes',edgeKind=midpoint?'midpointProbes':'edgeProbes';
+      const before=snapshot(),h=maxHeight*i/(2*bins),{probe,any}=atHeight(h),seeds=[],scales=[R*.01,R*.01];
       for(const nm of wavelengths){
         const guide=footprint(h,nm),center=guide?.q??[h,0];
         const rx=guide?.rx??R,ry=guide?.ry??R;
         let seed=null;
         const candidates=[center];
         if(previous)for(const q of previous.seeds)candidates.push([q[0]+center[0]-previous.center[0],q[1]]);
-        for(const q of candidates)if(probe(q,nm,'seedProbes')){seed=q;break;}
+        for(const q of candidates)if(probe(q,nm,seedKind)){seed=q;break;}
         // Only seed acquisition uses a bounded coarse search. Empty or unknown
         // regions fall back instead of interpreting failed probes as zero light.
         if(!seed)for(const fraction of [.25,.6,1]){
           for(let y=-2;y<=2&&!seed;y++)for(let x=-2;x<=2;x++){
             const q=[center[0]+x*rx*fraction/2,center[1]+y*ry*fraction/2];
-            if(probe(q,nm,'seedProbes')){seed=q;break;}
+            if(probe(q,nm,seedKind)){seed=q;break;}
           }
           if(seed)break;
         }
-        if(seed){seeds.push(seed);seedByNm.set(nm,seed);scales[0]=Math.max(scales[0],rx);scales[1]=Math.max(scales[1],ry);}
+        if(seed){seeds.push(seed);scales[0]=Math.max(scales[0],rx);scales[1]=Math.max(scales[1],ry);}
       }
-      if(!seeds.length){diagnostics.seedFallbacks++;nodes.push([...full]);nodeStates.push(null);previous=null;continue;}
+      if(!seeds.length){diagnostics[midpoint?'midpointSeedFallbacks':'seedFallbacks']++;samples.push([...full]);previous=null;continue;}
       const center=seeds[0],small=scales.map(s=>Math.max(s*.01,R*1e-6));
       let box=[center[0]-small[0],center[0]+small[0],center[1]-small[1],center[1]+small[1]];
       for(const q of seeds)box=union(box,[q[0]-small[0],q[0]+small[0],q[1]-small[1],q[1]+small[1]]);
       const hint=previous?.box.map((v,j)=>v+center[j<2?0:1]-previous.center[j<2?0:1]);
-      box=grow(box,seeds,any,scales,hint);
+      box=grow(box,seeds,any,scales,hint,edgeKind);
       // Padding is applied after all search/refinement, never fed back as hits.
-      if(uncertain(before)){diagnostics.uncertainFallbacks++;nodes.push([...full]);nodeStates.push(null);previous=null;continue;}
-      nodes.push(pad(box,scales));nodeStates.push({seedByNm,scales});previous={box,seeds,center,scales};
+      if(uncertain(before)){diagnostics.uncertainFallbacks++;samples.push([...full]);previous=null;continue;}
+      samples.push(pad(box,scales));previous={box,seeds,center,scales};
     }
-    for(let i=0;i<bins;i++){
-      const before=snapshot(),a=nodes[i],b=nodes[i+1],initial=union(a,b),h=maxHeight*(i+.5)/bins;
-      const {probe,any}=atHeight(h),scales=[(initial[1]-initial[0])/2,(initial[3]-initial[2])/2],seeds=[];
-      let candidate=[...initial];
-      for(const nm of wavelengths){
-        const left=nodeStates[i]?.seedByNm.get(nm),right=nodeStates[i+1]?.seedByNm.get(nm);
-        let q=left&&right?left.map((v,j)=>(v+right[j])/2):null;
-        if(!q||!probe(q,nm,'midpointProbes')){
-          const guide=footprint(h,nm);q=guide?.q;
-          if(!q||!probe(q,nm,'midpointProbes'))continue;
-        }
-        seeds.push(q);
-        // A valid midpoint seed can have moved outside both endpoint bounds.
-        // Include it before testing the four edges of their union.
-        const dx=Math.max(scales[0]*.01,R*1e-6),dy=Math.max(scales[1]*.01,R*1e-6);
-        candidate=union(candidate,[q[0]-dx,q[0]+dx,q[1]-dy,q[1]+dy]);
-      }
-      if(!seeds.length){diagnostics.midpointSeedFallbacks++;rows.push([...full]);continue;}
-      // Endpoint union plus midpoint seed/edge validation assumes smoothly
-      // varying connected footprints; it is not a support proof. The unchanged
-      // global mixture also covers missed islands and interior wavelengths.
-      const box=grow(candidate,seeds,any,scales,null,'midpointProbes');
-      if(uncertain(before)){diagnostics.uncertainFallbacks++;rows.push([...full]);continue;}
-      if(box.some((v,j)=>v!==initial[j])){diagnostics.midpointExpansions++;rows.push(pad(box,scales));}
-      else rows.push(initial);
-    }
-  }else for(let i=0;i<bins;i++)rows.push([...full]);
+  }
+  let physical=cachedPhysical;
+  if(!physical){
+    if(!enabled)for(let i=0;i<=2*bins;i++)samples.push([...full]);
+    physical={samples,probes,passed,diagnostics,precomputeMs:performance.now()-started};
+    physicalEntries.set(key,physical);if(physicalEntries.size>8)physicalEntries.delete(physicalEntries.keys().next().value);
+  }
+  const deriveStarted=performance.now(),nodes=physical.samples.filter((_,i)=>i%2===0),midpointNodes=physical.samples.filter((_,i)=>i%2===1);
+  const derivedDiagnostics={...physical.diagnostics};
+  for(let i=0;i<bins;i++){
+    const a=nodes[i],b=nodes[i+1],mid=midpointNodes[i],endpointUnion=union(a,b);
+    if(mid.some((v,j)=>j%2===0?v<endpointUnion[j]:v>endpointUnion[j]))derivedDiagnostics.midpointExpansions++;
+    if(movingCenter&&enabled){
+      const ca=[(a[0]+a[1])/2,(a[2]+a[3])/2],cb=[(b[0]+b[1])/2,(b[2]+b[3])/2];
+      const relative=(box,c)=>box.map((v,j)=>v-c[j<2?0:1]);
+      // One constant relative rectangle encloses all three physical bounds in
+      // the moving frame. Only its center interpolates with actual image height;
+      // interpolating/shrinking its dimensions would lose checked support.
+      rows.push(union(union(relative(a,ca),relative(b,cb)),relative(mid,ca.map((v,j)=>(v+cb[j])/2))));
+      centers.push([...ca,...cb]);
+    }else{rows.push(union(endpointUnion,mid));centers.push([0,0,0,0]);}
+  }
   rows.forEach((r,i)=>data.set(r,4+i*4));
-  const result={data,rows,nodes,bins,maxHeight,globalMix:PUPIL_GLOBAL_MIX,enabled,probes,passed,diagnostics,buildMs:performance.now()-started};
-  entries.set(key,result);if(entries.size>8)entries.delete(entries.keys().next().value);
+  centers.forEach((c,i)=>data.set(c,4+PUPIL_MAX_BINS*4+i*4));
+  const deriveMs=performance.now()-deriveStarted;
+  const result={data,rows,centers,nodes,midpointNodes,bins,maxHeight,globalMix:PUPIL_GLOBAL_MIX,enabled,movingCenter,
+    probes:physical.probes,passed:physical.passed,diagnostics:derivedDiagnostics,
+    precomputeMs:physical.precomputeMs,deriveMs,physicalCacheHit:!!cachedPhysical,
+    buildMs:performance.now()-started,coldBuildMs:physical.precomputeMs+deriveMs};
+  entries.set(resultKey,result);if(entries.size>16)entries.delete(entries.keys().next().value);
   return result;
 }
 
 export function pupilBox(table,sensor){
   const bins=table.bins??table.rows.length;
-  const index=table.maxHeight>0?Math.floor(Math.hypot(...sensor)/table.maxHeight*bins):0;
-  return table.rows[Math.min(bins-1,Math.max(0,index))];
+  const position=table.maxHeight>0?Math.max(0,Math.min(bins,Math.hypot(...sensor)/table.maxHeight*bins)):0;
+  const index=Math.min(bins-1,Math.floor(position)),t=position-index;
+  const b=table.rows[index],c=table.centers?.[index];
+  if(!c||c.every(v=>v===0))return b;
+  const x=c[0]+(c[2]-c[0])*t,y=c[1]+(c[3]-c[1])*t;
+  return [b[0]+x,b[1]+x,b[2]+y,b[3]+y];
 }
 /** Reference implementation of exactly the GPU's two-dimensional mixture map.
  * Component choice consumes/remaps u; v and all five existing Sobol dimensions

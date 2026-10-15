@@ -12,11 +12,11 @@ button.onclick=async()=>{
  button.disabled=true;let device;const buffers=[],errors=[],losses=[];let interrupted=false;
  const track=()=>{if(document.hidden||!document.hasFocus())interrupted=true;};
  document.addEventListener('visibilitychange',track);window.addEventListener('blur',track);
- const report={kind:'benchmark',browser:navigator.userAgent,date:new Date().toISOString(),results:[],errors,losses};
+ const report={kind:'resolution-benchmark',browser:navigator.userAgent,date:new Date().toISOString(),results:[],errors,losses};
  try{
   track();const adapter=await navigator.gpu.requestAdapter();if(!adapter)throw Error('No WebGPU adapter');
   const timestamp=adapter.features.has('timestamp-query');device=await adapter.requestDevice({requiredFeatures:timestamp?['timestamp-query']:[]});
-  report.adapter=adapter.info.toJSON?.()??{vendor:adapter.info.vendor,architecture:adapter.info.architecture,device:adapter.info.device};report.timestamp=timestamp;
+  report.adapter=adapter.info.toJSON?.()??{vendor:adapter.info.vendor,architecture:adapter.info.architecture,device:adapter.info.device};report.timestamp=timestamp;report.limits={maxUniformBufferBindingSize:device.limits.maxUniformBufferBindingSize};if(PUPIL_TABLE_BYTES>device.limits.maxUniformBufferBindingSize)throw Error(`Pupil ABI ${PUPIL_TABLE_BYTES} exceeds uniform limit ${device.limits.maxUniformBufferBindingSize}`);
   device.addEventListener('uncapturederror',e=>errors.push(e.error.message));device.lost.then(e=>{if(e.reason!=='destroyed')losses.push(e.message);});
   const buf=(data,usage)=>{const b=device.createBuffer({size:typeof data==='number'?data:data.byteLength,usage:usage|GPUBufferUsage.COPY_DST});if(typeof data!=='number')device.queue.writeBuffer(b,0,data);buffers.push(b);return b;};
   const storage=data=>buf(data,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_SRC),uniform=data=>buf(data,GPUBufferUsage.UNIFORM);
@@ -29,7 +29,7 @@ button.onclick=async()=>{
   for(const id of ids){
    progress.textContent=`预计算 ${id}`;await new Promise(r=>setTimeout(r,0));
    const lens=(await(await fetch(`/lenses/${id}.json`)).json()).configurations[0],p=packLens(lens,{sensorZMm:lens.sensorZMm});
-   const baseline=legacyBuild(lens,p),variants=[{name:'legacy32',table:baseline},...[32,64,128,256].map(bins=>({name:'iterative'+bins,table:buildPupilTable(lens,p,{bins})}))];
+   const variants=[];for(const bins of [128,256,512,1024])for(const movingCenter of [false,true]){progress.textContent=`预计算 ${id} ${movingCenter?'moving':'fixed'}${bins}`;await new Promise(r=>setTimeout(r,0));variants.push({name:(movingCenter?'moving':'fixed')+bins,table:buildPupilTable(lens,p,{bins,movingCenter})});}const baseline=variants[0].table;
    const U=uniform(p.parameters),S=storage(p.surfaces),L=storage(p.lut.values);
    const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[[0,U],[1,S],[2,L],[3,Q],[4,O],[20,T]].map(([binding,buffer])=>({binding,resource:{buffer}}))});
    async function run(table,h,nm,seed){
@@ -51,7 +51,7 @@ button.onclick=async()=>{
      progress.textContent=`${id} ${v.name} h=${fraction} nm=${nm} seed=${seed}`;track();rows.push({variant:v.name,...await run(v.table,baseline.maxHeight*fraction,nm,seed)});
     }
    }
-   report.results.push({id,sensorZMm:p.sensorZMm,region:p.region,builds:variants.map(v=>({variant:v.name,buildMs:v.table.buildMs,probes:v.table.probes,diagnostics:v.table.diagnostics})),rows});
+   report.results.push({id,sensorZMm:p.sensorZMm,region:p.region,builds:variants.map(v=>({variant:v.name,buildMs:v.table.buildMs,precomputeMs:v.table.precomputeMs,deriveMs:v.table.deriveMs,physicalCacheHit:v.table.physicalCacheHit,coldBuildMs:v.table.coldBuildMs,probes:v.table.probes,diagnostics:v.table.diagnostics})),rows});
   }
   track();report.interrupted=interrupted;report.foreground=!document.hidden&&document.hasFocus();report.passed=!errors.length&&!losses.length&&!interrupted;
  }catch(e){report.passed=false;report.error=e.stack;}
