@@ -130,11 +130,11 @@ test('mode A/B and display controls dispatch exact command names', async () => {
   const { calls, radio, $, store } = setup();
   toggle(radio('mode', 'lens'), true);
   toggle($('bloom'), false);
-  input($('diagSelect'), 'cache-miss');
+  input($('diagSelect'), 'geometry-normal');
   toggle(radio('output', 'sdr'), true);
   input($('evRange'), '1');
   await flush();
-  assert.deepEqual(types(calls), [['setMode', 'lens'], ['setBloom', false], ['setDiagnostic', 'cache-miss'],
+  assert.deepEqual(types(calls), [['setMode', 'lens'], ['setBloom', false], ['setDiagnostic', 'geometry-normal'],
     ['setOutput', 'sdr'], ['setExposureEV', 1]]);
   assert.equal($('evZero').disabled, true, 'already at 0 EV in the store');
   store.update({ display: { ...store.getState().display, exposureEV: 1 } });
@@ -326,17 +326,105 @@ test('sampling: actual progress, target, resolution, pause and reset', async () 
   assert.match($('resSelect').options.find((o) => o.value === '501').textContent, /501×334/);
 });
 
-test('high cache-miss warning links to the cache-miss diagnostic view', async () => {
-  const { $, calls, store } = setup();
-  assert.equal($('cacheWarn').hidden, true);
-  store.update({ diagnostics: { ...store.getState().diagnostics, attemptedSamples: 1000, cacheMissRate: 0.25, captureMs: null } });
-  assert.equal($('cacheWarn').hidden, false);
-  assert.match($('cacheWarnText').textContent, /25.0%/);
-  $('cacheWarnView').click();
+test('V2: lens mode name, real scene status and approximation notes come from the store', () => {
+  const { $, store, container } = setup();
+  // Mode name and scene state share ONE compact line.
+  assert.equal($('sceneStatus').textContent, 'B：几何首交点 + 实时光照 · 场景准备：等待开始');
+  assert.equal($('sceneStatus').getAttribute('data-scene'), 'pending');
+  store.update({ scene: { ...store.getState().scene, status: 'building', message: '提取场景几何并在 Worker 中构建 BVH' } });
+  assert.match($('sceneStatus').textContent, /^B：几何首交点 \+ 实时光照 · 场景准备：提取场景几何并在 Worker 中构建 BVH$/);
+  assert.doesNotMatch($('sceneStatus').textContent, /%/, 'no invented progress');
+  store.update({ scene: { ...store.getState().scene, status: 'ready', message: 'BVH 就绪：12 个实例 · 3400 个基础三角形' } });
+  assert.match($('sceneStatus').textContent, /BVH 就绪：12 个实例/, 'message used until a summary exists');
+  store.update({ scene: { ...store.getState().scene, summary: { instances: 264078, unsupported: [] } } });
+  assert.equal($('sceneStatus').textContent, 'B：几何首交点 + 实时光照 · BVH 就绪 264,078 实例');
+  assert.match($('sceneStatus').getAttribute('title'), /3400 个基础三角形/, 'full backend message kept as tooltip');
+  store.update({ scene: { ...store.getState().scene, status: 'error', message: 'Worker 崩溃' } });
+  assert.match($('sceneStatus').textContent, /B：几何首交点 \+ 实时光照 · 场景准备失败：Worker 崩溃/);
+  assert.ok($('sceneStatus').classList.contains('lu-invalid'));
+  assert.match(container.textContent, /最高约 4\.0 GiB/);
+  const approximations = store.getState().renderModel.approximations;
+  assert.equal($('approxList').children.length, approximations.length);
+  assert.match($('approxList').textContent, /阴影来自光栅阴影贴图/);
+  const text = container.textContent;
+  assert.doesNotMatch(text, /单层|缓存未命中|捕获/, 'old screen-capture texts removed');
+  assert.doesNotMatch(text, /路径追踪/, 'never claims path tracing');
+});
+
+test('V2: lighting errors, unsupported materials, BVH errors and transparency limit replace the cache-miss warning', () => {
+  const { $, store } = setup();
+  assert.equal($('sceneWarn').hidden, true);
+  const base = store.getState();
+  store.update({
+    scene: { ...base.scene, status: 'ready', summary: { instances: 3, unsupported: [] },
+      lighting: { ok: false, errors: ['阴影贴图缺失'], warnings: ['点光源阴影未启用'], lights: { directional: 1, point: 2, pointShadows: 0, hemisphere: 1 }, environment: true, reflection: true } },
+  });
+  assert.equal($('sceneWarn').hidden, false);
+  const first = $('sceneWarn').children[0];
+  assert.equal(first.getAttribute('data-level'), 'error');
+  assert.match(first.textContent, /光照资源错误：阴影贴图缺失/);
+  assert.match($('lightingWarnings').textContent, /点光源阴影未启用/);
+  assert.equal($('lightingWarnings').hidden, false);
+
+  store.update({ scene: { ...store.getState().scene, lighting: { ...store.getState().scene.lighting, ok: true, errors: [] }, summary: { instances: 3, unsupported: ['MeshToonMaterial', 'ShaderMaterial'] } } });
+  assert.match($('sceneWarn').textContent, /未支持材质（贡献为零）：MeshToonMaterial、ShaderMaterial/);
+
+  // Thresholds: BVH errors > 0, transparency limit > 0.1 %, both over paths that passed the lens.
+  store.update({ diagnostics: { ...base.diagnostics, attemptedSamples: 1000, bvhErrorRate: 0, transparencyLimitRate: 0.001 } });
+  assert.doesNotMatch($('sceneWarn').textContent, /BVH|透明层/);
+  store.update({ diagnostics: { ...base.diagnostics, attemptedSamples: 1000, bvhErrorRate: 0.0002, transparencyLimitRate: 0.004 } });
+  assert.match($('sceneWarn').textContent, /BVH 遍历错误 0.02%（占通过镜头的光线/);
+  assert.match($('sceneWarn').textContent, /透明层超过上限 0.40%（占通过镜头的光线/);
+  assert.equal($('rate-transparencyLimitRate').style.getPropertyValue('width'), '0.4%');
+});
+
+test('V2: diagnostics show real timings and BVH summary; nullable timings as —', () => {
+  const { $, store } = setup();
+  assert.match($('diagList').textContent, /计算耗时（GPU，单分块）—/, 'null GPU timing is not invented');
+  assert.match($('diagList').textContent, /光照刷新（CPU 提交）— · 0 次/);
+  assert.match($('diagList').textContent, /BVH 构建—/);
+  store.update({
+    diagnostics: { ...store.getState().diagnostics, computeMs: 3.456, lightingRefreshMs: 12.34, lightingRefreshes: 2 },
+    scene: { ...store.getState().scene, status: 'ready', summary: { instances: 12, uniqueTriangles: 3400, bvhNodes: 5000, tlasDepth: 4, maxBlasDepth: 18,
+      gpuBytes: 2 * 1024 * 1024, buildWallMs: 85.2, worker: true, unsupported: [] } },
+    revisions: { geometry: 1, material: 2, lighting: 3, camera: 4, optics: 5, display: 6, accumulation: 7 },
+  });
+  const text = $('diagList').textContent;
+  assert.match(text, /计算耗时（GPU，单分块）3.46 ms/);
+  assert.match(text, /光照刷新（CPU 提交）12.3 ms · 2 次/);
+  assert.match(text, /场景实例12/);
+  assert.match(text, /基础三角形3,400/);
+  assert.match(text, /BVH 节点 \/ 深度5,000 \/ TLAS 4 · BLAS ≤18/);
+  assert.match(text, /BVH 显存2.0 MiB/);
+  assert.match(text, /BVH 构建85.2 ms · Worker/);
+  assert.match(text, /1 \/ 2 \/ 3 \/ 4 \/ 5 \/ 6 \/ 7/);
+  assert.doesNotMatch(text, /捕获/);
+});
+
+test('V2: geometry diagnostics are grouped with a restart hint; rebuildScene dispatches', async () => {
+  const { $, store, calls } = setup();
+  const values = $('diagSelect').options.map((o) => o.value);
+  assert.deepEqual(values, ['beauty', 'scene-error', 'status', 'geometry-depth', 'geometry-normal', 'geometry-material']);
+  const group = $('diagSelect').querySelector('optgroup');
+  assert.match(group.getAttribute('label'), /几何\/法线\/材质诊断（重新累计）/);
+  assert.equal(group.children.length, 3);
+  assert.equal($('diagHint').textContent, '');
+  store.update({ display: { ...store.getState().display, diagnostic: 'geometry-depth' } });
+  assert.match($('diagHint').textContent, /^亮=近 exp\(-t\/15 m\) · 不经曝光\/Bloom · 切换几何类视图会重新累计$/);
+  store.update({ display: { ...store.getState().display, diagnostic: 'geometry-normal' } });
+  assert.match($('diagHint').textContent, /^世界法线×0\.5\+0\.5 · /);
+  store.update({ display: { ...store.getState().display, diagnostic: 'geometry-material' } });
+  assert.match($('diagHint').textContent, /^材质 ID 哈希色 · /);
+  store.update({ display: { ...store.getState().display, diagnostic: 'status' } });
+  assert.match($('diagHint').textContent, /^R=数值失败 · G=镜头遮挡\/全反射 · B=场景命中 · 不经曝光\/Bloom$/);
+  store.update({ display: { ...store.getState().display, diagnostic: 'scene-error' } });
+  assert.match($('diagHint').textContent, /^R=BVH错误\/透明层超限 · G=未支持材质 · B=水面反射出参考视野 · 黑=无 · /);
+  assert.doesNotMatch($('diagHint').textContent, /重新累计/);
+  $('rebuildButton').click();
   await flush();
-  assert.deepEqual(types(calls), [['setDiagnostic', 'cache-miss']]);
-  assert.match($('diagList').textContent, /捕获耗时未测量/, 'null timings are not invented');
-  assert.equal($('rate-cacheMissRate').style.getPropertyValue('width'), '25%');
+  assert.deepEqual(types(calls), [['rebuildScene', undefined]]);
+  store.update({ scene: { ...store.getState().scene, status: 'building' } });
+  assert.equal($('rebuildButton').disabled, true, 'no second rebuild while one is building');
 });
 
 test('command failures are shown, controls re-sync to the store, errors can be dismissed', async () => {
@@ -368,11 +456,15 @@ test('summary states raster vs lens honestly, including diagnostic views', () =>
   const { $, store } = setup();
   assert.match($('summary').textContent, /光栅近似预览（非镜头成像）/);
   store.update({ mode: 'lens', sampling: { ...store.getState().sampling, spp: 0 } });
+  assert.match($('summary').textContent, /场景准备中，尚无样本/, 'no samples before the BVH is ready');
+  store.update({ scene: { ...store.getState().scene, status: 'error', message: 'Worker 失败' } });
+  assert.match($('summary').textContent, /场景准备失败，无样本/);
+  store.update({ scene: { ...store.getState().scene, status: 'ready', message: 'BVH 就绪' } });
   assert.match($('summary').textContent, /等待首批样本/);
   store.update({ sampling: { ...store.getState().sampling, spp: 8, targetSpp: 64 } });
   assert.match($('summary').textContent, /镜头追迹 · 8\/64 spp/);
-  store.update({ display: { ...store.getState().display, diagnostic: 'cache-miss' } });
-  assert.match($('summary').textContent, /诊断视图：缓存未命中（非成像）/);
+  store.update({ display: { ...store.getState().display, diagnostic: 'scene-error' } });
+  assert.match($('summary').textContent, /诊断视图：场景错误分布（非成像）/);
 });
 
 test('panel collapses with the toggle and Escape; starts collapsed on narrow screens', () => {
@@ -524,13 +616,19 @@ test('uncalibrated focus after image-distance micro-adjust is never shown as inf
 test('rate labels state their denominators', () => {
   const { $, store } = setup();
   assert.equal($('rateRow-opticalPassRate').hidden, true, 'optional field hidden until the backend provides it');
-  store.update({ diagnostics: { ...store.getState().diagnostics, attemptedSamples: 1000, cacheMissRate: 0.3, opticalPassRate: 0.5, tirRate: 0.01 } });
+  store.update({ diagnostics: { ...store.getState().diagnostics, attemptedSamples: 1000, opticalPassRate: 0.5, tirRate: 0.01, sceneHitOfPassed: 0.8 } });
   assert.equal($('rateRow-opticalPassRate').hidden, false);
   assert.match($('rates').textContent, /占尝试光线通过镜头/);
-  assert.match($('rates').textContent, /占通过镜头的光线场景缓存未命中/);
-  assert.match($('rateRow-cacheMissRate').getAttribute('title'), /占通过镜头的光线/);
-  assert.match($('rateRow-tirRate').getAttribute('title'), /占尝试光线/);
-  assert.match($('cacheWarnText').textContent, /场景缓存未命中偏高：30.0%（占通过镜头的光线）/);
+  assert.match($('rates').textContent, /占通过镜头的光线场景命中/);
+  for (const key of ['sceneHitOfPassed', 'backgroundOfPassed', 'unsupportedRate', 'transparencyLimitRate', 'bvhErrorRate', 'reflectionOutsideRate']) {
+    assert.match($(`rateRow-${key}`).getAttribute('title'), /占通过镜头的光线/, key);
+  }
+  for (const key of ['opticalBlockedRate', 'tirRate', 'numericalErrorRate', 'hitRate', 'backgroundRate', 'radianceInvalidRate']) {
+    assert.match($(`rateRow-${key}`).getAttribute('title'), /占尝试光线/, key);
+  }
+  assert.equal($('rateText-sceneHitOfPassed').textContent, '80.0%');
+  assert.equal($('rateRow-hitRate').hidden, true, 'hidden until the backend publishes it');
+  assert.equal($('rateRow-cacheMissRate'), null, 'removed field has no row');
 });
 
 test('live breakpoint changes re-apply the remembered choice for each layout', () => {

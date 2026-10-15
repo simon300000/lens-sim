@@ -20,6 +20,7 @@ export function createGPUInterop(renderer) {
   return {
     device,
     get compilations(){return compilations;},
+    get liveBuffers(){return resources.size;},
     buffer,
     uniform(data,label){return buffer(data.byteLength,GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST,label,data);},
     storage(dataOrSize,label){const size=typeof dataOrSize==='number'?dataOrSize:dataOrSize.byteLength;return buffer(size,GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST|GPUBufferUsage.COPY_SRC,label,typeof dataOrSize==='number'?null:dataOrSize);},

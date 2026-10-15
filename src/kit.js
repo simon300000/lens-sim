@@ -1,5 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { positionLocal, positionView, normalView, sin, mix, materialColor, mx_noise_float, vec3 } from 'three/tsl';
+import { WOOD } from './scene/procedural-params.js';
+import { setLensMaterial, PROCEDURAL } from './scene/lens-registry.js';
 export { THREE };
 
 export function rng(seed = 42) {
@@ -16,18 +18,21 @@ export function mat(color, roughness = .85, extra = {}) {
 }
 
 export function woodMat(tint='#92714b') {
-  const m=mat(tint,.79);
+  const m=mat(tint,.79),W=WOOD;
   const p=positionLocal;
-  const n=mx_noise_float(p.mul(vec3(3.2,25,3.2)));
-  const grain=sin(p.y.mul(185).add(n.mul(12))).mul(.5).add(.5);
-  m.colorNode=materialColor.mul(mix(.77,1.08,grain.mul(.48).add(n.mul(.2)).add(.2)));
-  m.roughnessNode=grain.mul(.10).add(.70);
+  const n=mx_noise_float(p.mul(vec3(...W.noiseScale)));
+  const grain=sin(p.y.mul(W.grainFrequency).add(n.mul(W.grainWarp))).mul(.5).add(.5);
+  m.colorNode=materialColor.mul(mix(W.colorLow,W.colorHigh,grain.mul(W.colorGrain).add(n.mul(W.colorNoise)).add(W.colorBias)));
+  m.roughnessNode=grain.mul(W.roughnessGrain).add(W.roughnessBase);
   // Surface-gradient bump mapping works on the custom gables as well as UV
   // primitives, so procedural grain never requires an image or UV attribute.
-  const height=grain.mul(.00028);
+  const height=grain.mul(W.bumpHeight);
   const dx=positionView.dFdx(),dy=positionView.dFdy();
   const r1=dy.cross(normalView),r2=normalView.cross(dx),det=dx.dot(r1);
   m.normalNode=normalView.mul(det.abs()).sub(r1.mul(height.dFdx()).add(r2.mul(height.dFdy())).mul(det.sign())).normalize();
+  // The lens evaluator re-implements exactly this graph from the same WOOD
+  // constants, with an analytic grain/finite-difference noise gradient.
+  setLensMaterial(m,{kind:PROCEDURAL.WOOD});
   return m;
 }
 

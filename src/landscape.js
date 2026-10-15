@@ -230,5 +230,5 @@ export function buildLandscape(scene, pondOutline=[]) {
   }
   makeBatch(root,stoneGeometry(831,1),mat('#ffffff'),rocks);
   const forest=woodland(root);
-  return {root, metadata:{...forest,mountainRanges:ranges.length,pondHole:pondOutline.length>2,procedural:true}};
+  return {root, meadow:garden, metadata:{...forest,mountainRanges:ranges.length,pondHole:pondOutline.length>2,procedural:true}};
 }

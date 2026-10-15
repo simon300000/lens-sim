@@ -1,0 +1,24 @@
+<!doctype html><html><body><pre id="result">probe</pre><script type="module">
+import * as THREE from 'three/webgpu';
+import { buildSanteiScene } from '/src/scene/santei-scene.js';
+import { createDaylight } from '/src/lighting.js';
+const out=document.querySelector('#result'),step=l=>console.log('[step] '+l+' '+performance.now().toFixed(0));const errors=[];
+const q=new URLSearchParams(location.search);
+try{
+  const renderer=new THREE.WebGPURenderer({antialias:false});await renderer.init();renderer.setSize(120,80);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.backend.device.addEventListener('uncapturederror',e=>{errors.push(e.error.message);step('GPU ERROR '+e.error.message.split('\n')[0]);});
+  const {scene,details}=buildSanteiScene();
+  if(q.get('setlamps')!=='0')for(const lamp of details.lamps.slice(0,2)){lamp.light.castShadow=true;lamp.light.shadow.mapSize.set(512,512);lamp.light.shadow.camera.near=.08;lamp.light.shadow.camera.far=11;lamp.light.shadow.camera.layers.set(1);}
+  const daylight=createDaylight(scene,renderer,{details});
+  const camera=new THREE.PerspectiveCamera(40,1.5,.15,450);camera.position.set(21,13,27);camera.lookAt(0,2.7,2);camera.updateMatrixWorld();
+  if(q.get('warm')==='1'){for(const hour of [0,5.5]){daylight.update({hour,date:'2026-09-26'},true);renderer.setRenderTarget(new THREE.RenderTarget(120,80,{type:THREE.HalfFloatType}));renderer.render(scene,camera);renderer.setRenderTarget(null);await renderer.backend.device.queue.onSubmittedWorkDone();step('warm '+hour);}}
+  daylight.update({hour:16.5,date:'2026-09-26'},true);
+  const big=new THREE.RenderTarget(120,80,{type:THREE.HalfFloatType}),tiny=new THREE.RenderTarget(16,11,{type:THREE.HalfFloatType});
+  const draw=async(t,l)=>{renderer.setRenderTarget(t);renderer.render(scene,camera);renderer.setRenderTarget(null);await renderer.backend.device.queue.onSubmittedWorkDone();step(l);};
+  await draw(big,'day big');
+  daylight.update({hour:0,date:'2026-09-26'},true);
+  await draw(q.get('target')==='tiny'?tiny:big,'night first');
+  await draw(big,'night big');
+  out.textContent=JSON.stringify({errors});document.body.dataset.passed=String(errors.length===0);
+}catch(e){out.textContent=String(e.stack||e);document.body.dataset.passed='false';}
+</script></body></html>

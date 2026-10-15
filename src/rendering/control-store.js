@@ -8,10 +8,18 @@ export function createControlStore(initial = {}) {
     sampling: { targetSpp: 64, spp: 0, batchSpp: 4, resolution: 480, paused: false, seed: 1 },
     display: { exposureEV: 0, bloom: true, diagnostic: 'beauty', output: 'auto', actualOutput: 'pending' },
     af: { status: 'idle', message: '', autoOnRelease: false },
-    diagnostics: { captures: 0, pipelineCompilations: 0, cacheMissRate: 0, numericalErrorRate: 0,
-      opticalBlockedRate: 0, tirRate: 0, attemptedSamples: 0, captureMs: null, computeMs: null,
+    // Rates are over all attempts; *OfPassed and scene-side error rates use
+    // optical paths that reached the scene as denominator.
+    diagnostics: { pipelineCompilations: 0, numericalErrorRate: 0, opticalBlockedRate: 0, tirRate: 0,
+      bvhErrorRate: 0, unsupportedRate: 0, transparencyLimitRate: 0, radianceInvalidRate: 0, reflectionOutsideRate: 0,
+      attemptedSamples: 0, lightingRefreshMs: null, lightingRefreshes: 0, computeMs: null,
       timingSource: '尚未测量', width: 0, height: 0, memoryBytes: 0 },
-    revisions: { scene: 0, optics: 0, display: 0, accumulation: 0 }, ...initial,
+    // Lens image = nearest real BVH surface + real-time lighting from raster resources.
+    renderModel: { id: 'geometry-first-hit-realtime-lighting', label: '几何首交点 + 实时光照',
+      approximations: ['直接光与环境光为实时近似，不做场景多次反弹', '阴影来自光栅阴影贴图', '水面反射为参考视点平面反射',
+        '透明层沿同一射线有界合成，未模拟折射', '无屏幕空间 AO（GTAO 仅用于光栅导航）', '雾按实际路径长度计算'] },
+    scene: { status: 'pending', message: '', summary: null, lighting: null },
+    revisions: { geometry: 0, material: 0, lighting: 0, camera: 0, optics: 0, display: 0, accumulation: 0 }, ...initial,
   };
   let handler = null;
   const listeners = new Set();
