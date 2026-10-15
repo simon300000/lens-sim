@@ -28,7 +28,7 @@ button.onclick=async()=>{
   const options=new URLSearchParams(location.search),ids=options.has('lens')?[options.get('lens')]:sweepIds;
   for(const id of ids){
    progress.textContent=`预计算 ${id}`;await new Promise(r=>setTimeout(r,0));
-   const lens=(await(await fetch(`/lenses/${id}.json`)).json()).configurations[0],p=packLens(lens);
+   const lens=(await(await fetch(`/lenses/${id}.json`)).json()).configurations[0],p=packLens(lens,{sensorZMm:lens.sensorZMm});
    const baseline=legacyBuild(lens,p),variants=[{name:'legacy32',table:baseline},...[32,64,128,256].map(bins=>({name:'iterative'+bins,table:buildPupilTable(lens,p,{bins})}))];
    const U=uniform(p.parameters),S=storage(p.surfaces),L=storage(p.lut.values);
    const group=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[[0,U],[1,S],[2,L],[3,Q],[4,O],[20,T]].map(([binding,buffer])=>({binding,resource:{buffer}}))});

@@ -10,7 +10,7 @@ const area=b=>(b[1]-b[0])*(b[3]-b[2]);
 export async function pupilSweep(load,{ids=sweepIds,bins=[32,64,128,256],samples=16384,fine=192,progress=()=>{}}={}){
  const results=[];
  for(const id of ids){
-  const lens=await load(id),p=packLens(lens),legacy=legacyBuild(lens,p),variants=[{name:'legacy32',table:legacy,sample:legacySample}];
+  const lens=await load(id),p=packLens(lens,{sensorZMm:lens.sensorZMm}),legacy=legacyBuild(lens,p),variants=[{name:'legacy32',table:legacy,sample:legacySample}];
   for(const n of bins)variants.push({name:'iterative'+n,table:buildPupilTable(lens,p,{bins:n}),sample:samplePupil});
   const rows=[];
   // Independent heights include interior quarter-bin locations, not just the
