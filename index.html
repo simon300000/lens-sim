@@ -6,6 +6,8 @@
     <meta name="theme-color" content="#eeeadd" />
     <meta name="description" content="一座用 WebGPU 呈现的山间别墅与日式庭园。全部建筑、植物、鱼塘和材质由代码生成。" />
     <title>lens-sim</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/ui/lens-ui.css" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   </head>
   <body>
@@ -20,7 +22,12 @@
       <div class="time-marks" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
       <div class="time-bottom"><div class="time-presets" aria-label="时间预设"><button type="button" data-hour="5.5"><i class="time-icon time-icon-dawn" aria-hidden="true"></i>晨光</button><button type="button" data-hour="12"><i class="time-icon time-icon-sun" aria-hidden="true"></i>正午</button><button type="button" data-hour="17.5"><i class="time-icon time-icon-dusk" aria-hidden="true"></i>薄暮</button><button type="button" data-hour="0"><i class="time-icon time-icon-moon" aria-hidden="true"></i>子夜</button></div><span id="time-readout" class="time-readout">太阳与月亮随时光流转</span></div>
     </section>
-    <div id="loading" role="status"><p id="loading-message">正在加载场景</p><span class="loading-line"></span></div>
-    <script type="module" src="/src/main.js"></script>
+    <div id="loading" role="status" aria-live="polite" aria-busy="true">
+      <p id="loading-message">正在载入程序</p>
+      <progress id="loading-progress" max="10" value="0" aria-label="启动阶段进度"></progress>
+      <p id="loading-detail">启动阶段 1 / 10</p>
+      <p id="loading-elapsed" aria-hidden="true">已用 0 秒</p>
+    </div>
+    <script type="module" src="/src/startup.js"></script>
   </body>
 </html>

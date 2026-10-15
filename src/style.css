@@ -16,3 +16,13 @@ body[data-night="true"]{color:#e0dece}body[data-night="true"]::after{background:
 body[data-night="true"] .identity{background:rgba(18,29,36,.42)}
 .output-status{font-size:8px;letter-spacing:1px;border:1px solid currentColor;border-radius:3px;padding:3px 5px;margin-right:5px;pointer-events:auto}
 @media(max-width:700px){.time-controls{left:50%;transform:translateX(-50%)}.caption{display:none}}
+
+/* Available from the HTML head, before any rendering modules execute. */
+#loading{padding:24px;gap:14px}
+#loading-message{margin:0;font-size:13px;letter-spacing:2px;color:#59634e;max-width:440px;text-align:center;line-height:2}
+#loading-progress{width:min(320px,80vw);height:5px;border:0;border-radius:3px;overflow:hidden;appearance:none;-webkit-appearance:none;background:#d6d9c9;color:#7c8969}
+#loading-progress::-webkit-progress-bar{background:#d6d9c9;border-radius:3px}
+#loading-progress::-webkit-progress-value{background:#7c8969;border-radius:3px;transition:width .2s}
+#loading-progress::-moz-progress-bar{background:#7c8969;border-radius:3px}
+#loading-detail,#loading-elapsed{margin:0;max-width:440px;text-align:center;font-size:11px;line-height:1.8;color:#7c846e;font-variant-numeric:tabular-nums}
+#loading.error #loading-progress{display:none}

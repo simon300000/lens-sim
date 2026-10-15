@@ -5,6 +5,7 @@ import { buildGarden } from '../garden.js';
 import { buildLandscape } from '../landscape.js';
 import { buildDetails } from '../details.js';
 import { applyMeadowVariation, applyWaterSurface } from './procedural-materials.js';
+import { LOCAL_LAMP_SHADOW_LAYER } from './render-layers.js';
 
 /** The SANTEI villa scene, shared by the application and GPU benchmarks.
  * Lights from daylight (Sun/Moon/sky) are added by the caller. */
@@ -19,13 +20,13 @@ export function buildSanteiScene() {
   const details=buildDetails(scene,{garden,villa,vegetation,landscape});
   // Both paper lanterns need wall/roof occlusion. Their shadow cameras see the
   // local joinery layer, keeping the entire remote forest out of six cube faces.
-  villa.group.traverse(o=>{if(o.isMesh)o.layers.enable(1);});
-  details.group.traverse(o=>{if(o.isMesh)o.layers.enable(1);});
+  villa.group.traverse(o=>{if(o.isMesh)o.layers.enable(LOCAL_LAMP_SHADOW_LAYER);});
+  details.group.traverse(o=>{if(o.isMesh)o.layers.enable(LOCAL_LAMP_SHADOW_LAYER);});
   for(const lamp of details.lamps.slice(0,2)){
     lamp.light.castShadow=true;
     lamp.light.shadow.mapSize.set(512,512);
     lamp.light.shadow.camera.near=.08;lamp.light.shadow.camera.far=11;
-    lamp.light.shadow.camera.layers.set(1);
+    lamp.light.shadow.camera.layers.set(LOCAL_LAMP_SHADOW_LAYER);
     lamp.light.shadow.bias=-.00008;lamp.light.shadow.normalBias=.025;
   }
   details.metadata.shadowedLamps=2;

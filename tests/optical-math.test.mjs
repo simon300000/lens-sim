@@ -78,6 +78,9 @@ test('default ABCD agrees with pinned upstream reference and only stop aperture 
   const limits=apertureLimits(defaultLens);
   close(limits.maxStopRadiusMm,9.3137,1e-10);
   close(limits.minFNumber,1.787827484,2e-6);
+  const wideOpen=packLens(defaultLens);
+  close(wideOpen.fNumber,limits.minFNumber);
+  close(wideOpen.stopRadiusMm,limits.maxStopRadiusMm);
   const packed=packLens(defaultLens,{fNumber:4});
   close(packed.stopRadiusMm,Math.abs(p.focalLengthMm*p.pupilMagnification)/8);
   const numbers=new Float32Array(packed.surfaces.buffer);

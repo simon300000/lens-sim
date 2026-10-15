@@ -3,9 +3,6 @@
    body::after and body[data-night="true"]::after in style.css regardless of stylesheet order. */
 html body.lens-ui-mounted::after{content:none;display:none;background:none}
 
-/* The loading message's old style hung off `.loading-mark+p`; the brand mark is gone, so style it directly. */
-#loading-message{margin:0;font-size:10px;letter-spacing:3px;color:#7c846e;max-width:440px;text-align:center;line-height:2}
-
 /* Centre AF-S point. Fixed to the viewport centre (the letterboxed 36×24 sensor shares it), click-through,
    static (no animation), drawn with a light stroke and dark halo so it reads on any part of the scene. */
 .lens-ui-reticle{position:fixed;left:50%;top:50%;z-index:2;width:30px;height:20px;transform:translate(-50%,-50%);
