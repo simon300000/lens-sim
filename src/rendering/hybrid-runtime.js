@@ -36,9 +36,9 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
   let disposed=false,commandRevision=0,lensLoadRevision=0,statisticsRevision=0,lastStatisticsSpp=-1,statisticsBusy=false,lastError=null;
   let displayPipeline=null,imageNode=null,bloomNode=null,lightingDirty=true,sceneBuild=null;
   const viewportAspect=uniform(innerWidth/innerHeight),rawDisplay=uniform(0);
-  let diagnosticDirty=false,samplesInFlight=0;
+  let diagnosticDirty=false,samplesInFlight=0,rasterCameraDirty=false;
   const update=patch=>store.update(patch);
-  const state=()=>store.getState();
+  const state=()=>store.peekState();
   function cancelFocus(){commandRevision++;const af=state().af;if(af.status==='busy')update({af:{...af,status:'idle',message:'参数改变，已取消过期对焦'}});}
   function clearMetrics(){const d=state().diagnostics;update({diagnostics:{...d,attemptedSamples:0,numericalErrorRate:0,opticalBlockedRate:0,tirRate:0,hitRate:0,backgroundRate:0,
     opticalPassRate:0,bvhErrorRate:0,unsupportedRate:0,transparencyLimitRate:0,radianceInvalidRate:0,reflectionOutsideRate:0,sceneHitOfPassed:0,backgroundOfPassed:0}});diagnosticDirty=true;}
@@ -205,7 +205,14 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
   }
   function cameraChanged(){
     if(disposed)return;lightingDirty=true;
-    if(state().af.status==='busy')update({af:{...state().af,status:'idle',message:'相机改变，已丢弃过期对焦'}});
+    // Raster navigation does not consume the optical image. Clear it once and
+    // retain the latest pose via lightingDirty, without rebuilding UI snapshots
+    // and resetting optical buffers for every damping/keyboard frame.
+    if(state().mode==='raster'){
+      cancelFocus();
+      if(rasterCameraDirty){if(interacting&&!pointerActive)scheduleRelease();return;}
+      rasterCameraDirty=true;
+    }
     resetAccumulation('camera');
     if(interacting&&!pointerActive)scheduleRelease();
   }
@@ -214,7 +221,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
     if(s.status!=='ready'&&!recovery)throw new Error('镜头后端尚未就绪');
     const finite=(min,max)=>{if(!Number.isFinite(value)||value<min||value>max)throw new Error(`参数范围 ${min}–${max}`);return value;};
     switch(type){
-      case 'setMode':if(!['raster','lens'].includes(value))throw new Error('无效视图');update({mode:value});if(value==='lens')lightingDirty=true;requestFrame();break;
+      case 'setMode':if(!['raster','lens'].includes(value))throw new Error('无效视图');rasterCameraDirty=false;update({mode:value});if(value==='lens')lightingDirty=true;requestFrame();break;
       case 'selectLens':await loadLens(value);break;
       case 'selectConfiguration':await loadLens(s.lensId,value);break;
       case 'setFNumber':finite(...s.limits.fNumber);applyOpticalChange({fNumber:value});break;
@@ -245,7 +252,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
   function scheduleRelease(){
     clearTimeout(releaseTimer);releaseTimer=setTimeout(async()=>{
       interacting=false;
-      try{if(engine&&await engine.resizeChecked(state().sampling.resolution)){bindImage();resetAccumulation();}}
+      try{if(state().mode==='lens'&&engine&&await engine.resizeChecked(state().sampling.resolution)){bindImage();resetAccumulation();}}
       catch(error){if(!disposed)update({sampling:{...state().sampling,resolution:engine.dimensions.width},error:error.message});}
       if(disposed)return;
       if(state().af.autoOnRelease&&state().status==='ready')focusAt(null,true).catch(()=>{});requestFrame();
@@ -261,7 +268,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
     setInteracting(value){
       clearTimeout(releaseTimer);
       pointerActive=value;
-      if(value){interacting=true;if(engine?.resize(240)){bindImage();resetAccumulation();}}
+      if(value){interacting=true;if(state().mode==='lens'&&engine?.resize(240)){bindImage();resetAccumulation();}}
       else scheduleRelease();
     },
     needsFrame(){const s=state();return !disposed&&samplesInFlight<(interacting?1:maxSamplesInFlight)&&!document.hidden&&s.mode==='lens'&&s.status==='ready'&&sceneResources.ready&&!s.sampling.paused&&s.af.status!=='busy'&&hasSamplesRemaining(engine.spp,s.sampling.targetSpp);},

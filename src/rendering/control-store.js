@@ -26,6 +26,8 @@ export function createControlStore(initial = {}) {
   const snapshot = () => structuredClone(state);
   return {
     getState: snapshot,
+    // Runtime-only read view: never mutate it. Public snapshots remain isolated.
+    peekState: () => state,
     subscribe(listener) { listeners.add(listener); listener(snapshot()); return () => listeners.delete(listener); },
     update(patch) { state = { ...state, ...patch }; for (const listener of listeners) listener(snapshot()); },
     setHandler(next) { handler = next; },

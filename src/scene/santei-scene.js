@@ -5,6 +5,7 @@ import { buildGarden } from '../garden.js';
 import { buildLandscape } from '../landscape.js';
 import { buildDetails } from '../details.js';
 import { applyMeadowVariation, applyWaterSurface } from './procedural-materials.js';
+import { batchStaticSiblings, partitionStaticInstances } from './static-batches.js';
 import { LOCAL_LAMP_SHADOW_LAYER } from './render-layers.js';
 
 /** The SANTEI villa scene, shared by the application and GPU benchmarks.
@@ -37,5 +38,8 @@ export function buildSanteiScene() {
   });
   applyMeadowVariation(landscape.meadow.material);
   if(garden.water)applyWaterSurface(garden.water);
+  villa.group.userData.staticBatches=batchStaticSiblings(villa.group);
+  garden.garden.userData.staticBatches=batchStaticSiblings(garden.garden);
+  landscape.root.userData.spatialBatches=partitionStaticInstances(landscape.root);
   return { scene, garden, landscape, villa, vegetation, details };
 }
