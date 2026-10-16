@@ -43,8 +43,8 @@ body[data-night="true"] :is(.lens-ui,.lens-bench) :is(select,input){color-scheme
 .lens-ui select{-webkit-appearance:none;appearance:none;padding-right:24px;
   background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
   background-position:calc(100% - 13px) 50%,calc(100% - 9px) 50%;background-size:4px 4px;background-repeat:no-repeat}
-.lens-ui select option,.lens-ui select optgroup{color:#1d221e;background:#f7f6f1}
-body[data-night="true"] .lens-ui select option,body[data-night="true"] .lens-ui select optgroup{color:#eceee8;background:#1d2327}
+.lens-ui select option,.lens-ui select optgroup{color:#1c2129;background:#f7f6f1}
+body[data-night="true"] .lens-ui select option,body[data-night="true"] .lens-ui select optgroup{color:#eceef2;background:#1d2327}
 :is(.lens-ui,.lu-hud,.lens-bench) :is(select,input,button):disabled{opacity:.42;cursor:not-allowed}
 :is(.lens-ui,.lens-bench) input[aria-invalid="true"]{border-color:var(--ui-error)!important;box-shadow:0 0 0 2px var(--ui-error-bg)}
 .lens-ui input[type="number"]{-moz-appearance:textfield;appearance:textfield}
@@ -116,7 +116,7 @@ body[data-night="true"] .lens-ui select option,body[data-night="true"] .lens-ui 
 .lu-chevron{flex:none;width:7px;height:7px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:translateY(-2px) rotate(45deg);opacity:.5}
 .lens-ui[data-open="true"] .lu-chevron{transform:translateY(2px) rotate(-135deg)}
 
-.lu-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:2px 10px 10px;display:flex;flex-direction:column;gap:8px;
+.lu-body{flex:1;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding:2px 10px 10px;display:flex;flex-direction:column;gap:8px;
   scrollbar-width:thin;scrollbar-color:var(--ui-line-strong) transparent}
 .lens-ui:not([data-open="true"]) .lu-foot{display:none}
 
