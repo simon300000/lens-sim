@@ -134,13 +134,14 @@ export function createLensUI({ store, container } = {}) {
             h('input', { type: 'number', ref: 'focusInput', id: id('focusInput'), class: 'lu-num', step: 0.01, min: 0, inputmode: 'decimal', 'aria-label': '对焦距离（米）', 'aria-describedby': id('focusHint') }),
             h('span', { class: 'lu-unit', 'aria-hidden': 'true', text: 'm' })),
           h('button', { type: 'button', class: 'lu-btn lu-inf', ref: 'focusInf', 'aria-label': '对焦到无穷远', title: '对焦到无穷远', text: '∞' })),
-        h('div', { class: 'lu-row' }, label('imageInput', '像距'),
+        // Image distance stays wired up but is hidden here; the lens workbench is where it is inspected.
+        h('div', { class: 'lu-row', hidden: true }, label('imageInput', '像距'),
           h('div', { class: 'lu-stepper' },
             h('button', { type: 'button', class: 'lu-nudge', ref: 'imageMinus', 'aria-label': `像距减 ${IMAGE_NUDGE_MM} mm`, text: '−' }),
             h('input', { type: 'number', ref: 'imageInput', id: id('imageInput'), class: 'lu-num lu-num-wide', step: 0.001, inputmode: 'decimal', 'aria-describedby': `${id('imageHint')} ${id('focusHint')}` }),
             h('span', { class: 'lu-unit', 'aria-hidden': 'true', text: 'mm' }),
             h('button', { type: 'button', class: 'lu-nudge', ref: 'imagePlus', 'aria-label': `像距加 ${IMAGE_NUDGE_MM} mm`, text: '+' }))),
-        hint('imageHint'),
+        h('p', { class: 'lu-hint', ref: 'imageHint', id: id('imageHint'), hidden: true }),
         hint('focusHint'),
         check('afRelease', '环视松手后自动对焦')),
 
