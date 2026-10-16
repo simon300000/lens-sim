@@ -41,7 +41,7 @@
  const observer=new MutationObserver(()=>{
   const label=document.querySelector('#loading-message')?.textContent;
   if(profile.stage!==label){profile.stage=label;events.push({category:'stage',name:label,start:performance.now(),...state()});}
-  if(document.querySelector('#scene')?.dataset.ready==='true'&&!profile.finishing){profile.finishing=true;setTimeout(finish,1000);}
+  if(document.querySelector('#scene')?.dataset.ready==='true'&&!profile.finishing){profile.finishing=true;profile.readyAt=performance.now();setTimeout(finish,1000);}
  });observer.observe(document.documentElement,{subtree:true,childList:true,characterData:true,attributes:true,attributeFilter:['data-ready']});
  async function finish(){if(stopped)return;stopped=true;clearInterval(heartbeat);observer.disconnect();profile.finished=performance.now();profile.scene=window.__SANTEI__?.diagnostics;profile.viewport={width:innerWidth,height:innerHeight,dpr:devicePixelRatio};profile.state=state();
   const table=window.__SANTEI__?.hybrid?.engine?.pupilTable;

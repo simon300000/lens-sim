@@ -249,10 +249,13 @@ export function buildVegetation(scene) {
 
   makeBatch(garden,woodGeometry,brown,branches);
   makeBatch(garden,thinGeometry,twig,twigs);
-  // These five leaf sets share geometry, material, parent space and shadow state.
-  makeBatch(garden,leaf,green,[...leaves[0],...leaves[2],...shrubLeaves,...fernLeaves,...bambooLeaves]);
+  makeBatch(garden,leaf,green,leaves[0]);
   makeBatch(garden,mapleLeaf,pale,leaves[1]);
+  makeBatch(garden,leaf,green,leaves[2]);
+  makeBatch(garden,leaf,green,shrubLeaves);
+  makeBatch(garden,leaf,green,fernLeaves);
   makeBatch(garden,rodGeometry,stemMaterial,fernStems);
+  makeBatch(garden,leaf,green,bambooLeaves);
   makeBatch(garden,blade,grassMaterial,grass,{shadow:false});
   makeBatch(garden,rodGeometry,stemMaterial,stems,{shadow:false});
   makeBatch(garden,leaf,green,flowerLeaves,{shadow:false});

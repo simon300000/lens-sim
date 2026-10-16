@@ -31,9 +31,26 @@ export async function benchmarkApplication({trials=3,targetSpp=256}={}){
    rows.push({trial,wallMs,spp:engine.spp,attempts:engine.dimensions.width*engine.dimensions.height*engine.spp,
     attemptedPerSecond:engine.dimensions.width*engine.dimensions.height*engine.spp/(wallMs/1000),gpuTimestampMs:gpu,stats,pixelAccumSHA256:hash});
   }
+  // Separate raw production-kernel timing from the application's RAF/display
+  // throughput. A queue fence per measured batch is intentional benchmark work.
+  const kernel=[];
+  engine.reset();
+  for(let i=0;i<2;i++){engine.sample({batchSpp:4,targetSpp:0,seed:1});await interop.device.queue.onSubmittedWorkDone();}
+  for(let trial=0;trial<trials;trial++){
+    engine.reset();const batches=[];
+    for(let i=0;i<16;i++){
+      const start=performance.now();engine.sample({batchSpp:4,targetSpp:0,seed:1});
+      await interop.device.queue.onSubmittedWorkDone();const wallMs=performance.now()-start;
+      await new Promise(resolve=>setTimeout(resolve,0));
+      batches.push({wallMs,gpuMs:engine.lastTiming?.ms??null});
+    }
+    const stats=await engine.statistics(),data=await engine.readAccumulation();
+    const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',data))].map(v=>v.toString(16).padStart(2,'0')).join('');
+    kernel.push({trial,batches,spp:engine.spp,pixelAccumSHA256:hash,stats});
+  }
   const state=store.getState();
-  return {rows,visibility,foreground:visibility.every(v=>!v.hidden&&v.focused),dimensions:engine.dimensions,
+  return {rows,kernel,visibility,foreground:visibility.every(v=>!v.hidden&&v.focused),dimensions:engine.dimensions,
    lens:state.lensId,optics:state.optics,batchSpp:state.sampling.batchSpp,seed:state.sampling.seed,
-   passed:visibility.every(v=>!v.hidden&&v.focused)&&rows.every(r=>r.stats.numericalErrorRate===0&&r.stats.bvhErrorRate===0&&r.stats.radianceInvalidRate===0)};
+   passed:visibility.every(v=>!v.hidden&&v.focused)&&rows.every(r=>r.stats.numericalErrorRate===0&&r.stats.bvhErrorRate===0&&r.stats.radianceInvalidRate===0)&&kernel.every(r=>r.stats.numericalErrorRate===0&&r.stats.bvhErrorRate===0&&r.stats.radianceInvalidRate===0)};
  }finally{for(const event of ['visibilitychange','focus','blur'])removeEventListener(event,record);await store.dispatch('setPaused',true);}
 }

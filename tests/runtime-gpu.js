@@ -124,7 +124,9 @@ try{
   let enter,release;const entered=new Promise(resolve=>{enter=resolve;}),gate=new Promise(resolve=>{release=resolve;});
   runtime.engine.prepareLens=async(...args)=>{enter();await gate;return originalPrepare(...args);};
   const changingLens=store.dispatch('selectLens','canon-fl-50mm-f1-8');
-  await entered;runtime.cameraChanged();runtime.lightingChanged();release();await changingLens;
+  await entered;let invalidLensRejected=false;try{await store.dispatch('selectLens','missing-lens-fixture');}catch{invalidLensRejected=true;}
+  check(invalidLensRejected,'Invalid lens was accepted');
+  runtime.cameraChanged();runtime.lightingChanged();release();await changingLens;
   runtime.engine.prepareLens=originalPrepare;
   check(store.getState().status==='ready','Camera/light change stranded worker lens loading');
   await store.dispatch('setTargetSpp',64);await store.dispatch('setPaused',false);await store.dispatch('reset');

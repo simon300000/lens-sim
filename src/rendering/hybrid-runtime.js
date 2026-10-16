@@ -118,8 +118,8 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
     cancelFocus();update({optics:candidate});clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision('optics');publishEngine();requestFrame();
   }
   async function loadLens(id,index=0){
-    cancelFocus();const token=++lensLoadRevision,old=state();
     const entry=manifest.lenses.find(item=>item.id===id);if(!entry?.supported)throw new Error(entry?.reason||'镜头不可用');
+    cancelFocus();const token=++lensLoadRevision,old=state();
     update({status:'loading',error:null});
     try{
       const response=await fetch(entry.asset);if(!response.ok)throw new Error('无法加载镜头数据');
