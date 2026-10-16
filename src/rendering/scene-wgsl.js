@@ -1,5 +1,6 @@
 import intersectorSource from './scene-intersector.wgsl?raw';
 import shadingSource from './scene-shading.wgsl?raw';
+import { TEST_CHART_WGSL } from '../scene/test-chart-patterns.js';
 import { DFG_WGSL } from './dfg-lut.js';
 import { WOOD, MEADOW, WATER } from '../scene/procedural-params.js';
 
@@ -34,4 +35,4 @@ const WATER_FRESNEL_BIAS: f32 = ${f(WATER.fresnelBias)};
 const WATER_REFLECTION_GAIN: f32 = ${f(WATER.reflectionGain)};
 `;
 export const SCENE_INTERSECTOR_WGSL = intersectorSource;
-export const SCENE_SHADING_WGSL = DFG_WGSL + PROCEDURAL_WGSL + shadingSource;
+export const SCENE_SHADING_WGSL = DFG_WGSL + PROCEDURAL_WGSL + TEST_CHART_WGSL + shadingSource;

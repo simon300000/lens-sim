@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { buildTestTargets } from './test-targets.js';
 import { buildVilla } from '../villa.js';
 import { buildVegetation } from '../vegetation.js';
 import { buildGarden } from '../garden.js';
@@ -41,5 +42,6 @@ export function buildSanteiScene() {
   villa.group.userData.staticBatches=batchStaticSiblings(villa.group);
   garden.garden.userData.staticBatches=batchStaticSiblings(garden.garden);
   landscape.root.userData.spatialBatches=partitionStaticInstances(landscape.root);
-  return { scene, garden, landscape, villa, vegetation, details };
+  const testTargets=buildTestTargets(scene);
+  return { scene, garden, landscape, villa, vegetation, details, testTargets };
 }

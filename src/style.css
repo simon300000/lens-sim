@@ -37,3 +37,5 @@ body[data-night="true"] .view-hint{background:rgba(26,38,43,.94);border-color:rg
 body[data-night="true"] .camera-hint-mouse>span:nth-child(even){color:#b7c5ae}
 @media(max-width:700px){.view-hint{top:auto;right:16px;bottom:176px;width:auto;max-width:calc(100vw - 32px);padding:9px 12px;font-size:10px}.camera-hint-heading{margin-bottom:3px}}
 @media(pointer:coarse){.camera-hint-mouse{display:none}.camera-hint-touch{display:block}.view-hint{width:auto}}
+
+.test-target-links{display:flex;flex-wrap:wrap;gap:6px;pointer-events:auto}.test-target-links button{font:inherit;letter-spacing:0;border:1px solid currentColor;border-radius:4px;padding:4px 7px;color:inherit;background:rgba(238,234,221,.85);cursor:pointer}.test-target-links button:disabled{opacity:.45;cursor:wait}.test-target-links button:focus-visible{outline:2px solid currentColor;outline-offset:2px}.test-target-hint{font-size:9px;letter-spacing:0;line-height:1.5}body[data-night="true"] .test-target-links button{background:rgba(26,38,43,.85)}

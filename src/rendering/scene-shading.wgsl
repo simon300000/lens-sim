@@ -427,6 +427,7 @@ fn sceneShade(s: SceneSurface, wo: vec3f, key: u32) -> SceneShade {
     let fresnel = pow(1.0 - up, WATER_FRESNEL_POWER) * WATER_FRESNEL_SCALE + WATER_FRESNEL_BIAS;
     emissive = reflection * fresnel * WATER_REFLECTION_GAIN;
   }
+  if(m.kind>=4u && m.kind<=7u){base=vec3f(chartReflectance(s.uv,m.kind-4u));}
   let diffuseColor = base * s.color;
   roughness = min(max(roughness, 0.0525), 1.0);
   let metal = m.metalness;

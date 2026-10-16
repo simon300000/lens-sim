@@ -1,0 +1,5 @@
+<!doctype html><meta charset="utf-8"><title>Target intersector regression</title><pre id="result">Running full BVH validation</pre><script type="module">
+await import('./scene-bvh-gpu.js');
+const report=window.__bvhTest??{passed:false,error:document.querySelector('#result').textContent};
+await fetch('/__chart-report',{method:'POST',body:JSON.stringify({kind:'bvh-regression',...report})});document.title=`Target BVH ${report.passed?'PASS':'FAIL'}`;
+</script>
