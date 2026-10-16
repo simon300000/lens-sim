@@ -10,11 +10,12 @@ import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { probeHDRCanvas,isHDRConfiguration,outputRendererOptions,displayOutputNode,captureCanvasRange } from './hdr-output.js';
 import { createHybridRuntime } from './rendering/hybrid-runtime.js';
 import { createLensUI } from './ui/lens-ui.js';
+import { installActiveLightNodes } from './rendering/active-lights.js';
 import { createRasterAO } from './rendering/raster-ao.js';
 import { warmRender } from './rendering/startup-warmup.js';
 import { installNormalPassReuse } from './rendering/pass-reuse.js';
 import { startup } from './startup-progress.js';
-import { installCameraWheelTravel, installCameraLookAround } from './camera-controls.js';
+import { installCameraWheelTravel, installCameraLookAround, installCameraKeyboardTravel } from './camera-controls.js';
 
 const faults=[];
 window.addEventListener('error',event=>faults.push(event.message));
@@ -28,7 +29,7 @@ async function createScene(){
   const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});
   if(!adapter)throw new Error('未找到可用的 WebGPU 设备。请检查浏览器硬件加速设置。');
   let hdr=await probeHDRCanvas(adapter);
-  const rendererOptions={antialias:true,alpha:false,powerPreference:'high-performance',
+  const rendererOptions={antialias:false,alpha:false,powerPreference:'high-performance',
     // The lens BVH and large sensor tiles are storage buffers; request what the
     // adapter actually offers instead of relying on the 128/256 MiB defaults.
     requiredLimits:{maxTextureDimension2D:adapter.limits.maxTextureDimension2D,
@@ -41,6 +42,7 @@ async function createScene(){
     renderer=new THREE.WebGPURenderer({...rendererOptions,...outputRendererOptions(false)});
     await renderer.init();
   }
+  const disposeActiveLights=installActiveLightNodes(renderer);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));
   renderer.setSize(innerWidth,innerHeight);
   renderer.toneMapping=THREE.NoToneMapping;
@@ -91,10 +93,13 @@ async function createScene(){
   let completionRevision=-1;
   let pipeline,hybrid;
   const cameraExposure=uniform(1);
-  function wake(){if(!ready)return;framesNeeded=Math.max(framesNeeded,2);if(!rendering){rendering=true;requestAnimationFrame(frame);}}
+  function wake(){if(!ready)return;framesNeeded=Math.max(framesNeeded,2);if(!rendering){lastFrameTime=performance.now();rendering=true;requestAnimationFrame(frame);}}
   // Daylight refreshes shadows/PMREM itself; the lens bridge only repacks lights.
   function invalidate(){hybrid?.lightingChanged();wake();}
-  function frame(){
+  let lastFrameTime=performance.now();
+  function frame(now){
+    const delta=(now-lastFrameTime)/1000;lastFrameTime=now;
+    keyboardTravel.update(delta);
     // Commit the entire time state before any scene pass can cache this frame.
     if(pendingTime){const value=pendingTime;pendingTime=null;applyTime(value);}
     const revision=timeRevision,hour=sceneElement.dataset.hour;
@@ -103,7 +108,7 @@ async function createScene(){
     if(completionRevision!==revision&&sceneElement.dataset.renderedHour!==hour){completionRevision=revision;renderer.backend.device.queue.onSubmittedWorkDone().then(()=>{
       if(revision===timeRevision){sceneElement.dataset.renderedHour=hour;document.querySelector('#time-controls').setAttribute('aria-busy','false');}
     });}
-    framesNeeded--;if(framesNeeded>0||hybrid?.needsFrame())requestAnimationFrame(frame);else rendering=false;
+    framesNeeded--;if(framesNeeded>0||keyboardTravel.active||hybrid?.needsFrame())requestAnimationFrame(frame);else rendering=false;
   }
   await startup.stage(3,'初始化天空、日照与反射');
   const daylight=createDaylight(scene,renderer,{details,invalidate});
@@ -131,10 +136,12 @@ async function createScene(){
   pipeline=new THREE.RenderPipeline(renderer);
   // GTAO affects indirect light only. Direct Sun/Moon/lamp light stays governed
   // by its actual shadow map rather than an indiscriminate dark image overlay.
-  const prePass=pass(scene,camera,{type:THREE.HalfFloatType});
+  // AO needs a single surface normal/depth per pixel; resolving MSAA normals
+  // blends unrelated surfaces at silhouettes. Keep 4x MSAA on beauty only.
+  const prePass=pass(scene,camera,{type:THREE.HalfFloatType,samples:0});
   const normalMRT=mrt({output:normalView});prePass.setMRT(normalMRT);
   const normal=prePass.getTextureNode('output'),depth=prePass.getTextureNode('depth');
-  const scenePass=pass(scene,camera,{type:THREE.HalfFloatType});
+  const scenePass=pass(scene,camera,{type:THREE.HalfFloatType,samples:4});
   scenePass.renderTarget.texture.colorSpace=THREE.LinearSRGBColorSpace;
   const passReuse=installNormalPassReuse({renderer,normalMRT,beautyTarget:scenePass.renderTarget,camera});
   const beauty=scenePass.getTextureNode('output');
@@ -167,8 +174,10 @@ async function createScene(){
   window.__SANTEI__={scene,camera,renderer,controls,pipeline,diagnostics,garden,daylight,timeControls,scenePass};
   // Render on time/date changes and camera movement; never run an idle GPU loop.
   controls.addEventListener('change',()=>{hybrid?.cameraChanged();wake();});
-  controls.addEventListener('start',()=>{hybrid?.setInteracting(true);wake();});
-  controls.addEventListener('end',()=>{hybrid?.setInteracting(false);wake();});
+  const activeInputs=new Set();
+  controls.addEventListener('start',event=>{activeInputs.add(event.travelSource||'pointer');hybrid?.setInteracting(true);wake();});
+  controls.addEventListener('end',event=>{activeInputs.delete(event.travelSource||'pointer');hybrid?.setInteracting(activeInputs.size>0);wake();});
+  const keyboardTravel=installCameraKeyboardTravel(controls);
   const disposeWheelTravel=installCameraWheelTravel(controls,renderer.domElement);
   addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);hybrid?.resize();wake();});
   // Warm the visible Moon/stars, lamp shadows and unlit predawn variants while
@@ -232,7 +241,7 @@ async function createScene(){
   sceneElement.dataset.koi=garden.koi.length;
   console.info('SANTEI scene ready',diagnostics);
   startup.complete();
-  addEventListener('pagehide',()=>{ready=false;disposeWheelTravel();disposeLookAround();lensUI.dispose();hybrid.dispose();passReuse.dispose();rasterAO.dispose();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
+  addEventListener('pagehide',()=>{ready=false;keyboardTravel.dispose();disposeWheelTravel();disposeLookAround();lensUI.dispose();hybrid.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
   // Initialization captured the current scene and prepared its first lens
   // sample. Schedule display without throwing away that prepared state.
   wake();

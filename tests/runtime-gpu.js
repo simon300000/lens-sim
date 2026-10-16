@@ -26,6 +26,17 @@ try{
   await runtime.initialize();const store=runtime.store,res=runtime.sceneResources,light=runtime.lighting;
   check(store.getState().renderModel.id==='geometry-first-hit-realtime-lighting','render model not exposed');
   check(store.getState().scene.status==='ready'&&store.getState().scene.summary.instances===3,'scene summary missing');
+  // Raster navigation must not resize optical buffers or publish a full UI
+  // snapshot for every camera pose; switching back still uses the latest pose.
+  const rasterWidth=runtime.engine.dimensions.width;let rasterNotifications=0;
+  const unsubscribeRaster=store.subscribe(()=>rasterNotifications++);rasterNotifications=0;
+  runtime.setInteracting(true);
+  check(runtime.engine.dimensions.width===rasterWidth,'Raster gesture reallocated the optical image');
+  for(let i=0;i<12;i++){camera.position.x=i*.001;camera.updateMatrixWorld();runtime.cameraChanged();}
+  camera.position.x=0;camera.updateMatrixWorld();runtime.cameraChanged();runtime.setInteracting(false);
+  await new Promise(resolve=>setTimeout(resolve,260));unsubscribeRaster();
+  const rasterNavigation={poses:13,notifications:rasterNotifications,width:rasterWidth};
+  check(runtime.engine.dimensions.width===rasterWidth&&rasterNotifications<13,'Raster poses rebuilt optical buffers or UI snapshots');
   await store.dispatch('setResolution',240);await store.dispatch('setTargetSpp',4);await store.dispatch('setMode','lens');
   for(let i=0;i<4;i++){runtime.frame();await runtime.interop.device.queue.onSubmittedWorkDone();await new Promise(r=>setTimeout(r,0));}
   const builds=()=>{const {fullBuilds,tlasRebuilds,blasBuilt,blasReused}=res.counters;return JSON.stringify({fullBuilds,tlasRebuilds,blasBuilt,blasReused});};
@@ -67,9 +78,10 @@ try{
   check(!runtime.needsFrame()&&runtime.engine.spp===8,'target did not stop scheduler at 8 spp: '+runtime.engine.spp);
   const stats=await runtime.engine.statistics();check(stats.numericalErrorRate===0&&stats.bvhErrorRate===0,'runtime numerical/BVH errors');
   // Camera pose: lighting resources refresh once (reflector/pose), BVH untouched.
+  const cameraRevisionBefore=store.getState().revisions.camera;
   camera.position.x+=.01;camera.updateMatrixWorld();runtime.cameraChanged();runtime.frame();
   check(light.refreshes===refreshes+1&&builds()===built,'camera move rebuilt BVH or skipped resource refresh');
-  check(store.getState().revisions.camera===1&&runtime.engine.spp<=4,'camera move did not reset accumulation');
+  check(store.getState().revisions.camera===cameraRevisionBefore+1&&runtime.engine.spp<=4,'camera move did not reset accumulation');
   // Lighting/time: refresh, no BVH work.
   sun.intensity=3;runtime.lightingChanged();runtime.frame();
   check(light.refreshes===refreshes+2&&builds()===built,'lighting change rebuilt BVH');
@@ -146,11 +158,11 @@ try{
   await runtime.interop.device.queue.onSubmittedWorkDone();
   check(runtime.engine.memoryBytes===memoryBefore&&runtime.interop.liveBuffers===buffersBefore,`GPU buffers leaked across lens/resize cycles: ${buffersBefore} -> ${runtime.interop.liveBuffers}`);
   await runtime.interop.readTexture(runtime.engine.outputGPU);check(errors.length===0,'GPU validation: '+errors.join('\n'));
-  const result={passed:true,boundedSubmission,counters:res.counters,lightingRefreshes:light.refreshes,lightingStatus:light.status,scene:store.getState().scene.summary,
+  const result={passed:true,rasterNavigation,boundedSubmission,counters:res.counters,lightingRefreshes:light.refreshes,lightingStatus:light.status,scene:store.getState().scene.summary,
     afRealTarget:af.target,afMovedTarget:moved,manualFocus:{nearMm:near,farMm:far},smallApertureInfinity:infinity,
     nativeFiniteConfiguration:{focusDistanceM:finiteNative.focusDistanceM,imageDistanceMm:finiteNative.imageDistanceMm,failedFocusReason:focusFailure},configurationMotion,tableMotion,
     contactNativeConfiguration:contactNative,stats,liveBuffers:runtime.interop.liveBuffers,pipelines:runtime.interop.compilations,wakes,errors};
   out.textContent=JSON.stringify(result,null,2);document.body.dataset.passed='true';window.__runtimeTest={runtime,result};
   await fetch('http://127.0.0.1:5175/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'runtime-gpu',...result})}).catch(()=>{});
 }catch(error){out.textContent=error.stack||String(error);document.body.dataset.passed='false';console.error(error);
- await fetch('http://127.0.0.1:5175/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'runtime-gpu',passed:false,error:error.stack,errors})}).catch(()=>{});}
+ await fetch('http://127.0.0.1:5175/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'runtime-gpu',passed:false,error:error.message+'\n'+error.stack,errors})}).catch(()=>{});}

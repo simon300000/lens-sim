@@ -1,3 +1,4 @@
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { THREE, mat, woodMat, box, sphere, cylinder, beam, makeBatch, stoneGeometry, leafGeometry, rng } from './kit.js';
 
 // All surfaces in this garden are geometry and colour. There are no image assets.
@@ -149,6 +150,31 @@ function finGeometry(points, indices) {
   const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(points.flat(), 3)); g.setIndex(indices); g.computeVertexNormals(); return g;
 }
 
+// Fins/barbels share one plain material. Merge only within each fish and within
+// identical shadow states; its parent pose, two-sided transparency and all
+// triangles remain. This avoids hundreds of tiny PBR render objects per frame.
+function mergeKoiFins(koi,material){
+  const groups=new Map();
+  for(const part of koi.children){
+    if(part.material!==material)continue;
+    const key=`${part.castShadow}/${part.receiveShadow}`;
+    const group=groups.get(key)??[];group.push(part);groups.set(key,group);
+  }
+  for(const parts of groups.values()){
+    if(parts.length<2)continue;
+    const geometries=parts.map(part=>{
+      part.updateMatrix();const geometry=part.geometry.clone().applyMatrix4(part.matrix);
+      // Plain fin shading reads positions/normals; primitive rods also carry
+      // unused UVs which are absent on the modelled sheet fins.
+      geometry.deleteAttribute('uv');return geometry;
+    });
+    const geometry=mergeGeometries(geometries);for(const item of geometries)item.dispose();
+    const merged=new THREE.Mesh(geometry,material);merged.name='Modelled koi fins';
+    merged.castShadow=parts[0].castShadow;merged.receiveShadow=parts[0].receiveShadow;
+    for(const part of parts)koi.remove(part);koi.add(merged);
+  }
+}
+
 function addKoi(parent) {
   const bodies = mat('#ffffff', .43, { vertexColors: true, metalness: .04 });
   const fin = mat('#e3c898', .42, { side: THREE.DoubleSide, transparent: true, opacity: .86 }), eye = mat('#172422', .21), eyeRim = mat('#d9b36a', .55);
@@ -170,6 +196,7 @@ function addKoi(parent) {
       for (let k = 0; k < 3; k++) beam(koi, fin, [0, .004, -.55], [side * (.09 + k * .058), .006, -.855 + k * .018], .003);
     }
     const mouth = new THREE.Mesh(new THREE.TorusGeometry(.019, .004, 4, 10), mat('#cfb690', .56)); mouth.position.set(0, -.006, .479); koi.add(mouth);
+    mergeKoiFins(koi,fin);
   }
   return fish;
 }
