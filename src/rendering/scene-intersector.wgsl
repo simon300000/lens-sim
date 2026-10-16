@@ -78,6 +78,17 @@ fn sceneBox(n: BvhNode, o: vec3f, inv: vec3f, tMin: f32, tMax: f32) -> f32 {
 }
 
 struct WatertightRay { o: vec3f, kx: u32, ky: u32, kz: u32, s: vec3f }
+// Compensated difference of products keeps shared-edge tests antisymmetric
+// even when Metal contracts multiply/subtract into FMA. A plain a*b-c*d can
+// round the same edge negative in BOTH adjoining triangles, opening a hole at
+// the exact chart centre. No epsilon enlargement or false outside hits.
+// https://pharr.org/matt/blog/2019/11/03/difference-of-floats
+fn sceneDifferenceOfProducts(a:f32,b:f32,c:f32,d:f32)->f32 {
+  let cd=c*d;
+  let error=fma(-c,d,cd);
+  let difference=fma(a,b,-cd);
+  return difference+error;
+}
 fn sceneWatertight(o: vec3f, d: vec3f) -> WatertightRay {
   let a = abs(d);
   var kz = 0u;
@@ -94,9 +105,9 @@ fn sceneTriangle(r: WatertightRay, p0: vec3f, p1: vec3f, p2: vec3f, tMin: f32, t
   let ax = A[r.kx] - r.s.x * A[r.kz]; let ay = A[r.ky] - r.s.y * A[r.kz];
   let bx = B[r.kx] - r.s.x * B[r.kz]; let by = B[r.ky] - r.s.y * B[r.kz];
   let cx = C[r.kx] - r.s.x * C[r.kz]; let cy = C[r.ky] - r.s.y * C[r.kz];
-  let u = cx * by - cy * bx;
-  let v = ax * cy - ay * cx;
-  let w = bx * ay - by * ax;
+  let u = sceneDifferenceOfProducts(cx,by,cy,bx);
+  let v = sceneDifferenceOfProducts(ax,cy,ay,cx);
+  let w = sceneDifferenceOfProducts(bx,ay,by,ax);
   let miss = vec4f(SCENE_NO_HIT, 0.0, 0.0, 0.0);
   if ((u < 0.0 || v < 0.0 || w < 0.0) && (u > 0.0 || v > 0.0 || w > 0.0)) { return miss; }
   let det = u + v + w;

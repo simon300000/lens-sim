@@ -73,7 +73,7 @@ async function createScene(){
   updateOutputStatus();displayHDR.addEventListener('change',updateOutputStatus);
 
   await startup.stage(2,'铺设庭园，栽种花木');
-  const {scene,garden,landscape,villa,vegetation,details}=buildSanteiScene();
+  const {scene,garden,landscape,villa,vegetation,details,testTargets}=buildSanteiScene();
   const portrait=innerWidth/innerHeight<.85;
   const camera=new THREE.PerspectiveCamera(portrait?48:40,innerWidth/innerHeight,.15,450);
   camera.position.set(21,13,27);
@@ -171,7 +171,17 @@ async function createScene(){
       fullFrameReadback:pixelDiagnostics?'startup-night-opt-in':'on-demand-only'}};
   scene.traverse(o=>{if(o.isMesh){diagnostics.meshes++;if(o.isInstancedMesh)diagnostics.instances+=o.count;diagnostics.triangles+=(o.geometry.index?.count||o.geometry.attributes.position.count)/3*(o.isInstancedMesh?o.count:1);}});
   for(const [name,item]of Object.entries({villa,vegetation,garden,landscape,details}))diagnostics.groups[name]=item?.metadata||item?.userData||(name==='vegetation'?item:{});
-  window.__SANTEI__={scene,camera,renderer,controls,pipeline,diagnostics,garden,daylight,timeControls,scenePass};
+  window.__SANTEI__={scene,camera,renderer,controls,pipeline,diagnostics,garden,daylight,timeControls,scenePass,testTargets};
+  const gardenView={position:camera.position.toArray(),target:controls.target.toArray()};
+  function showTestTarget(key){
+    if(!ready)return;
+    const view=key==='garden'?gardenView:testTargets.views[key];
+    if(!view)return;
+    const damping=controls.enableDamping;controls.enableDamping=false;controls.update();
+    camera.position.fromArray(view.position);controls.target.fromArray(view.target);camera.lookAt(controls.target);controls.update();controls.enableDamping=damping;wake();
+  }
+  window.__SANTEI__.showTestTarget=showTestTarget;
+  for(const button of document.querySelectorAll('[data-test-target]'))button.addEventListener('click',()=>showTestTarget(button.dataset.testTarget));
   // Render on time/date changes and camera movement; never run an idle GPU loop.
   controls.addEventListener('change',()=>{hybrid?.cameraChanged();wake();});
   const activeInputs=new Set();
@@ -232,6 +242,7 @@ async function createScene(){
   diagnostics.initializationWallMs=performance.now()-startupStarted;
   sceneElement.dataset.initializationWallMs=String(diagnostics.initializationWallMs);
   ready=true;
+  for(const button of document.querySelectorAll('[data-test-target]'))button.disabled=false;
   diagnostics.drawCalls=renderer.info.render.drawCalls;
   sceneElement.dataset.backend=diagnostics.backend;
   sceneElement.dataset.ready='true';

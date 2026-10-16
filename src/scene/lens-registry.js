@@ -19,7 +19,7 @@ export function setLensRole(object, role) {
 export const lensRole = object => object.userData?.lensRole ?? null;
 
 /** Procedural material kinds understood by src/rendering/scene-shading.wgsl. */
-export const PROCEDURAL = Object.freeze({ NONE: 0, WOOD: 1, MEADOW: 2, WATER: 3 });
+export const PROCEDURAL = Object.freeze({ NONE: 0, WOOD: 1, MEADOW: 2, WATER: 3, CHART_SIEMENS: 4, CHART_ISO12233: 5, CHART_RULER: 6, CHART_FOCUS: 7 });
 
 export function setLensMaterial(material, descriptor) {
   if (!Object.values(PROCEDURAL).includes(descriptor.kind)) throw new Error('Unknown procedural lens material');
