@@ -26,6 +26,7 @@ function estimate(lens,p,t,h,nm,N,seed=1,spotBox=null){
 
 test('pupil cache keys optics, not pose/light; fallback and mixture retain full support',()=>{
   assert.equal(buildPupilTable(otus,packed),table);
+  assert.equal(table.bins,128);assert.equal(table.movingCenter,true);assert.equal(table.globalMix,.05);
   assert.notEqual(buildPupilTable(otus,packLens(otus,{sensorZMm:packed.sensorZMm+.01})),table);
   assert.notEqual(buildPupilTable(otus,packLens(otus,{sensorZMm:packed.sensorZMm,fNumber:2})),table);
   assert.notEqual(buildPupilTable(otus,packed,{enabled:false}),table);
@@ -85,4 +86,39 @@ test('radiometry also agrees at a smaller stop and in a different lens layout',(
     const ref=pupilReference(l,p,h,550,{coarse:1024,fine:384}),got=estimate(l,p,t,h,550,131072,7);
     assert.ok(ref.energy>0);assert.ok(Math.abs(got.energy/ref.energy-1)<.04,`${id} f/${fNumber}: ${got.energy} vs ${ref.energy}`);
   }
+});
+
+test('configurable partitions share endpoints, validate midpoints and match the fixed GPU ABI',()=>{
+  for(const bins of [128,256,512,1024]){
+    const t=buildPupilTable(otus,packed,{bins,movingCenter:false});
+    assert.equal(t.rows.length,bins);assert.equal(t.nodes.length,bins+1);
+    assert.equal(t.data[1],bins);assert.equal(t.data.byteLength,16+1024*32);
+    assert.equal(t.diagnostics.endpointNodes,bins+1);assert.equal(t.diagnostics.midpointChecks,bins);
+    assert.equal(buildPupilTable(otus,packed,{bins,movingCenter:false}),t);
+    for(let i=0;i<bins;i++)for(const b of [t.nodes[i],t.nodes[i+1]]){
+      const row=t.rows[i];assert.ok(row[0]<=b[0]&&row[1]>=b[1]&&row[2]<=b[2]&&row[3]>=b[3]);
+    }
+    assert.equal(pupilBox(t,[t.maxHeight,0]),t.rows.at(-1));
+    assert.equal(pupilBox(t,[t.maxHeight*3,0]),t.rows.at(-1));
+    for(let i=0;i<t.rows.length;i++)for(let j=0;j<4;j++)assert.equal(t.data[4+i*4+j],Math.fround(t.rows[i][j]));
+  }
+  for(const bins of [0,1025,1.5,NaN])assert.throws(()=>buildPupilTable(otus,packed,{bins}),RangeError);
+});
+
+
+test('moving-center proposal encloses shared endpoint/midpoint bounds with the actual height PDF',()=>{
+ const fixed=buildPupilTable(otus,packed,{bins:128,movingCenter:false}),moving=buildPupilTable(otus,packed,{bins:128,movingCenter:true});
+ assert.equal(moving.nodes[0],fixed.nodes[0]);assert.equal(moving.probes,fixed.probes);assert.equal(moving.precomputeMs,fixed.precomputeMs);
+ for(let i=0;i<128;i++)for(const [f,b]of [[0,moving.nodes[i]],[.5,moving.midpointNodes[i]],[1,moving.nodes[i+1]]]){
+  const q=pupilBox(moving,[(i+f)*moving.maxHeight/128,0]);
+  for(let j=0;j<4;j++)assert.ok(j%2===0?q[j]<=b[j]+1e-10:q[j]>=b[j]-1e-10);
+ }
+ for(const h of [0,5,15,21]){
+  const ref=pupilReference(otus,packed,h,550,{fine:256}),got=estimate(otus,packed,moving,h,550,32768,13);
+  assert.ok(Math.abs(got.energy/ref.energy-1)<.03,`moving energy at ${h}`);assert.equal(got.outside,0);
+  for(const [u,v]of [[.01,.8],[.7,.31]]){
+   const x=samplePupil(moving,[h,0],packed.region.radiusMm,u,v),y=samplePupil(moving,[0,h],packed.region.radiusMm,u,v);
+   if(h===0||u<.05){assert.ok(x.inGlobal&&y.inGlobal&&x.pdf>0&&y.pdf>0);assert.ok(Math.abs(x.reference[0]-y.reference[0])<1e-8&&Math.abs(x.reference[1]-y.reference[1])<1e-8);}else{assert.ok(Math.abs(x.reference[0]-y.reference[1])<1e-8&&Math.abs(x.reference[1]+y.reference[0])<1e-8);assert.ok(Math.abs(x.pdf-y.pdf)<1e-10);}
+  }
+ }
 });

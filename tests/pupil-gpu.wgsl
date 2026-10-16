@@ -22,8 +22,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
     let d=optics.geometry.x-optics.geometry.y;
     let w=(4.0/3.141592653589793)*pow(abs(direction.z),4.0)/(d*d*sample.pdf);
     energy+=w;sum2+=w*w;maximum=max(maximum,w);
-    let bin=min(31u,u32(length(probe.sensor.xy)/pupilTable.settings.x*32.0));
-    let b=pupilTable.boxes[bin];
+    let b=pupilBounds(probe.sensor.xy);
     // Test cases are on +x; the omission diagnostic uses that radial frame.
     if(sample.point.x<b.x||sample.point.x>b.y||sample.point.y<b.z||sample.point.y>b.w){omitted+=w;}
     if(probe.sensor.z==0.0){xyz+=spectralXYZContribution(vec3f(1),nm,1.0/400.0,w);}

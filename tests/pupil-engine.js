@@ -47,4 +47,4 @@ try{
   check(!errors.length,errors.join('\n'));
   result.textContent=JSON.stringify({passed:true,whiteRatio,pointRatio,pointL1,pointWallMs:[pointA.wallMs,pointB.wallMs],pointAttemptedSpp:[262144,16384],timingKind:'queue-complete render/resolve/readback wall time, cached pupil; correctness runs have different sample budgets, not an equal-quality speedup',originalPoint:sa,importancePoint:sb,whitePassRates:[whiteA.passRate,whiteB.passRate],pointStats:[pointA.stats,pointB.stats],errors},null,2);document.body.dataset.passed='true';
 }catch(error){result.textContent=JSON.stringify({passed:false,error:error.stack,errors});document.body.dataset.passed='false';}
-finally{rig?.engine.dispose();rig?.sceneResources.dispose();rig?.lighting.dispose();rig?.interop.dispose();renderer?.dispose();}
+finally{if(new URLSearchParams(location.search).has('report'))await fetch('/__pupil-report',{method:'POST',body:result.textContent});rig?.engine.dispose();rig?.sceneResources.dispose();rig?.lighting.dispose();rig?.interop.dispose();renderer?.dispose();}
