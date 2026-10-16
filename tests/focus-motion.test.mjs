@@ -11,15 +11,15 @@ const read=async id=>JSON.parse(await fs.readFile(new URL(`../vendor/lens-bench/
 const close=(a,b,tol=1e-8)=>assert.ok(Math.abs(a-b)<tol,`${a} vs ${b}`);
 const fixture=extra=>({id:'test',name:'test',tx:'50 3 N-BK7 10\n-50 10 - 10\n0 30 - 10',stop:2,fno:4,...extra});
 
-test('configuration focus reproduces prescribed internal gaps, interpolates inverse distance, and never drifts the sensor',async()=>{
+test('configuration focus reproduces prescribed internal gaps, interpolates inverse distance, and preserves the native sensor gap',async()=>{
   const record=await read('sony-fe-600mm-f4-gm-oss'),base=adaptLensRecord(record,catalog),before=JSON.stringify(base);
   assert.equal(base.focusMotion.kind,'configurations');
   for(const node of base.focusMotion.nodes){
     const result=focusedPrescription(base,node.u===0?null:1/node.u/1000).lens;
     for(const k of base.focusMotion.keys)if(k!==result.surfaces.length-1)close(result.surfaces[k].thicknessMm,node.t[k]);
-    close(result.sensorZMm,base.sensorZMm);
-    close(result.lastVertexZMm+result.imageDistanceMm,base.sensorZMm);
-    assert.equal(packLens(result,{fNumber:apertureLimits(result).minFNumber,sensorZMm:result.sensorZMm}).sensorZMm,base.sensorZMm);
+    close(result.sensorZMm,result.surfaces.reduce((sum,s)=>sum+s.thicknessMm,0));
+    close(result.imageDistanceMm,node.t.at(-1));
+    assert.equal(packLens(result,{fNumber:apertureLimits(result).minFNumber,sensorZMm:result.sensorZMm}).sensorZMm,result.sensorZMm);
   }
   const [a,b]=base.focusMotion.nodes,u=(a.u+b.u)/2;
   const mid=focusedPrescription(base,1/u/1000).lens;
@@ -75,7 +75,6 @@ test('all explicit focus tables agree with upstream spline / log-focal / inverse
       const expected=oracle.camFocusAt(P,motion.focalLengthMm,v);
       const thickness=motion.infinityThicknessMm.slice();
       motion.keys.forEach(k=>{thickness[k]+=expected.dt[k];});
-      thickness[thickness.length-1]=base.sensorZMm-thickness.slice(0,-1).reduce((sum,x)=>sum+x,0);
       if(thickness.some(t=>t<0)){assert.throws(()=>focusedPrescription(base,distanceM),/负间隔/);continue;}
       const result=focusedPrescription(base,distanceM);
       for(const k of motion.keys){
@@ -85,7 +84,7 @@ test('all explicit focus tables agree with upstream spline / log-focal / inverse
         close(result.lens.surfaces[k].thicknessMm,inf+expected.dt[k]);
       }
       assert.equal(result.clamped,expected.clamp);assert.equal(result.extrapolated,expected.ex);
-      close(result.lens.sensorZMm,base.sensorZMm);
+      close(result.lens.sensorZMm,thickness.reduce((sum,x)=>sum+x,0));
     }
     tested++;
   }
@@ -97,5 +96,5 @@ test('focus table mfd is clamped in sensor distance and reported back in first-v
     focus:{surf:[1],rows:[{zu:0,v:[0,.002],dt:[[0],[1]],mfd:500},{zu:1,v:[0,.002],dt:[[0],[1]],mfd:500}]}}}),catalog);
   const result=focusedPrescription(base,.1);
   assert.equal(result.clamped,true);close(result.focusDistanceM,(500-base.sensorZMm)/1000);
-  close(result.lens.surfaces[1].thicknessMm,11);close(result.lens.sensorZMm,base.sensorZMm);
+  close(result.lens.surfaces[1].thicknessMm,11);close(result.lens.imageDistanceMm,base.imageDistanceMm);close(result.lens.sensorZMm,base.sensorZMm+1);
 });

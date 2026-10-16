@@ -29,6 +29,7 @@ function increasing(xs){return xs.every((x,i)=>Number.isFinite(x)&&(!i||x>xs[i-1
 /** Normalize the explicit table first; otherwise infer the same configuration
  * family as upstream focusCam, excluding curvature changes / ambiguous zooms. */
 export function buildFocusMotion(record,baseSurfaces,configurationIndex){
+  const spectrum={wavelengths:(record.wl??[]).map(w=>({nm:Number(w[0]),weight:Number(w[1])})),primaryIndex:record.pri??0};
   const cfgs=record.cfgs??[],current=cfgs[configurationIndex]??{},n=baseSurfaces.length;
   const thickness=c=>baseSurfaces.map((s,k)=>c.thi?.[k]??s.thicknessMm);
   const baseThicknessMm=thickness(current),C=record.zoomcam;
@@ -46,7 +47,7 @@ export function buildFocusMotion(record,baseSurfaces,configurationIndex){
     const at=(k,x)=>spline(xs,C.nodes.map(q=>q.t[C.keys.indexOf(k)]),x);
     const x=minimize(x=>keys.reduce((sum,k)=>sum+(at(k,x)-baseThicknessMm[k])**2,0),xs[0],xs.at(-1));
     const infinityThicknessMm=baseThicknessMm.slice();C.keys.forEach(k=>{infinityThicknessMm[k]=at(k,x);});
-    return {kind:'zoomcam',source:'zoomcam.focus',keys:C.focus.surf.slice(),baseThicknessMm,infinityThicknessMm,rows,focalLengthMm:-1/x,fW:C.fW,fT:C.fT};
+    return {...spectrum,kind:'zoomcam',source:'zoomcam.focus',keys:C.focus.surf.slice(),baseThicknessMm,infinityThicknessMm,rows,focalLengthMm:-1/x,fW:C.fW,fT:C.fT};
   }
   if(cfgs.length<2)return null;
   const inv=c=>c.obj==null||!Number.isFinite(c.obj)||c.obj<=0||c.obj>=1e7?0:1/c.obj;
@@ -63,7 +64,7 @@ export function buildFocusMotion(record,baseSurfaces,configurationIndex){
     nodes.splice(i--,1);
   }
   if(nodes.length<2)return null;
-  return {kind:'configurations',source:'cfgs.thi / cfgs.obj',keys,baseThicknessMm,nodes};
+  return {...spectrum,kind:'configurations',source:'cfgs.thi / cfgs.obj',keys,baseThicknessMm,nodes};
 }
 function rowAt(row,v){
   const j=interval(row.v,v),w=(v-row.v[j])/(row.v[j+1]-row.v[j]);
@@ -71,7 +72,8 @@ function rowAt(row,v){
 }
 
 /** Distance is from the first vertex (UI/scene convention). Table v=1/D
- * instead uses object-to-sensor distance. The prescribed sensor stays fixed. */
+ * instead uses object-to-sensor distance. Native gaps are preserved; the
+ * sensor coordinate follows the resulting total track, as in lens-bench. */
 export function focusedPrescription(base,distanceM){
   const motion=base.focusMotion;if(!motion)throw new Error('Lens has no focus motion');
   if(distanceM!==null&&!(Number.isFinite(distanceM)&&distanceM>0))throw new Error('Invalid focus distance');
@@ -94,11 +96,12 @@ export function focusedPrescription(base,distanceM){
     extrapolated=u<nodes[0].u||u>nodes.at(-1).u;
     motion.keys.forEach(k=>{t[k]=lerp(a.t[k],b.t[k],w);});
   }
-  // The last T is the sensor gap, not another moving optical surface.
-  t[t.length-1]=base.sensorZMm-t.slice(0,-1).reduce((s,x)=>s+x,0);
   if(t.some(x=>!Number.isFinite(x)||x<0))throw new Error('对焦镜组超出有效行程（负间隔）；保留原焦点');
-  let z=0;const surfaces=base.surfaces.map((s,k)=>{const q={...s,zMm:z,thicknessMm:t[k]};z+=t[k];return q;});
-  const lens={...base,surfaces,lastVertexZMm:surfaces.at(-1).zMm,imageDistanceMm:t.at(-1),objectDistanceMm:actual===null?null:actual*1000,
+  // Follow bench's native prescription: preserve every specified gap and let
+  // the image coordinate follow the total track. No rigid coordinate rebasing.
+  let z=0;
+  const surfaces=base.surfaces.map((s,k)=>{const q={...s,zMm:z,thicknessMm:t[k]};z+=t[k];return q;});
+  const lens={...base,surfaces,sensorZMm:z,lastVertexZMm:surfaces.at(-1).zMm,imageDistanceMm:t.at(-1),objectDistanceMm:actual===null?null:actual*1000,
     focusMaxStopRadiusMm:base.focusMaxStopRadiusMm??apertureLimits(base).maxStopRadiusMm};
   return {lens,focusDistanceM:actual,extrapolated,clamped};
 }

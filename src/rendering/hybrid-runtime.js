@@ -8,7 +8,7 @@ import { createLightingResources, STAR_ANGULAR_RADIUS } from './lighting-resourc
 import { hasSamplesRemaining, MAX_IMAGE_WIDTH } from './sampling-plan.js';
 import { createControlStore } from './control-store.js';
 import { apertureLimits, rearSamplingRegion } from '../optics/lens-state.js';
-import { focusedPrescription } from '../optics/focus-motion.js';
+import { createFocusSolver } from '../optics/focus-solver.js';
 import { displayOutputNode } from '../hdr-output.js';
 
 function catalogueFocalLengthMm(lens){
@@ -29,7 +29,7 @@ function catalogueFocalLengthMm(lens){
  */
 export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,rasterBeauty,rasterGlare,refreshContext,cameraExposure,hdr,environment,requestFrame,onOutputState=()=>{},useWorker=true,maxSamplesInFlight=2}) {
   if(!Number.isInteger(maxSamplesInFlight)||maxSamplesInFlight<1||maxSamplesInFlight>2)throw new RangeError('Samples in flight must be 1 or 2');
-  const store=createControlStore(),interop=createGPUInterop(renderer);
+  const store=createControlStore(),interop=createGPUInterop(renderer),focusSolver=createFocusSolver();
   const sceneResources=createSceneResources({interop,scene,camera,starAngularRadius:STAR_ANGULAR_RADIUS,useWorker});
   const lighting=createLightingResources({interop,renderer,scene,camera,environment,refreshContext});
   let lens=null,baseLens=null,manifest=null,engine=null,baseExposure=cameraExposure.value,interacting=false,pointerActive=false,releaseTimer;
@@ -147,41 +147,34 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
   }
   async function focusAt(distanceM,autofocus=false){
     const token=++commandRevision,revisions=state().revisions;
-    const old=state();update({af:{...old.af,status:'busy',message:autofocus?'沿实际参考主光线求取真实场景交点':baseLens.focusMotion?'按上游对焦资料移动镜组':'追迹固定光束并求最佳像面'}});
+    const old=state();update({af:{...old.af,status:'busy',message:autofocus?'沿实际参考主光线求取真实场景交点':baseLens.focusMotion?'搜索镜组最佳对焦位置':'搜索最佳像面'}});
     try{
-      let target,hit=null;
+      let hit=null;
       if(autofocus){
         if(!sceneResources.ready)throw new Error('场景 BVH 尚未就绪');
-        engine.setPose(camera);hit=await engine.referenceTarget();target=hit.infinity?[0,0,-1e7]:hit.local;distanceM=hit.infinity?null:hit.distanceM;
+        engine.setPose(camera);hit=await engine.referenceTarget();distanceM=hit.infinity?null:hit.distanceM;
       }
-      else target=[0,0,-(distanceM===null?1e7:distanceM*1000)];
       if(token!==commandRevision)return;
-      if(baseLens.focusMotion){
-        const moved=focusedPrescription(baseLens,distanceM),next=moved.lens,limits=apertureLimits(next);
-        // Hold the physical stop opening while the entrance pupil / EFL change.
-        const fNumber=Math.max(limits.minFNumber,Math.min(limits.maxFNumber,
-          Math.abs(limits.focalLengthMm*limits.pupilMagnification)/(2*engine.packed.stopRadiusMm)));
-        const minimumGap=minimumImageDistance(next);
-        engine.setLens(next,{fNumber,sensorZMm:next.sensorZMm,dispersion:old.optics.dispersion});
-        lens=next;
-        cancelFocus();
-        update({optics:{...state().optics,fNumber,focusDistanceM:moved.focusDistanceM,focusDistanceKnown:true,
-          imageDistanceMm:next.imageDistanceMm,focalLengthMm:limits.focalLengthMm,
-          focusModel:`镜组移动 · ${baseLens.focusMotion.source}`},
-          limits:{fNumber:[limits.minFNumber,limits.maxFNumber],imageDistanceMm:[Math.min(minimumGap,next.imageDistanceMm),Math.max(200,Math.abs(limits.focalLengthMm)*4)]},
-          af:{...state().af,status:'success',message:`按 ${baseLens.focusMotion.source} 移动镜组 · 像面固定${moved.clamped?' · 已限制到资料最近对焦距离':''}${moved.extrapolated?' · 超出表格节点，沿末段外推':''}${hit?.transparentLayers?` · 穿过 ${hit.transparentLayers} 层透明面`:''}`,
-            lastResult:{source:baseLens.focusMotion.source,focusDistanceM:moved.focusDistanceM,sensorZMm:next.sensorZMm,extrapolated:moved.extrapolated,clamped:moved.clamped,target:hit}}});
-        clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision('optics');publishEngine();requestFrame();
-        return;
-      }
-      const result=await engine.focusPoint(target,{infinity:distanceM===null});
-      const now=state();
-      if(token!==commandRevision||revisions.geometry!==now.revisions.geometry||revisions.optics!==now.revisions.optics||revisions.camera!==now.revisions.camera)return;
-      applyOpticalChange({focusDistanceM:distanceM,focusDistanceKnown:true,imageDistanceMm:result.imageDistanceMm});
-      const rms=value=>value<=result.rmsResolutionMm?`<${result.rmsResolutionMm.toExponential(1)}`:value<.001?value.toFixed(6):value.toFixed(4);
-      const through=hit?.transparentLayers?` · 穿过 ${hit.transparentLayers} 层透明面`:'';
-      const targetText=hit?(hit.infinity?'背景 → ∞ · ':`真实交点 ${hit.distanceM.toFixed(3)} m · `):'';
-      update({af:{...state().af,status:'success',message:`${targetText}${result.beams}/${result.beamBudget} 光束 · RMS ${rms(result.beforeRmsMm)} → ${rms(result.afterRmsMm)} mm${through}`,lastResult:{...result,target:hit}}});
+      const moved=await focusSolver.solve(baseLens,distanceM,{currentLens:{...lens,sensorZMm:engine.packed.sensorZMm},stopRadiusMm:engine.packed.stopRadiusMm,dispersion:old.optics.dispersion});
+      const stale=()=>disposed||token!==commandRevision||revisions.geometry!==state().revisions.geometry||revisions.optics!==state().revisions.optics||revisions.camera!==state().revisions.camera;
+      if(stale())return;
+      const next=moved.lens,limits=apertureLimits(next);
+      const fNumber=Math.max(limits.minFNumber,Math.min(limits.maxFNumber,
+        Math.abs(limits.focalLengthMm*limits.pupilMagnification)/(2*engine.packed.stopRadiusMm)));
+      const minimumGap=minimumImageDistance(next),nextState={fNumber,sensorZMm:next.sensorZMm,dispersion:old.optics.dispersion};
+      // Precompute on the existing pupil Worker; setLens then consumes its cache.
+      await engine.prepareLens(next,nextState);if(stale())return;
+      engine.setLens(next,nextState);lens=next;cancelFocus();
+      const label=moved.method==='table'?'对焦表':moved.method==='cam-search'?'镜组 RMS 搜索':'像面 RMS 搜索';
+      const rms=v=>Number.isFinite(v)?`${(v*1000).toFixed(2)} µm`:'无有效光斑';
+      update({optics:{...state().optics,fNumber,focusDistanceM:moved.focusDistanceM,focusDistanceKnown:true,
+        imageDistanceMm:next.imageDistanceMm,focalLengthMm:limits.focalLengthMm,focusModel:`lens-bench · ${label}`},
+        limits:{fNumber:[limits.minFNumber,limits.maxFNumber],imageDistanceMm:[Math.min(minimumGap,next.imageDistanceMm),Math.max(200,Math.abs(limits.focalLengthMm)*4)]},
+        af:{...state().af,status:'success',message:`${label} · 轴上 RMS ${rms(moved.beforeRmsMm)} → ${rms(moved.afterRmsMm)}${moved.clamped?' · 已限制到资料最近对焦距离':''}${moved.extrapolated?' · 超出资料行程，沿末段外推':''}`,
+          lastResult:{source:baseLens.focusMotion?.source??'lens-bench planeFocus',method:moved.method,focusDistanceM:moved.focusDistanceM,sensorZMm:next.sensorZMm,
+            beforeRmsMm:moved.beforeRmsMm,afterRmsMm:moved.afterRmsMm,evaluations:moved.evaluations,solveMs:moved.solveMs,
+            extrapolated:moved.extrapolated,clamped:moved.clamped,target:hit}}});
+      clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision('optics');publishEngine();requestFrame();
     }catch(error){if(token===commandRevision){update({af:{...state().af,status:'error',message:error.message}});}throw error;}
   }
   /** Time of day / light change: shadows and PMREM already rerendered by the
@@ -322,7 +315,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       update({status:'ready'});publishEngine();
     },
     get diagnostics(){return {...state(),lastError,initializationMs:engine?.initializationMs,sceneStats:sceneResources.stats,lighting:lighting.status};},
-    dispose(){disposed=true;lensLoadRevision++;clearTimeout(releaseTimer);engine?.dispose();sceneResources.dispose();lighting.dispose();displayPipeline?.dispose();interop.dispose();store.dispose();},
+    dispose(){disposed=true;lensLoadRevision++;clearTimeout(releaseTimer);focusSolver.dispose();engine?.dispose();sceneResources.dispose();lighting.dispose();displayPipeline?.dispose();interop.dispose();store.dispose();},
   };
   const visibility=()=>{if(!document.hidden)requestFrame();};document.addEventListener('visibilitychange',visibility);
   const originalDispose=runtime.dispose;runtime.dispose=()=>{document.removeEventListener('visibilitychange',visibility);originalDispose();};

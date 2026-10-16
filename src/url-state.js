@@ -1,6 +1,6 @@
 // Share the physical view, not the raster/lens display mode. Keep unrelated
 // query parameters (including diagnostics) and the fragment intact.
-const VIEW_KEYS=['lens','config','pos','target','focus','focusKnown','imageDistance','fNumber'];
+const VIEW_KEYS=['lens','config','pos','target','focus','focusKnown','focusSolver','imageDistance','fNumber'];
 const vector=value=>{
   if(!value)return null;
   const parts=value.split(',');
@@ -35,8 +35,10 @@ export async function installURLState({camera,controls,store,requestFrame,window
     if(lens&&lens!==store.getState().lensId)await store.dispatch('selectLens',lens);
     if(Number.isInteger(config)&&config!==store.getState().configurationIndex)await store.dispatch('selectConfiguration',config);
     if(focus!==undefined&&focus!==store.getState().optics.focusDistanceM)await store.dispatch('setFocusDistance',focus);
-    if(aperture!==undefined&&aperture!==store.getState().optics.fNumber)await store.dispatch('setFNumber',aperture);
-    if(gap!==undefined){
+    if(aperture!==undefined){const s=store.getState(),f=Math.max(s.limits.fNumber[0],Math.min(s.limits.fNumber[1],aperture));if(f!==s.optics.fNumber)await store.dispatch('setFNumber',f);}
+    // Old links contain sensor gaps from the retired fixed-sensor focus path.
+    // Recompute known focus instead of applying that stale result over the solve.
+    if(gap!==undefined&&(params.get('focusKnown')==='0'||params.get('focusSolver')==='bench-v1')){
       const optics=store.getState().optics;
       if(gap!==optics.imageDistanceMm)await store.dispatch('setImageDistance',gap);
       // setImageDistance marks manual changes unknown. The saved flag describes
@@ -58,6 +60,7 @@ export async function installURLState({camera,controls,store,requestFrame,window
     url.searchParams.set('target',controls.target.toArray().map(coordinate).join(','));
     url.searchParams.set('focus',state.optics.focusDistanceM===null?'inf':String(state.optics.focusDistanceM));
     url.searchParams.set('focusKnown',state.optics.focusDistanceKnown===false?'0':'1');
+    url.searchParams.set('focusSolver','bench-v1');
     url.searchParams.set('imageDistance',String(state.optics.imageDistanceMm));
     url.searchParams.set('fNumber',String(state.optics.fNumber));
     if(url.href!==win.location.href)win.history.replaceState(win.history.state,'',url.href);
