@@ -16,6 +16,7 @@ import { packLens } from '../optics/lens-state.js';
 import { createComputeTimer } from './three-interop.js';
 import { imagePlan, sampleBudget, PIXEL_BYTES } from './sampling-plan.js';
 import { WORK_COUNTERS } from './work-model.js';
+import { createChunkBudget,chunkDispatch } from './adaptive-chunks.js';
 
 export const DIAGNOSTIC_MODES=Object.freeze({beauty:0,'scene-error':1,status:2,'geometry-depth':3,'geometry-normal':4,'geometry-material':5});
 // Modes >= 3 change what is accumulated (debug RGB), so switching resets accumulation.
@@ -52,12 +53,12 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   const pipelines=Object.fromEntries(jobs.map(([name],i)=>[name,compiled[i].value]));
   const timer=createComputeTimer(interop),pupilPrecomputer=createPupilPrecomputer();
   let pupilTable;
-  let surfaces,lut,tiles=[],tileCursor=0,roundBudget=0,roundTarget=0,image,packed,lens,groups={},spp=0,disposed=false,computeMs=null,statsPending=null,lastTiming=null;
+  let surfaces,lut,tiles=[],tileCursor=0,groupCursor=0,chunkBudget=createChunkBudget(),lastSubmission=null,sampleSerial=0,roundBudget=0,roundTarget=0,image,packed,lens,groups={},spp=0,disposed=false,computeMs=null,statsPending=null,lastTiming=null;
   let dimensions={width:0,height:0},currentRevision=0,resizeRevision=0,focusBudget=2048;
   const pose=new THREE.Matrix4();
   let sceneBound=-1,lightingBound=null;
   // Work counting (diagnostics HUD only): workgroup-samples submitted since the
-  // last readback, and GPU (or wall) time of recent counted dispatches.
+  // last readback, and GPU (or wall) time of recent counted chunks.
   let counting=false,workUnits=0,workPending=null,countingPipeline=null,countingCompile=null;const workTimings=[];
   const workSupported=device.limits.maxStorageBuffersPerShaderStage>=9;
   function recordWorkTiming(ms,units,source){if(!(ms>0&&units>0))return;workTimings.push({ms,units,source});if(workTimings.length>24)workTimings.shift();}
@@ -84,8 +85,9 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   /** Rebind after a BVH (re)upload or a change of raster lighting textures. */
   function bindScene(){if(sceneBound!==sceneResources.revision||lightingBound!==lighting.views||sceneResources.tables!==tablesBound){tablesBound=sceneResources.tables;rebuildGroups();}}
   let tablesBound=null;
-  function reset(){
-    currentRevision++;spp=0;tileCursor=0;roundBudget=0;computeMs=null;lastTiming=null;
+  function reset({resetTiming=false}={}){
+    if(resetTiming)chunkBudget=createChunkBudget();
+    currentRevision++;spp=0;tileCursor=0;groupCursor=0;lastSubmission=null;roundBudget=0;computeMs=null;lastTiming=null;
     if(tiles.length){const encoder=device.createCommandEncoder();for(const tile of tiles)encoder.clearBuffer(tile.buffer);device.queue.submit([encoder.finish()]);}
   }
   function allocate(nextWidth){
@@ -135,32 +137,39 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     }catch(error){interop.release(nextSurfaces);if(nextLut)interop.release(nextLut);throw error;}
     if(surfaces)interop.release(surfaces);if(lut)interop.release(lut);
     surfaces=nextSurfaces;lut=nextLut;
-    packed=next;lens=nextLens;device.queue.writeBuffer(optics,0,next.parameters);rebuildGroups();reset();return next;
+    packed=next;lens=nextLens;device.queue.writeBuffer(optics,0,next.parameters);rebuildGroups();reset({resetTiming:true});return next;
   }
   function updateOptics(state){
-    const next=packLens(lens,state);updatePupil(lens,next,state);packed=next;device.queue.writeBuffer(optics,0,next.parameters);reset();return next;
+    const next=packLens(lens,state);updatePupil(lens,next,state);packed=next;device.queue.writeBuffer(optics,0,next.parameters);reset({resetTiming:true});return next;
   }
   function setPose(sourceCamera){
     sourceCamera.updateMatrixWorld(true);pose.copy(sourceCamera.matrixWorld);device.queue.writeBuffer(camera,0,new Float32Array(pose.elements));
   }
-  function submit(pipeline,bindGroup,x=1,y=1,{timed=false,countedWork=0}={}){
+  function submit(pipeline,bindGroup,x=1,y=1,{timed=false,submission=null}={}){
     if(disposed)throw new Error('Optical engine disposed');
     const encoder=device.createCommandEncoder();const timestamps=timed?timer.begin():undefined;
     const pass=encoder.beginComputePass(timestamps?{timestampWrites:timestamps}:{});
     pass.setPipeline(pipeline);pass.setBindGroup(0,bindGroup);pass.dispatchWorkgroups(x,y);pass.end();
     const timingRevision=currentRevision,timingDimensions={...dimensions};
-    const collect=timed?timer.end(encoder,timestamps,ms=>{if(countedWork)recordWorkTiming(ms,countedWork,'gpu');if(timingRevision===currentRevision){computeMs=ms;lastTiming={...timingDimensions,ms};}}):null;
+    const collect=timed?timer.end(encoder,timestamps,ms=>{if(submission?.counted)recordWorkTiming(ms,submission.work,'gpu');if(timingRevision===currentRevision){computeMs=ms;lastTiming={...timingDimensions,ms};if(submission){submission.gpuMs=ms;chunkBudget.observe(submission,ms);}}}):null;
     device.queue.submit([encoder.finish()]);collect?.();
-    if(countedWork&&!timer.supported){const started=performance.now();device.queue.onSubmittedWorkDone().then(()=>recordWorkTiming(performance.now()-started,countedWork,'wall'),()=>{});}
   }
   const initializationMs=performance.now()-started;
   return {
     get texture(){return image.texture;},get outputGPU(){return image.gpu;},
-    get spp(){return spp;},get dimensions(){return {...dimensions};},get packed(){return packed;},get tileCount(){return tiles.length;},get roundComplete(){return tileCursor===0;},
+    get spp(){return spp;},get dimensions(){return {...dimensions};},get packed(){return packed;},get tileCount(){return tiles.length;},get roundComplete(){return tileCursor===0&&groupCursor===0;},
     get pupilTable(){return pupilTable;},
     get initializationMs(){return initializationMs;},
     get computeMs(){return computeMs;},get timestampSupported(){return timer.supported;},
     get lastTiming(){return lastTiming;},
+    get lastSubmission(){return lastSubmission;},
+    get sampleSerial(){return sampleSerial;},
+    // If timestamps are supported, feedback is delivered by timer.end itself,
+    // even when the asynchronous map completes after the queue fence callback.
+    completeChunk(submission,wallMs){
+      if(submission?.counted&&!timer.supported)recordWorkTiming(wallMs,submission.work,'wall');
+      if(!timer.supported&&submission?.revision===currentRevision)chunkBudget.observe(submission,wallMs);
+    },
     get memoryBytes(){return dimensions.width*dimensions.height*(PIXEL_BYTES+8)+(surfaces?.size??0)+(lut?.size??0)+pupil.size+beams.size+48+32+64+192+16+96+64;},
     async prepareLens(nextLens,state){
       const next=packLens(nextLens,state);
@@ -193,21 +202,29 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       })();
       return workPending;
     },
-    sample({batchSpp=1,targetSpp=64,seed=1,diagnostic='beauty',constantEnvironment=null,pinhole=null}={}){
+    sample({batchSpp=1,targetSpp=64,seed=1,diagnostic='beauty',constantEnvironment=null,pinhole=null,chunked=false,interactive=false}={}){
       bindScene();
       if(!tiles[0]?.sample)throw new Error('场景 BVH、光照资源或镜头尚未准备');
-      // One bounded tile per frame keeps large sensor sizes responsive to pause.
-      const budget=tileCursor?roundBudget:sampleBudget(spp,targetSpp,batchSpp);if(!budget)return false;
-      if(tileCursor===0)roundTarget=targetSpp;
+      // Complete every storage tile before advancing the global spp counter.
+      const budget=(tileCursor||groupCursor)?roundBudget:sampleBudget(spp,targetSpp,batchSpp);if(!budget)return false;
+      if(tileCursor===0&&groupCursor===0)roundTarget=targetSpp;
       roundBudget=budget;const tile=tiles[tileCursor];
+      const totalGroups=Math.ceil(dimensions.width/8)*Math.ceil(tile.height/8);
+      const plan=chunkBudget.plan(interactive,budget,totalGroups-groupCursor);
+      const groups=chunked?plan.groups:totalGroups;
+      const dispatch=chunked?chunkDispatch(groups,device.limits.maxComputeWorkgroupsPerDimension):{x:Math.ceil(dimensions.width/8),y:Math.ceil(tile.height/8)};
+      const counted=counting&&Boolean(tile.sampleCounting)&&!pinhole;
+      const submission={revision:currentRevision,chunked,interactive,groups,work:groups*budget,capacity:totalGroups*budget,tail:plan.tail,targetMs:plan.targetMs,gpuMs:null,counted};
+      if(counted)workUnits+=submission.work;
+      lastSubmission=submission;
       const bytes=new ArrayBuffer(192),f=new Float32Array(bytes),u=new Uint32Array(bytes);f.set(pinhole?.cameraToWorld??pose.elements);
       u.set([dimensions.width,dimensions.height,budget,roundTarget,seed,diagnosticIndex(diagnostic),constantEnvironment?1:0,tile.y],16);
-      f.set([...(constantEnvironment??[0,0,0]),0],24);u.set([pinhole?1:0,0,0,0],28);if(pinhole)f.set(pinhole.clipToCamera,32);
+      f.set([...(constantEnvironment??[0,0,0]),0],24);u.set([pinhole?1:0,chunked?groupCursor:0,chunked?dispatch.x:0,chunked?groups:0],28);if(pinhole)f.set(pinhole.clipToCamera,32);
       device.queue.writeBuffer(render,0,bytes);
-      const counted=counting&&Boolean(tile.sampleCounting)&&!pinhole,units=Math.ceil(dimensions.width/8)*Math.ceil(tile.height/8)*budget;
-      if(counted)workUnits+=units;
-      submit(counted?countingPipeline:pipelines.sample,counted?tile.sampleCounting:tile.sample,Math.ceil(dimensions.width/8),Math.ceil(tile.height/8),{timed:true,countedWork:counted?units:0});
-      tileCursor++;if(tileCursor===tiles.length){tileCursor=0;spp+=budget;}return true;
+      submit(counted?countingPipeline:pipelines.sample,counted?tile.sampleCounting:tile.sample,dispatch.x,dispatch.y,{timed:true,submission});
+      sampleSerial++;groupCursor+=groups;
+      if(groupCursor>=totalGroups){groupCursor=0;tileCursor++;if(tileCursor===tiles.length){tileCursor=0;spp+=budget;}}
+      return true;
     },
     resolve(diagnostic='beauty'){
       for(const tile of tiles){if(!tile.resolve)return;
