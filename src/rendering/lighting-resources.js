@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import {uniform as nodeUniform,vec4,context} from 'three/tsl';
 import { lensMaterial, PROCEDURAL } from '../scene/lens-registry.js';
 
 /** Lighting resource bridge (the only module that reaches into Three's
@@ -27,7 +28,7 @@ function cubeUVSize(height) {
   return { texelWidth: 1 / (3 * Math.max(2 ** maxMip, 7 * 16)), texelHeight: 1 / height, maxMip };
 }
 
-export function createLightingResources({ interop, renderer, scene, camera, environment, refreshSize = [16, 11] }) {
+export function createLightingResources({ interop, renderer, scene, camera, environment, refreshContext, refreshSize = [16, 11] }) {
   if (THREE.REVISION !== '183') throw new Error(`Lighting bridge requires tested Three r183; got ${THREE.REVISION}`);
   if (renderer.reversedDepthBuffer || renderer.logarithmicDepthBuffer) throw new Error('镜头光照桥接只支持标准深度缓冲（非反向/对数深度）');
   const { device } = interop;
@@ -41,6 +42,19 @@ export function createLightingResources({ interop, renderer, scene, camera, envi
   // Its own pixels are never read by the lens path.
   const refreshTarget = new THREE.RenderTarget(refreshSize[0], refreshSize[1], { type: THREE.HalfFloatType, depthBuffer: true });
   refreshTarget.texture.name = 'Lens lighting-resource refresh (pixels unused)';
+  // Match the application's RenderPipeline -> scene pass -> reflector nesting.
+  // Three keys render contexts by nesting depth as well as target attachments.
+  // A direct outer render would rebuild the same reflected PBR scene at depth 2.
+  let refreshPipeline=null;
+  if(refreshContext){
+    const trigger=nodeUniform(0).onRenderUpdate(()=>{renderer.render(scene,camera);return 0;});
+    refreshPipeline=new THREE.RenderPipeline(renderer);refreshPipeline.outputNode=vec4(trigger);
+  }
+  const receiverMaterial=new THREE.MeshStandardNodeMaterial({color:0xffffff,roughness:1,fog:false,depthWrite:false});
+  receiverMaterial.name='Lighting resource trigger';
+  // This draw exists only to update shadow hooks, never to generate beauty/AO.
+  // Its own material key prevents reuse of a beauty receiver's AO dependency.
+  receiverMaterial.contextNode=context({getAO:input=>input});
   const textureIds = new WeakMap(); let nextTextureId = 0;
   let views = null, viewKey = '', revision = 0, refreshes = 0, lastRefreshMs = null, status = { ok: false, errors: [], warnings: [] };
   const data = new Float32Array(LIGHTING_UNIFORM_BYTES / 4), u32 = new Uint32Array(data.buffer);
@@ -197,8 +211,29 @@ export function createLightingResources({ interop, renderer, scene, camera, envi
   function refresh() {
     const started = performance.now();
     const previous = renderer.getRenderTarget(), previousMRT = renderer.getMRT();
-    try { renderer.setMRT(null); renderer.setRenderTarget(refreshTarget); renderer.render(scene, camera); }
-    finally { renderer.setMRT(previousMRT); renderer.setRenderTarget(previous); }
+    const previousContext=renderer.contextNode,previousRenderObject=renderer.getRenderObjectFunction();
+    let receiverDrawn=false;
+    // Only a receiver and registered water need the outer draw: their updateBefore
+    // hooks generate complete shadow maps and the complete reflected scene. Shadow
+    // passes install their own caster callback; reflected cameras pass through.
+    const renderResourceObject=(object,passScene,passCamera,geometry,material,...rest)=>{
+      const reflector=lensMaterial(material)?.kind===PROCEDURAL.WATER;
+      if(passCamera===camera&&renderer.getRenderTarget()===refreshTarget&&!reflector){
+        if(receiverDrawn||!object.receiveShadow||!material.isMeshStandardNodeMaterial)return;
+        receiverDrawn=true;material=receiverMaterial;
+      }
+      if(previousRenderObject)previousRenderObject.call(renderer,object,passScene,passCamera,geometry,material,...rest);
+      else renderer.renderObject(object,passScene,passCamera,geometry,material,...rest);
+    };
+    try {
+      const context=refreshContext?.();if(context)renderer.contextNode=context;
+      renderer.setRenderObjectFunction(renderResourceObject);
+      renderer.setMRT(null); renderer.setRenderTarget(refreshTarget);
+      if(refreshPipeline)refreshPipeline.render();else renderer.render(scene,camera);
+    }finally {
+      renderer.setRenderObjectFunction(previousRenderObject);renderer.contextNode=previousContext;
+      renderer.setMRT(previousMRT); renderer.setRenderTarget(previous);
+    }
     refreshes++; lastRefreshMs = performance.now() - started;
     return update();
   }
@@ -216,6 +251,6 @@ export function createLightingResources({ interop, renderer, scene, camera, envi
       ];
     },
     update, refresh,
-    dispose() { refreshTarget.dispose(); dummyDepth.destroy(); dummyCube.destroy(); dummyColor.destroy(); interop.release(uniform); },
+    dispose() { receiverMaterial.dispose();refreshPipeline?.dispose();refreshTarget.dispose(); dummyDepth.destroy(); dummyCube.destroy(); dummyColor.destroy(); interop.release(uniform); },
   };
 }
