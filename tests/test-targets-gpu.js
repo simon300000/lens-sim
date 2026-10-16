@@ -14,7 +14,7 @@ try{
  const code=TEST_CHART_WGSL+`\n@group(0) @binding(0) var<uniform> kind:vec4u;\n@group(0) @binding(1) var image:texture_storage_2d<rgba16float,write>;\n@compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3u){if(id.x>=192u||id.y>=128u){return;}let q=vec2f((f32(id.x)+0.5)/192.0,(f32(id.y)+0.5)/128.0)*vec2f(0.9731,0.9617)+vec2f(0.01237,0.01891);textureStore(image,vec2i(id.xy),vec4f(chartReflectance(q,kind.x)));}`;
  const compute=await interop.computePipeline(code,'Analytic target parity');
  const group=device.createBindGroup({layout:compute.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer:params}},{binding:1,resource:output.gpu.createView()}]});
- for(let i=0;i<4;i++){
+ for(const i of [0,2,3]){
   kind.value=i;await new Promise(requestAnimationFrame);renderer.setRenderTarget(target);pipeline.render();renderer.setRenderTarget(null);
   device.queue.writeBuffer(params,0,new Uint32Array([i,0,0,0]));const encoder=device.createCommandEncoder(),pass=encoder.beginComputePass();pass.setPipeline(compute);pass.setBindGroup(0,group);pass.dispatchWorkgroups(24,16);pass.end();device.queue.submit([encoder.finish()]);
   const a=await interop.readTexture(interop.texture(target.texture)),b=await interop.readTexture(output.gpu);let max=0,different=0;let dark=0,light=0;

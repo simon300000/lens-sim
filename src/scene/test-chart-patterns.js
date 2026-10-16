@@ -1,8 +1,6 @@
 /** Analytic target reflectance, shared verbatim by Three's fragment shaders and
  * the physical lens compute shader. No texture, image or resolution-dependent LUT.
- * ISO-style diagnostic layout: wedges plus 5-degree low-contrast edges, not a
- * certified ISO chart. References: https://www.iso.org/standard/88626.html and
- * https://www.imatest.com/imaging/iso-12233/ . Frequencies are LW/chart-height. */
+ * ISO 12233 uses tessellated Cornell SVG geometry instead (iso-chart.js). */
 export const CHART_KIND=Object.freeze({SIEMENS:0,ISO12233:1,RULER:2,FOCUS:3});
 // The entry function must come first for Three's wgslFn parser.
 export const TEST_CHART_WGSL=`fn chartReflectance(coord: vec2f, chartKind: u32) -> f32 {
@@ -14,7 +12,7 @@ export const TEST_CHART_WGSL=`fn chartReflectance(coord: vec2f, chartKind: u32) 
     if(r<0.000001){return 0.4625;}
     return mix(0.025,0.90,step(0.0,sin(atan2(p.y,p.x)*72.0)));
   }
-  if(chartKind==1u){return chartISO(p*vec2f(1.5,1.0));}
+  if(chartKind==1u){return 0.90;} // Reserved legacy material ID; ISO now uses vector geometry.
   if(chartKind==2u){return chartRuler(p*vec2f(0.325,1.5));}
   // Upright focus reference: its centre is at the inclined ruler's zero depth.
   var ink=0.0;
@@ -40,45 +38,6 @@ fn chartNumber(p:vec2f,value:u32)->f32{
   let index=u32(floor(p.x/0.75));var divisor=1u;
   for(var i=0u;i<digits-index-1u;i++){divisor*=10u;}
   return chartDigit(vec2f((p.x-f32(index)*0.75)/0.6,p.y),(value/divisor)%10u);
-}
-// Constant bar count, linearly narrowing envelope -> hyperbolically increasing
-// spatial frequency. The complete chart height is 2 chart units.
-fn chartWedge(q:vec2f,halfLength:f32,low:f32,high:f32)->f32{
-  if(abs(q.x)>halfLength){return -1.0;}
-  let t=(q.x/halfLength+1.0)*0.5;
-  let frequency=1.0/mix(1.0/low,1.0/high,t);
-  let phase=q.y*frequency*0.25;
-  if(abs(phase)>2.5){return -1.0;}
-  return mix(0.025,0.90,step(0.0,cos(6.28318530718*phase)));
-}
-fn chartISO(p:vec2f)->f32{
-  if(abs(p.x)>1.46||abs(p.y)>0.96){return 0.025;}
-  var value=0.90;
-  // Ten horizontal and ten vertical wedges, plus two diagonal wedges.
-  for(var i=0u;i<5u;i++){
-    let x=-0.88+f32(i)*0.44;let y=-0.45+f32(i)*0.225;
-    for(var side=0u;side<2u;side++){
-      let sign=select(-1.0,1.0,side==1u);
-      let a=chartWedge(vec2f((p.y-sign*0.67)*sign,p.x-x),0.20,100.0,2000.0);
-      if(a>=0.0){value=a;}
-      let b=chartWedge(vec2f((p.x-sign*1.20)*sign,p.y-y),0.21,100.0,2000.0);
-      if(b>=0.0){value=b;}
-    }
-  }
-  for(var side=0u;side<2u;side++){
-    let sign=select(-1.0,1.0,side==1u);let d=p-vec2f(sign*0.39,0.0);
-    let wedge=chartWedge(vec2f((d.x+d.y)*0.70710678,(d.y-d.x)*0.70710678),0.24,100.0,2000.0);
-    if(wedge>=0.0){value=wedge;}
-  }
-  // Four 4:1 reflectance edge patches rotated 5 degrees for SFR inspection.
-  for(var i=0u;i<4u;i++){
-    let c=vec2f(select(-0.66,0.66,(i&1u)!=0u),select(-0.32,0.32,(i&2u)!=0u));let d=p-c;
-    if(max(abs(d.x),abs(d.y))<0.20){let q=vec2f(0.9961947*d.x+0.08715574*d.y,-0.08715574*d.x+0.9961947*d.y);value=select(0.72,0.18,max(abs(q.x),abs(q.y))<0.145);}
-  }
-  // Registration crosses and central high-contrast focus patch.
-  if(max(abs(p.x),abs(p.y))<0.11){value=select(0.90,0.025,p.x*p.y>0.0);}
-  let label=max(chartNumber((p-vec2f(-0.12,0.89))/0.035,12233u),max(chartNumber((p-vec2f(-1.35,-0.92))/0.045,100u),chartNumber((p-vec2f(1.10,-0.92))/0.045,2000u)));
-  return mix(value,0.025,label);
 }
 fn chartRuler(p:vec2f)->f32{
   if(abs(p.x)>0.315||abs(p.y)>1.47){return 0.025;}

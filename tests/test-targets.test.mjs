@@ -3,12 +3,26 @@ import assert from 'node:assert/strict';
 import {Scene,Vector3,Raycaster} from 'three/webgpu';
 import {buildTestTargets} from '../src/scene/test-targets.js';
 import {classifyMaterial,extractScene} from '../src/scene/scene-extract.js';
+import chart from '../src/scene/iso-chart-geometry.json' with {type:'json'};
+import {createHash} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 
-test('all analytic chart surfaces are registered imaging materials with real UVs and no textures',()=>{
+test('chart surfaces including the Cornell vector mesh are supported by physical lens extraction',()=>{
  const scene=new Scene(),targets=buildTestTargets(scene),ex=extractScene(scene);
- assert.equal(ex.report.expandedTriangles,248);assert.deepEqual(ex.report.unsupported,[]);
- assert.deepEqual(targets.surfaces.map(m=>classifyMaterial(m.material).kind).sort(),[4,5,6,7]);
- for(const mesh of targets.surfaces){assert.equal(classifyMaterial(mesh.material).reason,0);assert.equal(mesh.geometry.attributes.uv.count,4);assert.equal(mesh.material.map,null);assert.equal(mesh.material.specularIntensity,0);}
+ assert.equal(ex.report.expandedTriangles,246+chart.indices.length/3);assert.deepEqual(ex.report.unsupported,[]);
+ assert.deepEqual(targets.surfaces.map(m=>classifyMaterial(m.material).kind).sort(),[0,4,6,7]);
+ for(const mesh of targets.surfaces){assert.equal(classifyMaterial(mesh.material).reason,0);assert.equal(mesh.geometry.attributes.uv.count,mesh.geometry.attributes.position.count);assert.equal(mesh.material.map,null);assert.equal(mesh.material.specularIntensity,0);}
+ const iso=targets.surfaces[1],p=iso.geometry.attributes.position;
+ assert.equal(iso.material.vertexColors,true);assert.equal(iso.geometry.attributes.color.count,p.count);
+ iso.geometry.computeBoundingBox();const size=iso.geometry.boundingBox.getSize(new Vector3());
+ assert.ok(Math.abs(size.x/size.y-chart.width/chart.height)<1e-6);
+ for(let i=0;i<p.count;i++)assert.equal(p.getZ(i),0);
+ assert.equal(chart.sourceSHA256,createHash('sha256').update(readFileSync(new URL('../assets/test-charts/ISO_12233-reschart.svg',import.meta.url),'utf8')).digest('hex'));
+ assert.equal(chart.outlinedGlyphs,464);
+ // A fully covered, disjoint planar subdivision must have the area of the paper.
+ let area=0;const index=iso.geometry.index;
+ for(let i=0;i<index.count;i+=3){const a=index.getX(i),b=index.getX(i+1),c=index.getX(i+2);const cross=(p.getX(b)-p.getX(a))*(p.getY(c)-p.getY(a))-(p.getY(b)-p.getY(a))*(p.getX(c)-p.getX(a));assert.ok(cross>=-1e-9);area+=cross/2;}
+ assert.ok(Math.abs(area-size.x*size.y)<1e-5);
 });
 test('45 degree ruler has zero at reference depth and millimetre ticks map to real axial distance',()=>{
  const scene=new Scene(),{ruler,reference}=buildTestTargets(scene);scene.updateMatrixWorld(true);
