@@ -25,8 +25,8 @@ try{
  reuse=installNormalPassReuse({renderer,normalMRT,beautyTarget:null,camera});
  for(let view=0;view<3;view++){
   camera.position.x=4-view;camera.lookAt(0,.5,0);camera.updateMatrixWorld();sun.shadow.needsUpdate=true;
-  oldPipeline.render();await interop.device.queue.onSubmittedWorkDone();const a=await interop.readTexture(interop.texture(old.renderTarget.texture));
-  newPipeline.render();await interop.device.queue.onSubmittedWorkDone();const b=await interop.readTexture(interop.texture(newer.renderTarget.texture));
+  await new Promise(requestAnimationFrame);oldPipeline.render();await interop.device.queue.onSubmittedWorkDone();const a=await interop.readTexture(interop.texture(old.renderTarget.texture));
+  await new Promise(requestAnimationFrame);newPipeline.render();await interop.device.queue.onSubmittedWorkDone();const b=await interop.readTexture(interop.texture(newer.renderTarget.texture));
   const diff=compare(a,b);report.normal.push({view,...diff});check(diff.max===0&&diff.nonzero>1000,'Wood/water normal prepass changed');
  }
  reuse.dispose();reuse=null;
@@ -47,7 +47,7 @@ try{
  check(table.data.every((v,i)=>Object.is(v,reference.data[i])),'Worker pupil table differs from synchronous physical tracing');
  report.pupil={bins:table.bins,movingCenter:table.movingCenter,globalMix:table.globalMix,workerBuildMs:table.buildMs,bytewiseEqual:true};
  check(!report.errors.length,report.errors.join('\n'));report.passed=true;
-}catch(error){report.error=error.stack||String(error);}
+}catch(error){report.error=String(error)+'\n'+(error.stack||'');}
 finally{
  precomputer?.dispose();reuse?.dispose();lighting?.dispose();interop?.dispose();renderer?.dispose();
  window.__reuseReport=report;document.querySelector('#result').textContent=JSON.stringify(report,null,2);document.body.dataset.passed=String(report.passed);

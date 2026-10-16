@@ -6,10 +6,10 @@ import {emitter} from './gpu-fixtures.js';
 /** Test E: scheduling and lifecycle of the geometry-first-hit runtime.
  * What each change may (and may not) rebuild or refresh is asserted with the
  * runtime's own counters. */
-const out=document.querySelector('#result');
+const out=document.querySelector('#result'),errors=[];
 const check=(c,m)=>{if(!c)throw new Error(m);};
 try{
-  const adapter=await navigator.gpu.requestAdapter(),hdr=await probeHDRCanvas(adapter),errors=[];
+  const adapter=await navigator.gpu.requestAdapter(),hdr=await probeHDRCanvas(adapter);
   const renderer=new THREE.WebGPURenderer({antialias:false,...outputRendererOptions(hdr.supported)});await renderer.init();renderer.setSize(300,200);
   renderer.toneMapping=THREE.NoToneMapping;renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(renderer.domElement);
   renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
@@ -119,6 +119,23 @@ try{
   await store.dispatch('setImageDistance',0);
   check(store.getState().optics.imageDistanceMm===0,'manual zero-gap image plane rejected');
 
+  // Camera/light invalidation must not strand a CPU-worker lens request in loading.
+  const originalPrepare=runtime.engine.prepareLens;
+  let enter,release;const entered=new Promise(resolve=>{enter=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+  runtime.engine.prepareLens=async(...args)=>{enter();await gate;return originalPrepare(...args);};
+  const changingLens=store.dispatch('selectLens','canon-fl-50mm-f1-8');
+  await entered;runtime.cameraChanged();runtime.lightingChanged();release();await changingLens;
+  runtime.engine.prepareLens=originalPrepare;
+  check(store.getState().status==='ready','Camera/light change stranded worker lens loading');
+  await store.dispatch('setTargetSpp',64);await store.dispatch('setPaused',false);await store.dispatch('reset');
+  await runtime.interop.device.queue.onSubmittedWorkDone();
+  runtime.frame();runtime.frame();const submitted=runtime.engine.spp;runtime.frame();
+  check(submitted===8&&runtime.engine.spp===submitted,'Render submission escaped two-batch bound');
+  await store.dispatch('reset');check(runtime.engine.spp===0,'In-flight reset did not clear sample count');
+  await runtime.interop.device.queue.onSubmittedWorkDone();runtime.frame();
+  await runtime.interop.device.queue.onSubmittedWorkDone();
+  const boundedSubmission={submittedBeforeReset:submitted,afterReset:runtime.engine.spp,loadingRecovered:store.getState().status==='ready'};
+
   // Repeated lens switching / resize / pause: no GPU errors, no leaked tiles.
   const cycle=async()=>{await store.dispatch('selectLens','canon-fl-50mm-f1-8');await store.dispatch('setResolution',480);await store.dispatch('setResolution',240);await store.dispatch('setPaused',true);await store.dispatch('setPaused',false);runtime.frame();};
   await cycle();await runtime.interop.device.queue.onSubmittedWorkDone();
@@ -127,9 +144,11 @@ try{
   await runtime.interop.device.queue.onSubmittedWorkDone();
   check(runtime.engine.memoryBytes===memoryBefore&&runtime.interop.liveBuffers===buffersBefore,`GPU buffers leaked across lens/resize cycles: ${buffersBefore} -> ${runtime.interop.liveBuffers}`);
   await runtime.interop.readTexture(runtime.engine.outputGPU);check(errors.length===0,'GPU validation: '+errors.join('\n'));
-  const result={passed:true,counters:res.counters,lightingRefreshes:light.refreshes,lightingStatus:light.status,scene:store.getState().scene.summary,
+  const result={passed:true,boundedSubmission,counters:res.counters,lightingRefreshes:light.refreshes,lightingStatus:light.status,scene:store.getState().scene.summary,
     afRealTarget:af.target,afMovedTarget:moved,manualFocus:{nearMm:near,farMm:far},smallApertureInfinity:infinity,
     nativeFiniteConfiguration:{focusDistanceM:finiteNative.focusDistanceM,imageDistanceMm:finiteNative.imageDistanceMm,failedFocusReason:focusFailure},configurationMotion,tableMotion,
     contactNativeConfiguration:contactNative,stats,liveBuffers:runtime.interop.liveBuffers,pipelines:runtime.interop.compilations,wakes,errors};
   out.textContent=JSON.stringify(result,null,2);document.body.dataset.passed='true';window.__runtimeTest={runtime,result};
-}catch(error){out.textContent=error.stack||String(error);document.body.dataset.passed='false';console.error(error);}
+  await fetch('http://127.0.0.1:5175/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'runtime-gpu',...result})}).catch(()=>{});
+}catch(error){out.textContent=error.stack||String(error);document.body.dataset.passed='false';console.error(error);
+ await fetch('http://127.0.0.1:5175/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'runtime-gpu',passed:false,error:error.stack,errors})}).catch(()=>{});}

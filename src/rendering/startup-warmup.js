@@ -40,5 +40,5 @@ export async function warmRender({renderer,scene,camera,render,budgetMs=48,onPro
   render();
   const after=renderCacheCounts(renderer);
   return {rounds,variants:known.size,wallMs:performance.now()-started,finalSubmitMs:performance.now()-finalStarted,
-    finalNewNodes:after.nodes-before.nodes,finalNewPipelines:after.pipelines-before.pipelines};
+    finalStartMs:finalStarted,finalEndMs:performance.now(),finalNodeCacheDelta:after.nodes-before.nodes,finalPipelineCacheDelta:after.pipelines-before.pipelines};
 }
