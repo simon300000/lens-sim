@@ -9,6 +9,7 @@ import reduceSource from '../optics/focus-reduce.wgsl?raw';
 import statisticsSource from './statistics.wgsl?raw';
 import { SPECTRAL_WGSL } from '../spectral/reconstruction.js';
 import { SAMPLING_WGSL } from '../spectral/sampler.js';
+import {createPupilPrecomputer} from '../optics/pupil-precompute.js';
 import { buildPupilTable, PUPIL_TABLE_BYTES } from '../optics/pupil-sampling.js';
 import pupilSource from '../optics/pupil-sampling.wgsl?raw';
 import { packLens } from '../optics/lens-state.js';
@@ -32,14 +33,18 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   const summary=interop.storage(48,'AF reduced quadratic moments');
   const target=interop.storage(32,'AF actual chief-ray world target');
   const pupil=interop.uniform(new Uint8Array(PUPIL_TABLE_BYTES),'Radial exit pupil proposal table');
-  const pipelines={};
-  pipelines.sample=await interop.computePipeline(opticalSource+SCENE_INTERSECTOR_WGSL+SCENE_SHADING_WGSL+SPECTRAL_WGSL+SAMPLING_WGSL+pupilSource+integratorSource,'Real lens + BVH first hit + shading fused integrate');
-  pipelines.resolve=await interop.computePipeline(SPECTRAL_WGSL+resolveSource,'XYZ display-only resolve');
-  pipelines.focus=await interop.computePipeline(opticalSource+SAMPLING_WGSL+focusSource,'AF physical forward beam trace');
-  pipelines.target=await interop.computePipeline(opticalSource+SCENE_INTERSECTOR_WGSL+targetSource,'AF reference ray -> BVH first opaque surface');
-  pipelines.reduce=await interop.computePipeline(reduceSource,'AF cross-workgroup quadratic reduction');
-  pipelines.statistics=await interop.computePipeline(statisticsSource,'Attempt statistics reduction');
-  const timer=createComputeTimer(interop);
+  const jobs=[
+    ['sample',opticalSource+SCENE_INTERSECTOR_WGSL+SCENE_SHADING_WGSL+SPECTRAL_WGSL+SAMPLING_WGSL+pupilSource+integratorSource,'Real lens + BVH first hit + shading fused integrate'],
+    ['resolve',SPECTRAL_WGSL+resolveSource,'XYZ display-only resolve'],
+    ['focus',opticalSource+SAMPLING_WGSL+focusSource,'AF physical forward beam trace'],
+    ['target',opticalSource+SCENE_INTERSECTOR_WGSL+targetSource,'AF reference ray -> BVH first opaque surface'],
+    ['reduce',reduceSource,'AF cross-workgroup quadratic reduction'],
+    ['statistics',statisticsSource,'Attempt statistics reduction'],
+  ];
+  const compiled=await Promise.allSettled(jobs.map(([,code,label])=>interop.computePipeline(code,label)));
+  const failure=compiled.find(result=>result.status==='rejected');if(failure)throw failure.reason;
+  const pipelines=Object.fromEntries(jobs.map(([name],i)=>[name,compiled[i].value]));
+  const timer=createComputeTimer(interop),pupilPrecomputer=createPupilPrecomputer();
   let pupilTable;
   let surfaces,lut,tiles=[],tileCursor=0,roundBudget=0,roundTarget=0,image,packed,lens,groups={},spp=0,disposed=false,computeMs=null,statsPending=null,lastTiming=null;
   let dimensions={width:0,height:0},currentRevision=0,resizeRevision=0,focusBudget=2048;
@@ -144,6 +149,10 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     get computeMs(){return computeMs;},get timestampSupported(){return timer.supported;},
     get lastTiming(){return lastTiming;},
     get memoryBytes(){return dimensions.width*dimensions.height*(PIXEL_BYTES+8)+(surfaces?.size??0)+(lut?.size??0)+pupil.size+beams.size+48+32+64+192+16+96+64;},
+    async prepareLens(nextLens,state){
+      const next=packLens(nextLens,state);
+      return pupilPrecomputer.prepare(nextLens,next,{enabled:state?.pupilSampling!==false,bins:state?.pupilBins,movingCenter:state?.pupilMovingCenter});
+    },
     reset,resize,resizeChecked,setLens,updateOptics,setPose,bindScene,
     sample({batchSpp=1,targetSpp=64,seed=1,diagnostic='beauty',constantEnvironment=null,pinhole=null}={}){
       bindScene();
@@ -218,6 +227,6 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       return {sensorZMm:z,imageDistanceMm:z-lens.lastVertexZMm,beams:count,beamBudget:focusBudget,beforeRmsMm:Math.sqrt(merit(previousSensorZ)),afterRmsMm:Math.sqrt(merit(z)),rmsResolutionMm,quadratic:{A,B,C,originSensorZMm:referenceSensorZ},target:localTarget};
     },
     async readAccumulation(){const result=new Uint8Array(dimensions.width*dimensions.height*PIXEL_BYTES);let offset=0;for(const tile of tiles){const part=new Uint8Array(await interop.readBuffer(tile.buffer,tile.bytes));result.set(part,offset);offset+=part.length;}return result.buffer;},
-    dispose(){disposed=true;timer.dispose();for(const b of [optics,render,resolve,focus,camera,beams,summary,target,surfaces,lut,pupil,...tiles.map(t=>t.buffer)])if(b)interop.release(b);image?.texture.dispose();},
+    dispose(){disposed=true;pupilPrecomputer.dispose();timer.dispose();for(const b of [optics,render,resolve,focus,camera,beams,summary,target,surfaces,lut,pupil,...tiles.map(t=>t.buffer)])if(b)interop.release(b);image?.texture.dispose();},
   };
 }

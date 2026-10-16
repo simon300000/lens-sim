@@ -37,12 +37,24 @@ export function createGPUInterop(renderer) {
     },
     async computePipeline(code,label){
       check();device.pushErrorScope('validation');
-      const module=device.createShaderModule({code,label});
-      const info=await module.getCompilationInfo();
+      let module,pipelinePromise,infoPromise,errorPromise,creationError;
+      try{
+        module=device.createShaderModule({code,label});
+        infoPromise=module.getCompilationInfo();
+        pipelinePromise=device.createComputePipelineAsync({label,layout:'auto',compute:{module,entryPoint:'main'}});
+      }catch(error){creationError=error;}finally{
+        // Error scopes are a device-wide stack. Pop synchronously, before any
+        // await, so concurrent jobs cannot consume one another's validation scope.
+        errorPromise=device.popErrorScope();
+      }
+      const results=await Promise.allSettled([infoPromise,pipelinePromise,errorPromise]);
+      if(creationError)throw creationError;
+      const rejection=results.find(result=>result.status==='rejected');
+      if(rejection)throw new Error(`${label}: ${rejection.reason?.message??rejection.reason}`);
+      const [info,pipeline,error]=results.map(result=>result.value);
       const errors=info.messages.filter(m=>m.type==='error');
-      if(errors.length){await device.popErrorScope();throw new Error(`${label}: `+errors.map(m=>`${m.lineNum}:${m.linePos} ${m.message}`).join('\n'));}
-      const pipeline=await device.createComputePipelineAsync({label,layout:'auto',compute:{module,entryPoint:'main'}});
-      const error=await device.popErrorScope();if(error)throw new Error(`${label}: ${error.message}`);
+      if(errors.length)throw new Error(`${label}: `+errors.map(m=>`${m.lineNum}:${m.linePos} ${m.message}`).join('\n'));
+      if(error)throw new Error(`${label}: ${error.message}`);
       compilations++;return pipeline;
     },
     release(resource){if(resources.delete(resource))resource.destroy();},
@@ -82,4 +94,19 @@ export function createComputeTimer(interop) {
       return ()=>read.mapAsync(GPUMapMode.READ).then(()=>{const t=new BigUint64Array(read.getMappedRange());onResult(Number(t[1]-t[0])/1e6);read.unmap();pending=false;},()=>{pending=false;});},
     dispose(){querySet.destroy();resolve.destroy();read.destroy();},
   };
+}
+
+/** Startup bookkeeping only: never share render states or GPU bindings.
+ * Include Three's real attachment/MRT/nesting context, not target identity. */
+export function renderVariantKey(renderer,args){
+  if(THREE.REVISION!=='183')throw new Error('Render warmup requires Three r183');
+  const [object,scene,camera,geometry,material,,lights,clipping]=args;
+  const context=renderer._currentRenderContext;
+  if(!context)throw new Error('No active render context during warmup');
+  return [object.id,geometry.id,material.id,material.version,scene.overrideMaterial?.id,scene.overrideMaterial?.version,
+    camera.id,context.id,renderer.contextNode.id,renderer.contextNode.version,lights.getCacheKey(),clipping?.cacheKey,object.receiveShadow].join('/');
+}
+export function renderCacheCounts(renderer){
+  if(THREE.REVISION!=='183')throw new Error('Render warmup requires Three r183');
+  return {nodes:renderer._nodes.nodeBuilderCache.size,pipelines:renderer._pipelines.caches.size};
 }

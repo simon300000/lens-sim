@@ -27,15 +27,16 @@ function catalogueFocalLengthMm(lens){
  *   optics    (lens/stop/focus) -> optics buffer + accumulation; never BVH or shadows
  *   display   (exposure/bloom/output) -> display only
  */
-export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,rasterBeauty,rasterGlare,cameraExposure,hdr,environment,requestFrame,onOutputState=()=>{},useWorker=true}) {
+export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,rasterBeauty,rasterGlare,refreshContext,cameraExposure,hdr,environment,requestFrame,onOutputState=()=>{},useWorker=true,maxSamplesInFlight=2}) {
+  if(!Number.isInteger(maxSamplesInFlight)||maxSamplesInFlight<1||maxSamplesInFlight>2)throw new RangeError('Samples in flight must be 1 or 2');
   const store=createControlStore(),interop=createGPUInterop(renderer);
   const sceneResources=createSceneResources({interop,scene,camera,starAngularRadius:STAR_ANGULAR_RADIUS,useWorker});
-  const lighting=createLightingResources({interop,renderer,scene,camera,environment});
+  const lighting=createLightingResources({interop,renderer,scene,camera,environment,refreshContext});
   let lens=null,baseLens=null,manifest=null,engine=null,baseExposure=cameraExposure.value,interacting=false,pointerActive=false,releaseTimer;
-  let disposed=false,commandRevision=0,statisticsRevision=0,lastStatisticsSpp=-1,statisticsBusy=false,lastError=null;
+  let disposed=false,commandRevision=0,lensLoadRevision=0,statisticsRevision=0,lastStatisticsSpp=-1,statisticsBusy=false,lastError=null;
   let displayPipeline=null,imageNode=null,bloomNode=null,lightingDirty=true,sceneBuild=null;
   const viewportAspect=uniform(innerWidth/innerHeight),rawDisplay=uniform(0);
-  let diagnosticDirty=false,sampleBusy=false;
+  let diagnosticDirty=false,samplesInFlight=0;
   const update=patch=>store.update(patch);
   const state=()=>store.getState();
   function cancelFocus(){commandRevision++;const af=state().af;if(af.status==='busy')update({af:{...af,status:'idle',message:'参数改变，已取消过期对焦'}});}
@@ -117,18 +118,20 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
     cancelFocus();update({optics:candidate});clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision('optics');publishEngine();requestFrame();
   }
   async function loadLens(id,index=0){
-    cancelFocus();const token=commandRevision,old=state();
     const entry=manifest.lenses.find(item=>item.id===id);if(!entry?.supported)throw new Error(entry?.reason||'镜头不可用');
+    cancelFocus();const token=++lensLoadRevision,old=state();
     update({status:'loading',error:null});
     try{
       const response=await fetch(entry.asset);if(!response.ok)throw new Error('无法加载镜头数据');
-      const nextAsset=await response.json();if(token!==commandRevision)return;
+      const nextAsset=await response.json();if(token!==lensLoadRevision)return;
       const next=nextAsset.configurations[index];if(!next)throw new Error(nextAsset.configurationStatus[index]?.reason||'配置不可用');
       const limits=apertureLimits(next);
       const focusDistanceM=next.objectDistanceMm===null?null:next.objectDistanceMm/1000;
       const sensorZMm=next.sensorZMm,fNumber=limits.minFNumber;
       const minimumGap=minimumImageDistance(next);
-      const packed=engine.setLens(next,{fNumber,sensorZMm,dispersion:old.optics.dispersion});
+      const nextState={fNumber,sensorZMm,dispersion:old.optics.dispersion};
+      await engine.prepareLens(next,nextState);if(token!==lensLoadRevision||disposed)return;
+      const packed=engine.setLens(next,nextState);
       lens=next;baseLens=next;statisticsRevision++;
       update({status:'ready',error:null,lensId:id,configurationIndex:index,configurations:nextAsset.configurationStatus.map(c=>({...c,available:c.supported})),
         warnings:[...(next.capabilityWarnings??[]),...next.warnings.filter(w=>/^(通光数据不完整|含 nd\/vd|DOE 按|380–780)/.test(w)),
@@ -140,7 +143,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
           focusModel:next.focusMotion?`镜组移动 · ${next.focusMotion.source}`:'固定镜组 · 传感器轴向调焦'},
         af:{...old.af,status:'idle',message:'上游原始像面与物距；可使用 AF-S 对当前目标调焦'}});
       clearMetrics();revision('optics');bindImage();publishEngine();requestFrame();
-    }catch(error){if(token===commandRevision){update({status:lens?'ready':'error',error:error.message});}throw error;}
+    }catch(error){if(token!==lensLoadRevision||disposed)return;update({status:lens?'ready':'error',error:error.message});throw error;}
   }
   async function focusAt(distanceM,autofocus=false){
     const token=++commandRevision,revisions=state().revisions;
@@ -261,7 +264,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       if(value){interacting=true;if(engine?.resize(240)){bindImage();resetAccumulation();}}
       else scheduleRelease();
     },
-    needsFrame(){const s=state();return !disposed&&!sampleBusy&&!document.hidden&&s.mode==='lens'&&s.status==='ready'&&sceneResources.ready&&!s.sampling.paused&&s.af.status!=='busy'&&hasSamplesRemaining(engine.spp,s.sampling.targetSpp);},
+    needsFrame(){const s=state();return !disposed&&samplesInFlight<(interacting?1:maxSamplesInFlight)&&!document.hidden&&s.mode==='lens'&&s.status==='ready'&&sceneResources.ready&&!s.sampling.paused&&s.af.status!=='busy'&&hasSamplesRemaining(engine.spp,s.sampling.targetSpp);},
     frame(){
       const s=state();if(s.mode==='raster'){rasterPipeline.render();return;}
       // Never display raster as successful lens output.
@@ -269,9 +272,12 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       try{
         ensureLighting();
         if(diagnosticDirty){engine.resolve(s.display.diagnostic);diagnosticDirty=false;}
-        const submitted=!sampleBusy&&!s.sampling.paused&&!document.hidden&&s.af.status!=='busy'&&engine.sample({batchSpp:interacting?1:s.sampling.batchSpp,targetSpp:s.sampling.targetSpp,seed:s.sampling.seed,diagnostic:s.display.diagnostic});
+        const submitted=samplesInFlight<(interacting?1:maxSamplesInFlight)&&!s.sampling.paused&&!document.hidden&&s.af.status!=='busy'&&engine.sample({batchSpp:interacting?1:s.sampling.batchSpp,targetSpp:s.sampling.targetSpp,seed:s.sampling.seed,diagnostic:s.display.diagnostic});
         displayPipeline.render();publishEngine();
-        if(submitted){sampleBusy=true;interop.device.queue.onSubmittedWorkDone().then(()=>{sampleBusy=false;if(!disposed)requestFrame();},error=>{sampleBusy=false;if(!disposed)update({status:'error',error:error.message});});}
+        // Keep at most two ordered batches on the existing GPU queue. One whole-
+        // queue fence per frame previously left a RAF-sized bubble after each
+        // slow batch. Interaction stays single-batch to bound control latency.
+        if(submitted){samplesInFlight++;interop.device.queue.onSubmittedWorkDone().then(()=>{samplesInFlight--;if(!disposed)requestFrame();},error=>{samplesInFlight--;if(!disposed)update({status:'error',error:error.message});});}
         if(!statisticsBusy&&engine.roundComplete&&engine.spp>0&&engine.spp!==lastStatisticsSpp&&((s.sampling.targetSpp>0&&engine.spp>=s.sampling.targetSpp)||engine.spp%32===0)){
           statisticsBusy=true;lastStatisticsSpp=engine.spp;const rev=statisticsRevision;
           engine.statistics().then(stats=>{if(stats&&rev===statisticsRevision){
@@ -309,7 +315,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       update({status:'ready'});publishEngine();
     },
     get diagnostics(){return {...state(),lastError,initializationMs:engine?.initializationMs,sceneStats:sceneResources.stats,lighting:lighting.status};},
-    dispose(){disposed=true;clearTimeout(releaseTimer);engine?.dispose();sceneResources.dispose();lighting.dispose();displayPipeline?.dispose();interop.dispose();store.dispose();},
+    dispose(){disposed=true;lensLoadRevision++;clearTimeout(releaseTimer);engine?.dispose();sceneResources.dispose();lighting.dispose();displayPipeline?.dispose();interop.dispose();store.dispose();},
   };
   const visibility=()=>{if(!document.hidden)requestFrame();};document.addEventListener('visibilitychange',visibility);
   const originalDispose=runtime.dispose;runtime.dispose=()=>{document.removeEventListener('visibilitychange',visibility);originalDispose();};

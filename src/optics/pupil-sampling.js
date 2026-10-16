@@ -13,6 +13,30 @@ export const PUPIL_GLOBAL_MIX=.05;
 const PRIMARY=587.5618;
 const union=(a,b)=>[Math.min(a[0],b[0]),Math.max(a[1],b[1]),Math.min(a[2],b[2]),Math.max(a[3],b[3])];
 
+function resultCacheKey(packed,{enabled=true,bins=PUPIL_BINS,movingCenter=true}={}){
+  if(!Number.isInteger(bins)||bins<1||bins>PUPIL_MAX_BINS)throw new RangeError(`Pupil bins must be an integer from 1 to ${PUPIL_MAX_BINS}`);
+  const {sensorZMm,stopRadiusMm,region}=packed;
+  enabled=enabled&&!region.directional;
+  const p=new Float32Array(packed.parameters.buffer,packed.parameters.byteOffset,16);
+  const dispersion=new Uint32Array(packed.parameters.buffer,packed.parameters.byteOffset,16)[3]!==0;
+  return `${JSON.stringify([sensorZMm,stopRadiusMm,p[12],p[13],region.zMm,region.radiusMm,dispersion,enabled,bins])}/${movingCenter}`;
+}
+export function cachedPupilTable(lens,packed,options){return cache.get(lens)?.get(resultCacheKey(packed,options));}
+
+/** Accept a result from the same physical builder in the CPU worker. Validate
+ * the requested state and fixed ABI before making it visible to synchronous
+ * engine setters; stale requests cannot install a table under a different key. */
+export function cachePreparedPupilTable(lens,packed,options={},table){
+  const {bins=PUPIL_BINS,movingCenter=true,enabled=true}=options;
+  const p=new Float32Array(packed.parameters.buffer,packed.parameters.byteOffset,16);
+  const active=enabled&&!packed.region.directional,maxHeight=Math.hypot(p[12],p[13])/2;
+  if(!(table?.data instanceof Float32Array)||table.data.byteLength!==PUPIL_TABLE_BYTES||table.bins!==bins||table.movingCenter!==movingCenter||table.enabled!==active||table.maxHeight!==maxHeight||table.globalMix!==PUPIL_GLOBAL_MIX||table.requestKey!==resultCacheKey(packed,options)||table.rows?.length!==bins||table.centers?.length!==bins||!table.data.every(Number.isFinite))throw new Error('Worker pupil table does not match requested optics');
+  const key=resultCacheKey(packed,options);let entries=cache.get(lens);
+  if(!entries){entries=new Map();cache.set(lens,entries);}
+  entries.set(key,table);if(entries.size>16)entries.delete(entries.keys().next().value);
+  return table;
+}
+
 export function buildPupilTable(lens,packed,{enabled=true,bins=PUPIL_BINS,movingCenter=true}={}) {
   if(!Number.isInteger(bins)||bins<1||bins>PUPIL_MAX_BINS)throw new RangeError(`Pupil bins must be an integer from 1 to ${PUPIL_MAX_BINS}`);
   const {sensorZMm,stopRadiusMm,region}=packed;
@@ -212,7 +236,7 @@ export function buildPupilTable(lens,packed,{enabled=true,bins=PUPIL_BINS,moving
   rows.forEach((r,i)=>data.set(r,4+i*4));
   centers.forEach((c,i)=>data.set(c,4+PUPIL_MAX_BINS*4+i*4));
   const deriveMs=performance.now()-deriveStarted;
-  const result={data,rows,centers,nodes,midpointNodes,bins,maxHeight,globalMix:PUPIL_GLOBAL_MIX,enabled,movingCenter,
+  const result={requestKey:resultKey,data,rows,centers,nodes,midpointNodes,bins,maxHeight,globalMix:PUPIL_GLOBAL_MIX,enabled,movingCenter,
     probes:physical.probes,passed:physical.passed,diagnostics:derivedDiagnostics,
     precomputeMs:physical.precomputeMs,deriveMs,physicalCacheHit:!!cachedPhysical,
     buildMs:performance.now()-started,coldBuildMs:physical.precomputeMs+deriveMs};
