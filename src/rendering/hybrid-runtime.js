@@ -10,7 +10,6 @@ import { createControlStore } from './control-store.js';
 import { apertureLimits, rearSamplingRegion } from '../optics/lens-state.js';
 import { createFocusSolver } from '../optics/focus-solver.js';
 import { displayOutputNode } from '../hdr-output.js';
-
 import { exportLensTexture, captureCanvas } from './image-export.js';
 import { summarizeWork } from './work-model.js';
 import { loadGlassCatalog, inspectRecord, customLensId, CUSTOM_BRAND } from '../optics/lens-workbench.js';
@@ -46,7 +45,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
   const sceneResources=createSceneResources({interop,scene,camera,starAngularRadius:STAR_ANGULAR_RADIUS,useWorker});
   const lighting=createLightingResources({interop,renderer,scene,camera,environment,refreshContext});
   let lens=null,baseLens=null,baseAsset=null,manifest=null,engine=null,baseExposure=cameraExposure.value,interacting=false,pointerActive=false,releaseTimer;
-  let disposed=false,commandRevision=0,lensLoadRevision=0,statisticsRevision=0,lastStatisticsSpp=-1,statisticsBusy=false,lastError=null;
+  let disposed=false,commandRevision=0,lensLoadRevision=0,statisticsRevision=0,lastStatisticsSerial=-1,statisticsBusy=false,lastError=null;
   let displayPipeline=null,imageNode=null,bloomNode=null,lightingDirty=true,sceneBuild=null;
   const viewportAspect=uniform(innerWidth/innerHeight),rawDisplay=uniform(0);
   let diagnosticDirty=false,samplesInFlight=0,rasterCameraDirty=false;
@@ -58,10 +57,25 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
     if(!lens||!engine?.packed)return;
     update({prescription:slimPrescription(lens,{stopRadiusMm:engine.packed.stopRadiusMm,sensorZMm:engine.packed.sensorZMm,focusDistanceM:state().optics.focusDistanceM})});
   }
+  let inputUntil=0,lastDisplayAt=-Infinity,lastPublishAt=-Infinity,lastStatisticsAt=-Infinity,lastDisplayRevision='';
+  // All page input counts, including hovering/scrolling the controls. This is
+  // scheduling only: it must not resize the image or invalidate accumulated rays.
+  const inputEvents=['click','pointermove','pointerdown','pointerup','wheel','keydown','keyup','input','touchmove','focusin'];
+  const inputOptions={capture:true,passive:true};
+  const noteInput=event=>{if(event.isTrusted){inputUntil=performance.now()+1000;}};
+  for(const type of inputEvents)document.addEventListener(type,noteInput,inputOptions);
+  // Message tasks yield to page input without a RAF-sized gap after every tiny
+  // compute dispatch. Presentation remains throttled independently below.
+  const chunkTasks=new MessageChannel();
+  chunkTasks.port1.onmessage=()=>{if(runtime.needsFrame())runtime.frame();};
+  const isInteractive=()=>interacting||performance.now()<inputUntil;
+  // Input immediately stops replenishing the second queued chunk. Already
+  // submitted GPU work drains normally; it cannot be cancelled.
+  const flightLimit=()=>isInteractive()?1:maxSamplesInFlight;
   const update=patch=>store.update(patch);
   const state=()=>store.peekState();
   function cancelFocus(){commandRevision++;const af=state().af;if(af.status==='busy')update({af:{...af,status:'idle',message:'参数改变，已取消过期对焦'}});}
-  function clearMetrics(){const d=state().diagnostics;update({diagnostics:{...d,attemptedSamples:0,numericalErrorRate:0,opticalBlockedRate:0,tirRate:0,hitRate:0,backgroundRate:0,
+  function clearMetrics(){lastStatisticsAt=-Infinity;const d=state().diagnostics;update({diagnostics:{...d,attemptedSamples:0,numericalErrorRate:0,opticalBlockedRate:0,tirRate:0,hitRate:0,backgroundRate:0,
     opticalPassRate:0,bvhErrorRate:0,unsupportedRate:0,transparencyLimitRate:0,radianceInvalidRate:0,reflectionOutsideRate:0,sceneHitOfPassed:0,backgroundOfPassed:0}});diagnosticDirty=true;}
   function revision(kind){const revisions={...state().revisions};revisions[kind]=(revisions[kind]??0)+1;if(kind!=='display'&&kind!=='accumulation')revisions.accumulation++;update({revisions});}
   function sceneSummary(){
@@ -80,7 +94,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       ...engine.dimensions,memoryBytes:engine.memoryBytes+(sceneResources.stats?.gpuBytes??0)+1008},
       scene:{...s.scene,...(sceneSummary()?{summary:sceneSummary()}:{}),lighting:{ok:ls.ok,errors:ls.errors??[],warnings:ls.warnings??[],lights:ls.lights,environment:ls.environment,reflection:ls.reflection}}});
   }
-  function resetAccumulation(kind='accumulation'){cancelFocus();engine?.reset();clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision(kind);publishEngine();requestFrame();}
+  function resetAccumulation(kind='accumulation'){cancelFocus();engine?.reset();clearMetrics();statisticsRevision++;lastStatisticsSerial=-1;revision(kind);publishEngine();requestFrame();}
   function minimumImageDistance(prescription){
     let lo=0,hi=Math.max(1,prescription.imageDistanceMm);
     const valid=gap=>{try{rearSamplingRegion(prescription,prescription.lastVertexZMm+gap);return true;}catch{return false;}};
@@ -136,7 +150,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
     // Validate and upload before committing the UI snapshot. A rejected change
     // leaves the previous optics and focus state intact.
     engine.updateOptics({fNumber:candidate.fNumber,sensorZMm:lens.lastVertexZMm+candidate.imageDistanceMm,dispersion:candidate.dispersion});
-    cancelFocus();update({optics:candidate});clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision('optics');publishPrescription();publishEngine();requestFrame();
+    cancelFocus();update({optics:candidate});clearMetrics();statisticsRevision++;lastStatisticsSerial=-1;revision('optics');publishPrescription();publishEngine();requestFrame();
   }
   async function loadLens(id,index=0){
     const custom=customAssets.get(id),entry=custom?null:manifest.lenses.find(item=>item.id===id);
@@ -197,7 +211,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
           lastResult:{source:baseLens.focusMotion?.source??'lens-bench planeFocus',method:moved.method,focusDistanceM:moved.focusDistanceM,sensorZMm:next.sensorZMm,
             beforeRmsMm:moved.beforeRmsMm,afterRmsMm:moved.afterRmsMm,evaluations:moved.evaluations,solveMs:moved.solveMs,
             extrapolated:moved.extrapolated,clamped:moved.clamped,target:hit}}});
-      clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision('optics');publishPrescription();publishEngine();requestFrame();
+      clearMetrics();statisticsRevision++;lastStatisticsSerial=-1;revision('optics');publishPrescription();publishEngine();requestFrame();
     }catch(error){if(token===commandRevision){update({af:{...state().af,status:'error',message:error.message}});}throw error;}
   }
   /** Time of day / light change: shadows and PMREM already rerendered by the
@@ -232,7 +246,6 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
     resetAccumulation('camera');
     if(interacting&&!pointerActive)scheduleRelease();
   }
-  /** Adapt + preflight an imported/edited lens-bench record in the browser, then load it like bundled data. */
   /** HUD-driven arithmetic estimate. The counting integrator variant compiles on first use. */
   async function setWorkCounting(on){
     workCounting=on;lastWorkAt=-Infinity;
@@ -244,6 +257,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
     if(!on||workCounting!==on)setWork(workCounting?state().diagnostics.work:null);
     requestFrame();return status;
   }
+  /** Adapt + preflight an imported/edited lens-bench record in the browser, then load it like bundled data. */
   async function loadCustomLens({record,configurationIndex=0}={}){
     if(!record||typeof record.tx!=='string')throw new Error('缺少镜头处方');
     const catalog=await loadGlassCatalog();
@@ -340,7 +354,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       if(value){interacting=true;if(state().mode==='lens'&&engine?.resize(240)){bindImage();resetAccumulation();}}
       else scheduleRelease();
     },
-    needsFrame(){const s=state();return !disposed&&samplesInFlight<(interacting?1:maxSamplesInFlight)&&!document.hidden&&s.mode==='lens'&&s.status==='ready'&&sceneResources.ready&&!s.sampling.paused&&s.af.status!=='busy'&&hasSamplesRemaining(engine.spp,s.sampling.targetSpp);},
+    needsFrame(){const s=state();return !disposed&&samplesInFlight<flightLimit()&&!document.hidden&&s.mode==='lens'&&s.status==='ready'&&sceneResources.ready&&!s.sampling.paused&&s.af.status!=='busy'&&hasSamplesRemaining(engine.spp,s.sampling.targetSpp);},
     frame(){
       const s=state();if(s.mode==='raster'){rasterPipeline.render();return;}
       // Never display raster as successful lens output.
@@ -348,25 +362,45 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       try{
         ensureLighting();
         if(diagnosticDirty){engine.resolve(s.display.diagnostic);diagnosticDirty=false;}
-        const submitted=samplesInFlight<(interacting?1:maxSamplesInFlight)&&!s.sampling.paused&&!document.hidden&&s.af.status!=='busy'&&engine.sample({batchSpp:interacting?1:s.sampling.batchSpp,targetSpp:s.sampling.targetSpp,seed:s.sampling.seed,diagnostic:s.display.diagnostic});
-        displayPipeline.render();publishEngine();
-        // Keep at most two ordered batches on the existing GPU queue. One whole-
-        // queue fence per frame previously left a RAF-sized bubble after each
-        // slow batch. Interaction stays single-batch to bound control latency.
-        if(submitted){samplesInFlight++;interop.device.queue.onSubmittedWorkDone().then(()=>{samplesInFlight--;if(!disposed)requestFrame();},error=>{samplesInFlight--;if(!disposed)update({status:'error',error:error.message});});}
-        if(workCounting&&!workBusy&&engine.workCounting&&performance.now()-lastWorkAt>=1000){
-          workBusy=true;lastWorkAt=performance.now();
+        const now=performance.now(),interactive=interacting||now<inputUntil;
+        // Idle: larger chunks, up to four samples per pixel and two submissions
+        // in flight. Input: small chunks and a single outstanding submission.
+        const submitted=samplesInFlight<flightLimit()&&!s.sampling.paused&&!document.hidden&&s.af.status!=='busy'&&engine.sample({batchSpp:interactive?1:s.sampling.batchSpp,targetSpp:s.sampling.targetSpp,seed:s.sampling.seed,diagnostic:s.display.diagnostic,chunked:true,interactive});
+        const finished=s.sampling.targetSpp>0&&engine.spp>=s.sampling.targetSpp;
+        const displayRevision=`${s.revisions.display}/${s.revisions.accumulation}`;
+        // Avoid full viewport bloom/output and cloned DOM snapshots per chunk.
+        // Explicit display edits and the final chunk are always presented.
+        if(displayRevision!==lastDisplayRevision||(submitted&&(now-lastDisplayAt>=1000/30||finished))){
+          displayPipeline.render();lastDisplayAt=now;lastDisplayRevision=displayRevision;
+        }
+        if(now-lastPublishAt>=125||(submitted&&finished)){publishEngine();lastPublishAt=now;}
+        if(submitted){
+          const submission=engine.lastSubmission;
+          samplesInFlight++;
+          // Fill the idle queue through another browser task, giving pending
+          // input an opportunity to switch back before more work is submitted.
+          if(samplesInFlight<flightLimit())chunkTasks.port2.postMessage(null);
+          interop.device.queue.onSubmittedWorkDone().then(()=>{
+            if(!disposed)engine.completeChunk(submission,performance.now()-now);
+            samplesInFlight--;if(!disposed)chunkTasks.port2.postMessage(null);
+          },error=>{samplesInFlight--;if(!disposed)update({status:'error',error:error.message});});
+        }
+        // Counters are valid during a partial sweep too: each pixel records its
+        // own attempts. Spp modulo gates can be skipped forever (1,5,9,...).
+        if(workCounting&&!workBusy&&engine.workCounting&&now-lastWorkAt>=1000){
+          workBusy=true;lastWorkAt=now;
           engine.readWork().then(result=>{
             if(result&&result.workUnits>0&&workCounting&&!disposed)update({diagnostics:{...state().diagnostics,work:{status:'ok',...summarizeWork(result.counts,result),timedChunks:result.timedChunks}}});
           }).catch(()=>{}).finally(()=>{workBusy=false;});
         }
-        if(!statisticsBusy&&engine.roundComplete&&engine.spp>0&&engine.spp!==lastStatisticsSpp&&((s.sampling.targetSpp>0&&engine.spp>=s.sampling.targetSpp)||engine.spp%32===0)){
-          statisticsBusy=true;lastStatisticsSpp=engine.spp;const rev=statisticsRevision;
+        const sampleSerial=engine.sampleSerial;
+        if(!statisticsBusy&&engine.lastSubmission&&sampleSerial!==lastStatisticsSerial&&(now-lastStatisticsAt>=1000||finished||s.sampling.paused)){
+          statisticsBusy=true;lastStatisticsSerial=sampleSerial;lastStatisticsAt=now;const rev=statisticsRevision;
           engine.statistics().then(stats=>{if(stats&&rev===statisticsRevision){
             update({diagnostics:{...state().diagnostics,...stats}});
             if(stats.numericalErrorRate>1e-3){lastError=`光学数值错误率 ${(stats.numericalErrorRate*100).toFixed(3)}%，已停止累计；可切换光栅或选择其他镜头。`;update({status:'error',error:lastError});}
             else if(stats.bvhErrorRate>0){lastError=`BVH 遍历错误率 ${(stats.bvhErrorRate*100).toFixed(4)}%（实现错误，不是镜头遮挡或背景），已停止累计。`;update({status:'error',error:lastError});}
-          }}).catch(error=>{lastError=error.message;}).finally(()=>{statisticsBusy=false;});
+          }}).catch(error=>{lastError=error.message;}).finally(()=>{statisticsBusy=false;if(!disposed&&engine.sampleSerial!==lastStatisticsSerial)requestFrame();});
         }
       }catch(error){lastError=error.message;update({status:'error',error:error.message});console.error(error);}
     },
@@ -398,7 +432,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       update({status:'ready'});publishEngine();
     },
     get diagnostics(){return {...state(),lastError,initializationMs:engine?.initializationMs,sceneStats:sceneResources.stats,lighting:lighting.status};},
-    dispose(){disposed=true;lensLoadRevision++;clearTimeout(releaseTimer);focusSolver.dispose();engine?.dispose();sceneResources.dispose();lighting.dispose();displayPipeline?.dispose();interop.dispose();store.dispose();},
+    dispose(){disposed=true;lensLoadRevision++;clearTimeout(releaseTimer);for(const type of inputEvents)document.removeEventListener(type,noteInput,inputOptions);chunkTasks.port1.close();chunkTasks.port2.close();focusSolver.dispose();engine?.dispose();sceneResources.dispose();lighting.dispose();displayPipeline?.dispose();interop.dispose();store.dispose();},
   };
   const visibility=()=>{if(!document.hidden)requestFrame();};document.addEventListener('visibilitychange',visibility);
   const originalDispose=runtime.dispose;runtime.dispose=()=>{document.removeEventListener('visibilitychange',visibility);originalDispose();};

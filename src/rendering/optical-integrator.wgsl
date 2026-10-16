@@ -6,7 +6,7 @@ struct RenderParameters {
   size: vec4<u32>,      // width, height, batch spp, target attempted spp
   settings: vec4<u32>,  // seed, diagnostic mode, test constant environment, tile y offset
   environment: vec4<f32>, // RGB constant radiance for numerical GPU acceptance only
-  debug: vec4<u32>,     // x: 0 lens, 1 diagnostic pinhole (tests only, bypasses optics and spectra)
+  debug: vec4<u32>,     // x: pinhole; y: first group; z: dispatch row width; w: chunk group count (0 = legacy)
   pinholeClipToCamera: mat4x4<f32>,
 };
 // 64 bytes. failures: optical blocked, TIR, optical numerical, BVH traversal error.
@@ -118,9 +118,17 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>,@builtin(local_invocation_in
   // WORK-COUNTING-END
 }
 fn integratePixel(id:vec3<u32>){
-  let imageY=id.y+render.settings.w;
-  if(id.x>=render.size.x||imageY>=render.size.y){return;}
-  let pixel=id.y*render.size.x+id.x;
+  // Storage tiles keep their original layout. Scheduling chunks only select
+  // workgroups within that tile, preserving pixel IDs and random sequences.
+  let groupsX=(render.size.x+7u)/8u;
+  let chunkGroup=(id.y/8u)*render.debug.z+id.x/8u;
+  if(render.debug.w!=0u&&chunkGroup>=render.debug.w){return;}
+  let linearGroup=render.debug.y+chunkGroup;
+  let imageX=select(id.x,(linearGroup%groupsX)*8u+id.x%8u,render.debug.w!=0u);
+  let localY=select(id.y,(linearGroup/groupsX)*8u+id.y%8u,render.debug.w!=0u);
+  let imageY=localY+render.settings.w;
+  if(imageX>=render.size.x||imageY>=render.size.y){return;}
+  let pixel=localY*render.size.x+imageX;
   var a=accumulation[pixel];
   let remaining=select(render.size.w-min(render.size.w,a.attempts),0xffffffffu-a.attempts,render.size.w==0u);
   let batch=min(render.size.z,remaining);
@@ -129,7 +137,7 @@ fn integratePixel(id:vec3<u32>){
   for(var j=0u;j<min(batch,4u);j++){
     let index=a.attempts;
     workCounters[WORK_PATH]++;
-    let globalPixel=imageY*render.size.x+id.x;
+    let globalPixel=imageY*render.size.x+imageX;
     let key=spectralHash32(globalPixel^spectralHash32(index+render.settings.x*0x632be5abu));
     a.attempts++;
     var worldOrigin:vec3<f32>;var worldDirection:vec3<f32>;
@@ -138,13 +146,13 @@ fn integratePixel(id:vec3<u32>){
     if(pinhole){
       // Diagnostic pinhole: pixel-centre ray of the reference camera. Used
       // only by the raster/compute shading comparison test.
-      let ndc=vec2<f32>((f32(id.x)+0.5)/f32(render.size.x)*2.0-1.0,1.0-(f32(imageY)+0.5)/f32(render.size.y)*2.0);
+      let ndc=vec2<f32>((f32(imageX)+0.5)/f32(render.size.x)*2.0-1.0,1.0-(f32(imageY)+0.5)/f32(render.size.y)*2.0);
       let viewH=render.pinholeClipToCamera*vec4<f32>(ndc,0.5,1.0);
       worldOrigin=(render.cameraToWorld*vec4<f32>(0,0,0,1)).xyz;
       worldDirection=normalize((render.cameraToWorld*vec4<f32>(viewH.xyz/viewH.w,0)).xyz);
     }else{
       let jitter=vec2<f32>(sampleDimension(globalPixel,index,0u,render.settings.x),sampleDimension(globalPixel,index,1u,render.settings.x));
-      let uv=(vec2<f32>(f32(id.x),f32(imageY))+jitter)/vec2<f32>(render.size.xy);
+      let uv=(vec2<f32>(f32(imageX),f32(imageY))+jitter)/vec2<f32>(render.size.xy);
       // A real sensor image is inverted. Stored output y=0 is the displayed top.
       let sensor=vec3<f32>(-(uv.x-.5)*optics.sensor.x,(uv.y-.5)*optics.sensor.y,optics.geometry.x);
       let pupilUV=vec2<f32>(sampleDimension(globalPixel,index,2u,render.settings.x),sampleDimension(globalPixel,index,3u,render.settings.x));
@@ -199,5 +207,5 @@ fn integratePixel(id:vec3<u32>){
     a.xyz+=contribution;
   }
   accumulation[pixel]=a;
-  textureStore(lensImage,vec2<i32>(i32(id.x),i32(imageY)),resolvePixel(a));
+  textureStore(lensImage,vec2<i32>(i32(imageX),i32(imageY)),resolvePixel(a));
 }
