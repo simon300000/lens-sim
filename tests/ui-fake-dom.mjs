@@ -155,6 +155,7 @@ export function createFakeDocument({ narrow = false } = {}) {
   doc.ownerDocument = doc;
   doc.nodeType = 9;
   doc.createElement = (tag) => new FakeElement(doc, tag);
+  doc.createElementNS = (_ns, tag) => new FakeElement(doc, tag);
   doc.createTextNode = (text) => new FakeText(doc, String(text));
   const html = doc.createElement('html');
   doc.appendChild(html);

@@ -2,7 +2,6 @@ import * as THREE from 'three/webgpu';
 import { pass, mrt, normalView, vec4, Fn, float, builtinAOContext, uniform } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { buildSanteiScene } from './scene/santei-scene.js';
 import { createDaylight } from './lighting.js';
 import { createTimeControls } from './time-controls.js';
@@ -16,7 +15,8 @@ import { warmRender } from './rendering/startup-warmup.js';
 import { installNormalPassReuse } from './rendering/pass-reuse.js';
 import { startup } from './startup-progress.js';
 import { installURLState } from './url-state.js';
-import { installCameraWheelTravel, installCameraLookAround, installCameraKeyboardTravel } from './camera-controls.js';
+import { createCameraRig, createScenePicker } from './camera-controls.js';
+import { installSceneCard } from './ui/scene-card.js';
 
 const faults=[];
 window.addEventListener('error',event=>faults.push(event.message));
@@ -24,6 +24,7 @@ window.addEventListener('unhandledrejection',event=>faults.push(String(event.rea
 
 async function createScene(){
   const startupStarted=performance.now();
+  installSceneCard();
   await startup.stage(1,'检测 GPU 与 HDR 画布支持');
   const pixelDiagnostics=new URLSearchParams(location.search).get('gpu-diagnostics')==='1';
   if(!navigator.gpu)throw new Error('此浏览器尚未启用 WebGPU。请用支持 WebGPU 的 Chrome 或 Edge 打开本地地址。');
@@ -79,15 +80,12 @@ async function createScene(){
   const camera=new THREE.PerspectiveCamera(portrait?48:40,innerWidth/innerHeight,.15,450);
   camera.position.set(21,13,27);
   if(portrait)camera.position.multiplyScalar(1.48);
-  const controls=new OrbitControls(camera,renderer.domElement);
-  controls.target.set(0,2.7,2.0);
-  controls.enableDamping=true;
-  controls.dampingFactor=.07;
-  controls.minDistance=5;controls.maxDistance=62;
-  controls.minPolarAngle=.01;controls.maxPolarAngle=Math.PI-.01;
-  controls.enablePan=true;controls.panSpeed=.7;controls.rotateSpeed=.55;
-  const disposeLookAround=installCameraLookAround(controls);
-  controls.update();
+  camera.lookAt(0,2.7,2.0);
+  // One rig for look / orbit / pan / dolly / walk. Picking skips dense vegetation instances.
+  const controls=createCameraRig(camera,renderer.domElement,{
+    pick:createScenePicker([villa.group,garden.garden,details.group,testTargets.group,landscape.meadow]),
+    requestFrame:()=>wake()});
+  controls.target.set(0,2.7,2.0);camera.lookAt(controls.target);controls.update(0);
 
   let ready=false,framesNeeded=0,rendering=false,pendingTime=null;
   let timeRevision=0;
@@ -100,16 +98,15 @@ async function createScene(){
   let lastFrameTime=performance.now();
   function frame(now){
     const delta=(now-lastFrameTime)/1000;lastFrameTime=now;
-    keyboardTravel.update(delta);
     // Commit the entire time state before any scene pass can cache this frame.
     if(pendingTime){const value=pendingTime;pendingTime=null;applyTime(value);}
     const revision=timeRevision,hour=sceneElement.dataset.hour;
-    controls.update();if(hybrid)hybrid.frame();else pipeline.render();
+    const cameraMoving=controls.update(delta);if(hybrid)hybrid.frame();else pipeline.render();
     // Time completion is checked only on a new scene revision, never per optical batch.
     if(completionRevision!==revision&&sceneElement.dataset.renderedHour!==hour){completionRevision=revision;renderer.backend.device.queue.onSubmittedWorkDone().then(()=>{
       if(revision===timeRevision){sceneElement.dataset.renderedHour=hour;document.querySelector('#time-controls').setAttribute('aria-busy','false');}
     });}
-    framesNeeded--;if(framesNeeded>0||keyboardTravel.active||hybrid?.needsFrame())requestAnimationFrame(frame);else rendering=false;
+    framesNeeded--;if(framesNeeded>0||cameraMoving||hybrid?.needsFrame())requestAnimationFrame(frame);else rendering=false;
   }
   await startup.stage(3,'初始化天空、日照与反射');
   const daylight=createDaylight(scene,renderer,{details,invalidate});
@@ -178,8 +175,7 @@ async function createScene(){
     if(!ready)return;
     const view=key==='garden'?gardenView:testTargets.views[key];
     if(!view)return;
-    const damping=controls.enableDamping;controls.enableDamping=false;controls.update();
-    camera.position.fromArray(view.position);controls.target.fromArray(view.target);camera.lookAt(controls.target);controls.update();controls.enableDamping=damping;wake();
+    camera.position.fromArray(view.position);controls.target.fromArray(view.target);camera.lookAt(controls.target);controls.sync();wake();
   }
   window.__SANTEI__.showTestTarget=showTestTarget;
   for(const button of document.querySelectorAll('[data-test-target]'))button.addEventListener('click',()=>showTestTarget(button.dataset.testTarget));
@@ -188,8 +184,6 @@ async function createScene(){
   const activeInputs=new Set();
   controls.addEventListener('start',event=>{activeInputs.add(event.travelSource||'pointer');hybrid?.setInteracting(true);wake();});
   controls.addEventListener('end',event=>{activeInputs.delete(event.travelSource||'pointer');hybrid?.setInteracting(activeInputs.size>0);wake();});
-  const keyboardTravel=installCameraKeyboardTravel(controls);
-  const disposeWheelTravel=installCameraWheelTravel(controls,renderer.domElement);
   addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);hybrid?.resize();wake();});
   // Warm the visible Moon/stars, lamp shadows and unlit predawn variants while
   // the loading curtain is up, instead of compiling them on the first slider move.
@@ -254,7 +248,7 @@ async function createScene(){
   sceneElement.dataset.koi=garden.koi.length;
   console.info('SANTEI scene ready',diagnostics);
   startup.complete();
-  addEventListener('pagehide',()=>{urlState.dispose();ready=false;keyboardTravel.dispose();disposeWheelTravel();disposeLookAround();lensUI.dispose();hybrid.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
+  addEventListener('pagehide',()=>{urlState.dispose();ready=false;lensUI.dispose();hybrid.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
   // Initialization captured the current scene and prepared its first lens
   // sample. Schedule display without throwing away that prepared state.
   wake();

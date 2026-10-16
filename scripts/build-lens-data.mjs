@@ -86,7 +86,9 @@ export async function buildLensData() {
       configurationStatus.push({ ...status, ...capability, warnings: [...status.warnings, ...capability.warnings] });
     }
     const supported = configurationStatus.some(cfg => cfg.supported);
-    const asset = { schemaVersion: 1, id: record.id, source: { repository: upstream, commit: sha, path: `data/lenses/${file}`, license: 'GPL-3.0', modified: 'lens-sim normalized data adapter' }, upstreamWarnings: [...(record.warn ?? [])], configurations, configurationStatus };
+    // The unmodified upstream record is kept so the workbench can edit the
+    // prescription and re-run the same adapter/preflight in the browser.
+    const asset = { schemaVersion: 1, id: record.id, source: { repository: upstream, commit: sha, path: `data/lenses/${file}`, license: 'GPL-3.0', modified: 'lens-sim normalized data adapter' }, upstreamWarnings: [...(record.warn ?? [])], configurations, configurationStatus, record };
     await fs.writeFile(path.join(output, file), JSON.stringify(asset) + '\n');
     const meta = metadata.get(record.id) ?? {};
     entries.push({ ...inspected, parserSupported: inspected.supported, supported, gpuValidated: false, validation: 'static-preflight-only',
@@ -99,6 +101,8 @@ export async function buildLensData() {
   const manifest = { schemaVersion: 1, source: { repository: upstream, branch: 'main', commit: sha, license: 'GPL-3.0' }, defaultId, lenses: entries };
   await fs.writeFile(path.join(output, 'manifest.json'), JSON.stringify(manifest) + '\n');
   await fs.writeFile(path.join(output, 'LICENSE.lens-bench.txt'), license);
+  // Static glass catalog for in-browser editing and .seq/.zmx import (loaded on demand).
+  await fs.writeFile(path.join(output, 'glass-catalog.json'), JSON.stringify({ ...catalog, source: { repository: upstream, commit: sha, license: 'GPL-3.0' } }) + '\n');
   const summary = { commit: sha, total: entries.length, parserSupported: entries.filter(entry => entry.parserSupported).length,
     supported: entries.filter(entry => entry.supported).length, unsupported: entries.filter(entry => !entry.supported).length,
     parserSupportedConfigurations: entries.flatMap(e => e.configurations).filter(c => c.parserSupported).length,

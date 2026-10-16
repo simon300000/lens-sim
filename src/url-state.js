@@ -54,15 +54,18 @@ export async function installURLState({camera,controls,store,requestFrame,window
     if(state.status!=='ready'||state.af.status==='busy')return;
     const url=new URL(win.location.href);
     for(const key of VIEW_KEYS)url.searchParams.delete(key);
-    url.searchParams.set('lens',state.lensId);
-    url.searchParams.set('config',String(state.configurationIndex));
     url.searchParams.set('pos',camera.position.toArray().map(coordinate).join(','));
     url.searchParams.set('target',controls.target.toArray().map(coordinate).join(','));
-    url.searchParams.set('focus',state.optics.focusDistanceM===null?'inf':String(state.optics.focusDistanceM));
-    url.searchParams.set('focusKnown',state.optics.focusDistanceKnown===false?'0':'1');
-    url.searchParams.set('focusSolver','bench-v1');
-    url.searchParams.set('imageDistance',String(state.optics.imageDistanceMm));
-    url.searchParams.set('fNumber',String(state.optics.fNumber));
+    // Imported/edited prescriptions exist only in this page: share the pose, never a dangling lens.
+    if(!state.lensId.startsWith('custom:')){
+      url.searchParams.set('lens',state.lensId);
+      url.searchParams.set('config',String(state.configurationIndex));
+      url.searchParams.set('focus',state.optics.focusDistanceM===null?'inf':String(state.optics.focusDistanceM));
+      url.searchParams.set('focusKnown',state.optics.focusDistanceKnown===false?'0':'1');
+      url.searchParams.set('focusSolver','bench-v1');
+      url.searchParams.set('imageDistance',String(state.optics.imageDistanceMm));
+      url.searchParams.set('fNumber',String(state.optics.fNumber));
+    }
     if(url.href!==win.location.href)win.history.replaceState(win.history.state,'',url.href);
   }
   function schedule(){win.clearTimeout(timer);timer=win.setTimeout(write,200);}
