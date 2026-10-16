@@ -37,6 +37,7 @@ fn opticalBernstein(s: OpticalSurface, u: f32) -> vec2f {
 }
 // .x sag; .y 1 if in the primary conic domain, else 0.
 fn opticalSag(s: OpticalSurface, xy: vec2f) -> vec2f {
+  workCounters[WORK_SAG]++;
   let r2 = dot(xy, xy);
   var c = 0.0;
   if (s.geometry.y != 0.0) { c = 1.0 / s.geometry.y; }
@@ -44,8 +45,10 @@ fn opticalSag(s: OpticalSurface, xy: vec2f) -> vec2f {
   if (q < 0.0) { return vec2f(0.0); }
   var z = c*r2 / (1.0 + sqrt(q));
   let u2=r2/(s.bounds.y*s.bounds.y);
-  if(s.bounds.z==3.0){z+=opticalBernstein(s,sqrt(u2)).x;}
+  let degree=min(s.media.z,28u);
+  if(s.bounds.z==3.0){z+=opticalBernstein(s,sqrt(u2)).x;workCounters[WORK_POLY_FLOPS]+=3u*degree*degree/2u;}
   else{
+    workCounters[WORK_POLY_FLOPS]+=2u*degree+3u;
     let xodd=s.bounds.z==1.0;let u=select(u2,sqrt(u2),xodd);var polynomial=0.0;
     for(var j=min(s.media.z,28u);j>0u;j--){polynomial=polynomial*u+opticalCoefficient(s,j-1u);}
     z+=polynomial*select(u2*u2,u,xodd);
@@ -54,6 +57,8 @@ fn opticalSag(s: OpticalSurface, xy: vec2f) -> vec2f {
   return vec2f(z,1.0);
 }
 fn opticalNormal(s: OpticalSurface, xy: vec2f) -> vec4f {
+  workCounters[WORK_NORMAL]++;
+  workCounters[WORK_POLY_FLOPS]+=select(3u*min(s.media.z,28u)+3u,3u*min(s.media.z,28u)*min(s.media.z,28u)/2u,s.bounds.z==3.0);
   let r2 = dot(xy,xy);
   var c = 0.0;
   if (s.geometry.y != 0.0) { c = 1.0/s.geometry.y; }
@@ -253,6 +258,7 @@ fn opticalBracketAsphere(s: OpticalSurface, p: vec3f, v: vec3f, tolerance: f32) 
   return vec2f(0.0);
 }
 fn opticalIntersect(s: OpticalSurface, p: vec3f, v: vec3f) -> OpticalHit {
+  workCounters[WORK_LENS_SURFACE]++;
   let tolerance = 1e-5 + 8e-7*max(abs(s.geometry.x),length(p));
   let roots = opticalConicRoots(s,p,v);
   var t = -1e30;

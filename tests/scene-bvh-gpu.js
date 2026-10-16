@@ -1,13 +1,13 @@
 import * as THREE from 'three/webgpu';
 import { createGPUInterop } from '../src/rendering/three-interop.js';
 import { createSceneResources } from '../src/rendering/scene-resources.js';
-import { SCENE_INTERSECTOR_WGSL } from '../src/rendering/scene-wgsl.js';
+import { SCENE_INTERSECTOR_WGSL, WORK_COUNTERS_WGSL } from '../src/rendering/scene-wgsl.js';
 import { bruteForceIntersect } from '../src/scene/scene-reference.js';
 import { diagnosticScene, rng } from './scene-fixtures.js';
 /** Test A: GPU two-level BVH against an f64 CPU brute force on the SAME
  * extracted geometry. Development reference only, never a runtime fallback. */
 const out = document.querySelector('#result'), check = (c, m) => { if (!c) throw new Error(m); };
-const KERNEL = SCENE_INTERSECTOR_WGSL + `
+const KERNEL = WORK_COUNTERS_WGSL + SCENE_INTERSECTOR_WGSL + `
 struct RayIn { origin: vec3f, tMin: f32, direction: vec3f, tMax: f32 }
 struct HitOut { t: f32, b1: f32, b2: f32, instance: u32, triangle: u32, status: u32, error: u32, front: u32 }
 @group(0) @binding(0) var<storage,read> rays: array<RayIn>;

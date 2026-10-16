@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import opticalSource from '../optics/optical-core.wgsl?raw';
-import { SCENE_INTERSECTOR_WGSL, SCENE_SHADING_WGSL } from './scene-wgsl.js';
+import { SCENE_INTERSECTOR_WGSL, SCENE_SHADING_WGSL, WORK_COUNTERS_WGSL } from './scene-wgsl.js';
 import integratorSource from './optical-integrator.wgsl?raw';
 import resolveSource from './resolve.wgsl?raw';
 import focusSource from '../optics/focus.wgsl?raw';
@@ -15,6 +15,7 @@ import pupilSource from '../optics/pupil-sampling.wgsl?raw';
 import { packLens } from '../optics/lens-state.js';
 import { createComputeTimer } from './three-interop.js';
 import { imagePlan, sampleBudget, PIXEL_BYTES } from './sampling-plan.js';
+import { WORK_COUNTERS } from './work-model.js';
 
 export const DIAGNOSTIC_MODES=Object.freeze({beauty:0,'scene-error':1,status:2,'geometry-depth':3,'geometry-normal':4,'geometry-material':5});
 // Modes >= 3 change what is accumulated (debug RGB), so switching resets accumulation.
@@ -33,11 +34,16 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   const summary=interop.storage(48,'AF reduced quadratic moments');
   const target=interop.storage(32,'AF actual chief-ray world target');
   const pupil=interop.uniform(new Uint8Array(PUPIL_TABLE_BYTES),'Radial exit pupil proposal table');
+  const WORK_BYTES=WORK_COUNTERS.length*8,work=interop.storage(WORK_BYTES,'Work tallies (64-bit lo/hi pairs)');
+  // The integrator ships in two variants: the normal one strips the work
+  // reduction (its private tallies are dead code), the diagnostics one keeps it.
+  const sampleSource=WORK_COUNTERS_WGSL+opticalSource+SCENE_INTERSECTOR_WGSL+SCENE_SHADING_WGSL+SPECTRAL_WGSL+SAMPLING_WGSL+pupilSource;
+  const countingSource=sampleSource+integratorSource;
   const jobs=[
-    ['sample',opticalSource+SCENE_INTERSECTOR_WGSL+SCENE_SHADING_WGSL+SPECTRAL_WGSL+SAMPLING_WGSL+pupilSource+integratorSource,'Real lens + BVH first hit + shading fused integrate'],
+    ['sample',sampleSource+integratorSource.replace(/\/\/ WORK-COUNTING-BEGIN[\s\S]*?\/\/ WORK-COUNTING-END\n/g,''),'Real lens + BVH first hit + shading fused integrate'],
     ['resolve',SPECTRAL_WGSL+resolveSource,'XYZ display-only resolve'],
-    ['focus',opticalSource+SAMPLING_WGSL+focusSource,'AF physical forward beam trace'],
-    ['target',opticalSource+SCENE_INTERSECTOR_WGSL+targetSource,'AF reference ray -> BVH first opaque surface'],
+    ['focus',WORK_COUNTERS_WGSL+opticalSource+SAMPLING_WGSL+focusSource,'AF physical forward beam trace'],
+    ['target',WORK_COUNTERS_WGSL+opticalSource+SCENE_INTERSECTOR_WGSL+targetSource,'AF reference ray -> BVH first opaque surface'],
     ['reduce',reduceSource,'AF cross-workgroup quadratic reduction'],
     ['statistics',statisticsSource,'Attempt statistics reduction'],
   ];
@@ -50,6 +56,11 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   let dimensions={width:0,height:0},currentRevision=0,resizeRevision=0,focusBudget=2048;
   const pose=new THREE.Matrix4();
   let sceneBound=-1,lightingBound=null;
+  // Work counting (diagnostics HUD only): workgroup-samples submitted since the
+  // last readback, and GPU (or wall) time of recent counted dispatches.
+  let counting=false,workUnits=0,workPending=null,countingPipeline=null,countingCompile=null;const workTimings=[];
+  const workSupported=device.limits.maxStorageBuffersPerShaderStage>=9;
+  function recordWorkTiming(ms,units,source){if(!(ms>0&&units>0))return;workTimings.push({ms,units,source});if(workTimings.length>24)workTimings.shift();}
 
   function group(pipeline,entries){return device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries});}
   function focusGroups(){
@@ -63,6 +74,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     const sceneBindings=[...sceneResources.bindings(6),...lighting.bindings(11)];
     for(const tile of tiles){
       tile.sample=group(pipelines.sample,[...lensBindings,uniformBinding(3,render),uniformBinding(4,tile.buffer),{binding:5,resource:image.gpu.createView()},...sceneBindings,uniformBinding(20,pupil)]);
+      tile.sampleCounting=countingPipeline?group(countingPipeline,[...lensBindings,uniformBinding(3,render),uniformBinding(4,tile.buffer),{binding:5,resource:image.gpu.createView()},...sceneBindings,uniformBinding(20,pupil),uniformBinding(21,work)]):null;
       tile.resolve=group(pipelines.resolve,[uniformBinding(0,resolve),uniformBinding(1,tile.buffer),{binding:2,resource:image.gpu.createView()}]);
     }
     groups.target=group(pipelines.target,[...lensBindings,uniformBinding(3,camera),uniformBinding(4,target),...sceneResources.bindings(6).slice(0,3)]);
@@ -131,14 +143,15 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   function setPose(sourceCamera){
     sourceCamera.updateMatrixWorld(true);pose.copy(sourceCamera.matrixWorld);device.queue.writeBuffer(camera,0,new Float32Array(pose.elements));
   }
-  function submit(pipeline,bindGroup,x=1,y=1,{timed=false}={}){
+  function submit(pipeline,bindGroup,x=1,y=1,{timed=false,countedWork=0}={}){
     if(disposed)throw new Error('Optical engine disposed');
     const encoder=device.createCommandEncoder();const timestamps=timed?timer.begin():undefined;
     const pass=encoder.beginComputePass(timestamps?{timestampWrites:timestamps}:{});
     pass.setPipeline(pipeline);pass.setBindGroup(0,bindGroup);pass.dispatchWorkgroups(x,y);pass.end();
     const timingRevision=currentRevision,timingDimensions={...dimensions};
-    const collect=timed?timer.end(encoder,timestamps,ms=>{if(timingRevision===currentRevision){computeMs=ms;lastTiming={...timingDimensions,ms};}}):null;
+    const collect=timed?timer.end(encoder,timestamps,ms=>{if(countedWork)recordWorkTiming(ms,countedWork,'gpu');if(timingRevision===currentRevision){computeMs=ms;lastTiming={...timingDimensions,ms};}}):null;
     device.queue.submit([encoder.finish()]);collect?.();
+    if(countedWork&&!timer.supported){const started=performance.now();device.queue.onSubmittedWorkDone().then(()=>recordWorkTiming(performance.now()-started,countedWork,'wall'),()=>{});}
   }
   const initializationMs=performance.now()-started;
   return {
@@ -154,6 +167,32 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       return pupilPrecomputer.prepare(nextLens,next,{enabled:state?.pupilSampling!==false,bins:state?.pupilBins,movingCenter:state?.pupilMovingCenter});
     },
     reset,resize,resizeChecked,setLens,updateOptics,setPose,bindScene,
+    get workCounting(){return counting&&Boolean(countingPipeline);},
+    get workSupported(){return workSupported;},
+    /** Resolves to 'counting' | 'off' | 'unsupported'. The counting variant compiles once, on first use. */
+    async setWorkCounting(on){
+      counting=Boolean(on)&&workSupported;workUnits=0;workTimings.length=0;
+      if(!counting)return workSupported?'off':'unsupported';
+      if(!countingPipeline){countingCompile??=interop.computePipeline(countingSource,'Fused integrate + work counters (diagnostics)');countingPipeline=await countingCompile;rebuildGroups();}
+      const encoder=device.createCommandEncoder();encoder.clearBuffer(work);device.queue.submit([encoder.finish()]);workUnits=0;
+      return counting?'counting':'off';
+    },
+    /** Copy-and-clear in one submission, so every chunk is counted exactly once. */
+    async readWork(){
+      if(workPending||!counting)return workPending;
+      const units=workUnits;workUnits=0;
+      const staging=device.createBuffer({size:WORK_BYTES,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+      const encoder=device.createCommandEncoder();encoder.copyBufferToBuffer(work,0,staging,0,WORK_BYTES);encoder.clearBuffer(work);device.queue.submit([encoder.finish()]);
+      workPending=(async()=>{
+        try{
+          await staging.mapAsync(GPUMapMode.READ);const u=new Uint32Array(staging.getMappedRange());
+          const counts=WORK_COUNTERS.map((_,i)=>u[2*i]+u[2*i+1]*4294967296);
+          const ms=workTimings.reduce((a,t)=>a+t.ms,0),measured=workTimings.reduce((a,t)=>a+t.units,0);
+          return {counts,workUnits:units,msPerWorkUnit:measured>0?ms/measured:null,timing:workTimings.at(-1)?.source??null,timedChunks:workTimings.length};
+        }finally{if(staging.mapState==='mapped')staging.unmap();staging.destroy();workPending=null;}
+      })();
+      return workPending;
+    },
     sample({batchSpp=1,targetSpp=64,seed=1,diagnostic='beauty',constantEnvironment=null,pinhole=null}={}){
       bindScene();
       if(!tiles[0]?.sample)throw new Error('场景 BVH、光照资源或镜头尚未准备');
@@ -165,7 +204,9 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       u.set([dimensions.width,dimensions.height,budget,roundTarget,seed,diagnosticIndex(diagnostic),constantEnvironment?1:0,tile.y],16);
       f.set([...(constantEnvironment??[0,0,0]),0],24);u.set([pinhole?1:0,0,0,0],28);if(pinhole)f.set(pinhole.clipToCamera,32);
       device.queue.writeBuffer(render,0,bytes);
-      submit(pipelines.sample,tile.sample,Math.ceil(dimensions.width/8),Math.ceil(tile.height/8),{timed:true});
+      const counted=counting&&Boolean(tile.sampleCounting)&&!pinhole,units=Math.ceil(dimensions.width/8)*Math.ceil(tile.height/8)*budget;
+      if(counted)workUnits+=units;
+      submit(counted?countingPipeline:pipelines.sample,counted?tile.sampleCounting:tile.sample,Math.ceil(dimensions.width/8),Math.ceil(tile.height/8),{timed:true,countedWork:counted?units:0});
       tileCursor++;if(tileCursor===tiles.length){tileCursor=0;spp+=budget;}return true;
     },
     resolve(diagnostic='beauty'){
@@ -227,6 +268,6 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       return {sensorZMm:z,imageDistanceMm:z-lens.lastVertexZMm,beams:count,beamBudget:focusBudget,beforeRmsMm:Math.sqrt(merit(previousSensorZ)),afterRmsMm:Math.sqrt(merit(z)),rmsResolutionMm,quadratic:{A,B,C,originSensorZMm:referenceSensorZ},target:localTarget};
     },
     async readAccumulation(){const result=new Uint8Array(dimensions.width*dimensions.height*PIXEL_BYTES);let offset=0;for(const tile of tiles){const part=new Uint8Array(await interop.readBuffer(tile.buffer,tile.bytes));result.set(part,offset);offset+=part.length;}return result.buffer;},
-    dispose(){disposed=true;pupilPrecomputer.dispose();timer.dispose();for(const b of [optics,render,resolve,focus,camera,beams,summary,target,surfaces,lut,pupil,...tiles.map(t=>t.buffer)])if(b)interop.release(b);image?.texture.dispose();},
+    dispose(){disposed=true;pupilPrecomputer.dispose();timer.dispose();for(const b of [optics,render,resolve,focus,camera,beams,summary,target,surfaces,lut,pupil,work,...tiles.map(t=>t.buffer)])if(b)interop.release(b);image?.texture.dispose();},
   };
 }

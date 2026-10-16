@@ -1,4 +1,7 @@
 import intersectorSource from './scene-intersector.wgsl?raw';
+import workCountersSource from './work-counters.wgsl?raw';
+/** Declares the per-invocation work tallies; prepend once per shader module. */
+export const WORK_COUNTERS_WGSL = workCountersSource;
 import shadingSource from './scene-shading.wgsl?raw';
 import { TEST_CHART_WGSL } from '../scene/test-chart-patterns.js';
 import { DFG_WGSL } from './dfg-lut.js';

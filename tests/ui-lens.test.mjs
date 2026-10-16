@@ -809,3 +809,16 @@ test('save picture dispatches exportImage and is disabled until a lens sample ex
   await flush();
   assert.ok(calls.some((c) => c.type === 'exportImage'));
 });
+
+test('GPU work counting follows the HUD: on while open and ready, off when closed', async () => {
+  const { doc, $, calls, store } = setup({ initial: { ...READY, status: 'loading' } });
+  key(doc, 'p');
+  await flush();
+  assert.ok(!calls.some((c) => c.type === 'setWorkCounting'), 'not before the backend is ready');
+  store.update({ status: 'ready' });
+  await flush();
+  assert.deepEqual(calls.filter((c) => c.type === 'setWorkCounting').map((c) => c.value), [true]);
+  $('hudClose').click();
+  await flush();
+  assert.deepEqual(calls.filter((c) => c.type === 'setWorkCounting').map((c) => c.value), [true, false]);
+});

@@ -39,6 +39,12 @@ struct PixelAccum {
 @group(0) @binding(17) var sceneReflection: texture_2d<f32>;
 @group(0) @binding(18) var sceneCompareSampler: sampler_comparison;
 @group(0) @binding(19) var sceneLinearSampler: sampler;
+// WORK-COUNTING-BEGIN  (compiled only into the diagnostics variant; needs a 9th storage buffer)
+// 64-bit work totals as (low, high) u32 pairs.
+@group(0) @binding(21) var<storage,read_write> workTotals: array<atomic<u32>>;
+// Per-lane staging (14 x 64 u32): plain stores, no shared-memory atomics.
+var<workgroup> workgroupWork: array<array<u32, 64>, 14>;
+// WORK-COUNTING-END
 
 const LINEAR_SRGB_TO_XYZ_M = mat3x3<f32>(
   vec3<f32>(0.4124564, 0.2126729, 0.0193339),
@@ -82,7 +88,36 @@ fn recordScene(a: ptr<function, PixelAccum>, scene: SceneSample) {
 }
 
 @compute @workgroup_size(8,8)
-fn main(@builtin(global_invocation_id) id:vec3<u32>){
+fn main(@builtin(global_invocation_id) id:vec3<u32>,@builtin(local_invocation_index) lane:u32){
+  integratePixel(id);
+  // WORK-COUNTING-BEGIN
+  // Every invocation reaches the barrier: integratePixel returns, never exits main.
+  // Constant indices only: a dynamic index would move workCounters out of registers
+  // and slow every tally in the traversal loops.
+  workgroupWork[0][lane]=workCounters[0];
+  workgroupWork[1][lane]=workCounters[1];
+  workgroupWork[2][lane]=workCounters[2];
+  workgroupWork[3][lane]=workCounters[3];
+  workgroupWork[4][lane]=workCounters[4];
+  workgroupWork[5][lane]=workCounters[5];
+  workgroupWork[6][lane]=workCounters[6];
+  workgroupWork[7][lane]=workCounters[7];
+  workgroupWork[8][lane]=workCounters[8];
+  workgroupWork[9][lane]=workCounters[9];
+  workgroupWork[10][lane]=workCounters[10];
+  workgroupWork[11][lane]=workCounters[11];
+  workgroupWork[12][lane]=workCounters[12];
+  workgroupWork[13][lane]=workCounters[13];
+  workgroupBarrier();
+  // One lane per counter sums the 64 lanes, then a single global 64-bit add.
+  if(lane<WORK_COUNTERS){
+    var v=0u;
+    for(var i=0u;i<64u;i++){v+=workgroupWork[lane][i];}
+    if(v!=0u){let old=atomicAdd(&workTotals[lane*2u],v);if(old>0xffffffffu-v){atomicAdd(&workTotals[lane*2u+1u],1u);}}
+  }
+  // WORK-COUNTING-END
+}
+fn integratePixel(id:vec3<u32>){
   let imageY=id.y+render.settings.w;
   if(id.x>=render.size.x||imageY>=render.size.y){return;}
   let pixel=id.y*render.size.x+id.x;
@@ -93,6 +128,7 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>){
   // batch <= 4 is a runtime value, so this loop is not unrolled.
   for(var j=0u;j<min(batch,4u);j++){
     let index=a.attempts;
+    workCounters[WORK_PATH]++;
     let globalPixel=imageY*render.size.x+id.x;
     let key=spectralHash32(globalPixel^spectralHash32(index+render.settings.x*0x632be5abu));
     a.attempts++;
@@ -157,6 +193,7 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>){
     // negative scene RGB. Diagnose it instead of silently changing its colour.
     if(any(rgb<vec3<f32>(-1e-5))||any(abs(rgb)>vec3<f32>(1e30))||any(rgb!=rgb)){a.extra.y++;continue;}
     if(pinhole||geometryMode){a.xyz+=LINEAR_SRGB_TO_XYZ_M*rgb;continue;}
+    workCounters[WORK_SPECTRAL]++;
     let contribution=spectralXYZContribution(max(rgb,vec3<f32>(0)),lambda,1./(optics.wavelength.y-optics.wavelength.x),weight);
     if(any(abs(contribution)>vec3<f32>(1e30))||any(contribution!=contribution)){a.extra.y++;continue;}
     a.xyz+=contribution;

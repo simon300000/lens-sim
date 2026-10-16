@@ -1,5 +1,7 @@
 import * as THREE from 'three/webgpu';
-import opticalCore from '../src/optics/optical-core.wgsl?raw';
+import opticalCoreRaw from '../src/optics/optical-core.wgsl?raw';
+import workCounters from '../src/rendering/work-counters.wgsl?raw';
+const opticalCore=workCounters+opticalCoreRaw;
 import {createGPUInterop} from '../src/rendering/three-interop.js';
 import {packLens} from '../src/optics/lens-state.js';
 import {traceLens,unit,add,intersectSurface,refract} from '../src/optics/optical-reference.js';

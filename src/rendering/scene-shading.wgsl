@@ -87,6 +87,7 @@ fn mxGrad3(hash: u32, x: f32, y: f32, z: f32) -> f32 {
 }
 fn mxFade(t: f32) -> f32 { return t * t * t * (t * (t * 6.0 - 15.0) + 10.0); }
 fn mxNoise3(p: vec3f) -> f32 {
+  workCounters[WORK_NOISE]++;
   let fl = floor(p);
   let X = i32(fl.x); let Y = i32(fl.y); let Z = i32(fl.z);
   let f = p - fl;
@@ -226,6 +227,7 @@ fn sceneDirectionalShadow(slot: u32, P: vec3f, N: vec3f) -> f32 {
   let base = coord.xy - f * texel;
   var sum = 0.0;
   for (var k = 0u; k < sceneRuntimeBound(16u); k++) {
+    workCounters[WORK_SHADOW_TAP]++;
     let i = k % 4u; let j = k / 4u;
     let w = scenePCFWeight(i, f.x) * scenePCFWeight(j, f.y);
     let uv = base + (vec2f(f32(i), f32(j)) - 1.0) * texel;
@@ -259,6 +261,7 @@ fn scenePointShadow(slot: u32, P: vec3f, N: vec3f, lightPosition: vec3f, phi: f3
   let texel = p2.z / p2.y;
   var sum = 0.0;
   for (var i = 0u; i < sceneRuntimeBound(5u); i++) {
+    workCounters[WORK_SHADOW_TAP]++;
     let r = sqrt((f32(i) + 0.5) / 5.0);
     let theta = f32(i) * 2.399963229728653 + phi;
     let o = vec2f(cos(theta), sin(theta)) * r;
@@ -339,6 +342,7 @@ fn sceneMoon(d: vec3f) -> vec4f {
 /// Analytic environment: the raster sky dome, stars and Moon are registered
 /// environment objects, answered here by direction instead of as occluders.
 fn sceneEnvironmentRadiance(d: vec3f) -> vec3f {
+  workCounters[WORK_ENVIRONMENT]++;
   var c = sceneSky(d);
   let star = sceneStars(d);
   c = mix(c, star.rgb, star.a);
@@ -382,6 +386,7 @@ struct SceneShade { rgb: vec3f, alpha: f32, reflectionOutside: bool }
 /// Outgoing radiance at a real hit, plus alpha and fog, matching three's
 /// fragment output before blending. key decorrelates stochastic filters.
 fn sceneShade(s: SceneSurface, wo: vec3f, key: u32) -> SceneShade {
+  workCounters[WORK_SHADE]++;
   let L = sceneLighting;
   let m = sceneMaterial(s.material);
   var out: SceneShade;
@@ -461,6 +466,7 @@ fn sceneShade(s: SceneSurface, wo: vec3f, key: u32) -> SceneShade {
       let slot = L.pointShadowSlot[i - 2u].x;
       if (receive && slot >= 0.0) { colour *= scenePointShadow(u32(slot), s.P, N, lp.xyz, phi); }
     }
+    workCounters[WORK_LIGHT]++;
     let irradiance = clamp(dot(N, Ld), 0.0, 1.0) * colour;
     directDiffuse += irradiance * diffuseContribution / SCENE_PI;
     directSpecular += irradiance * sceneBRDFGGXMulti(Ld, V, N, specularColorBlended, 1.0, roughness);

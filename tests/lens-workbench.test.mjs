@@ -115,3 +115,27 @@ test('export mapping matches the SDR display transform', () => {
   mapRows(new Uint16Array([0x3c00, 0x7e00, 0x0000, 0x3c00]), 4, 1, 1, out, 0, { raw: true });
   assert.deepEqual([...out], [255, 0, 0, 255]);
 });
+
+test('work model: weighted FLOPs, group shares and rate from measured time', async () => {
+  const { WORK_COUNTERS, summarizeWork } = await import('../src/rendering/work-model.js');
+  const counts = WORK_COUNTERS.map(([key]) => ({ path: 100, lensSurface: 1000, box: 2000, shade: 50 }[key] ?? 0));
+  const flops = 100 * 110 + 1000 * 115 + 2000 * 26 + 50 * 320;
+  const w = summarizeWork(counts, { workUnits: 10, msPerWorkUnit: 0.5, timing: 'gpu' });
+  assert.equal(w.flopsPerPath, flops / 100);
+  assert.ok(Math.abs(w.gflops - flops / 0.005 / 1e9) < 1e-12, 'FLOPs over 10 × 0.5 ms');
+  assert.ok(Math.abs(Object.values(w.share).reduce((a, b) => a + b, 0) - 1) < 1e-12);
+  assert.equal(w.perPath.lensSurfaces, 10);
+  assert.equal(w.perPath.boxes, 20);
+  assert.equal(summarizeWork(counts, { workUnits: 10, msPerWorkUnit: null }).gflops, null, 'no timing, no rate');
+});
+
+test('every WGSL work counter has a cost-model entry in the same order', async () => {
+  const { WORK_COUNTERS } = await import('../src/rendering/work-model.js');
+  const wgsl = await readFile(new URL('../src/rendering/work-counters.wgsl', import.meta.url), 'utf8');
+  const consts = [...wgsl.matchAll(/const (WORK_[A-Z_]+): u32 = (\d+)u;/g)].filter(([, n]) => n !== 'WORK_COUNTERS');
+  assert.equal(consts.length, WORK_COUNTERS.length);
+  consts.forEach(([, , index], i) => assert.equal(Number(index), i));
+  assert.match(wgsl, new RegExp(`array<u32, ${WORK_COUNTERS.length}>`));
+  const integrator = await readFile(new URL('../src/rendering/optical-integrator.wgsl', import.meta.url), 'utf8');
+  assert.match(integrator, new RegExp(`array<array<u32, 64>, ${WORK_COUNTERS.length}>`));
+});
