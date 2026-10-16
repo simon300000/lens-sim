@@ -129,6 +129,7 @@ export function adaptLensRecord(record, catalog, { configurationIndex = 0 } = {}
     surfaces, glasses, stopIndex, apertureMode, apertureValue, focusMotion,
     sensorZMm: zMm, imageDistanceMm: last.thicknessMm, lastVertexZMm: last.zMm,
     objectDistanceMm,
+    focusWavelengths:(record.wl??[]).map(w=>({nm:Number(w[0]),weight:Number(w[1])})),focusPrimaryIndex:record.pri??0,
     sensorMm: [36, 24], wavelengthRangeNm: [380, 780],
     apertureDataComplete: missing.length === 0, missingApertureSurfaces: missing, warnings,
     metadata: { src: record.src, kind: record.kind, note: record.note ?? '', fieldMode: record.fmode, fieldExtent: record.fov, empiricalVignetting: configuration?.vig ?? null, vigCoord: record.vigCoord ?? null, vigH: record.vigH ?? null, empiricalVignettingApplied: false },
