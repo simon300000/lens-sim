@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#eeeadd" />
+    <meta name="description" content="一座用 WebGPU 呈现的山间别墅与日式庭园。全部建筑、植物、鱼塘和材质由代码生成。" />
+    <title>lens-sim Startup Profile</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <link rel="stylesheet" href="/src/ui/lens-ui.css" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  </head>
+  <body>
+    <main id="scene" aria-label="山间别墅三维场景"></main>
+    <aside class="view-hint" aria-label="相机操作提示">
+      <div class="camera-hint-heading"><span>相机操作</span><span id="output-status" class="output-status" aria-label="输出动态范围">HDR</span></div>
+      <div class="camera-hint-mouse"><span>左键拖动</span><span>原地转头</span><span>右键 / Shift + 左键拖动</span><span>平移</span><span>滚轮向上 / 向下</span><span>前进 / 后退</span></div>
+      <div class="camera-hint-touch">单指拖动原地转头 · 双指移动平移 · 双指捏合缩放</div>
+    </aside>
+    <section id="time-controls" class="time-controls" aria-label="庭院日照时间">
+      <div class="time-heading">
+        <div class="time-current"><label for="time-slider">时光</label><output id="time-output" for="time-slider">16:30</output><span id="time-period" class="time-period">午后</span></div>
+        <label class="time-date-label"><span class="visually-hidden">观景日期</span><input id="time-date" class="time-date" type="date" value="2026-09-26" aria-label="观景日期" /></label>
+      </div>
+      <div class="time-slider-wrap"><input id="time-slider" class="time-slider" type="range" min="0" max="24" step="0.016666666666666666" value="16.5" aria-label="一天中的时间" aria-valuetext="16:30" /></div>
+      <div class="time-marks" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
+      <div class="time-bottom"><div class="time-presets" aria-label="时间预设"><button type="button" data-hour="5.5"><i class="time-icon time-icon-dawn" aria-hidden="true"></i>晨光</button><button type="button" data-hour="12"><i class="time-icon time-icon-sun" aria-hidden="true"></i>正午</button><button type="button" data-hour="17.5"><i class="time-icon time-icon-dusk" aria-hidden="true"></i>薄暮</button><button type="button" data-hour="0"><i class="time-icon time-icon-moon" aria-hidden="true"></i>子夜</button></div><span id="time-readout" class="time-readout">太阳与月亮随时光流转</span></div>
+    </section>
+    <div id="loading" role="status" aria-live="polite" aria-busy="true">
+      <p id="loading-message">正在载入程序</p>
+      <progress id="loading-progress" max="10" value="0" aria-label="启动阶段进度"></progress>
+      <p id="loading-detail">启动阶段 1 / 10</p>
+      <p id="loading-elapsed" aria-hidden="true">已用 0 秒</p>
+    </div>
+    <script src="/tests/startup-profile.js"></script>
+    <script type="module" src="/tests/startup-profile-boot.js"></script>
+  </body>
+</html>
