@@ -11,6 +11,18 @@ import { apertureLimits, rearSamplingRegion } from '../optics/lens-state.js';
 import { createFocusSolver } from '../optics/focus-solver.js';
 import { displayOutputNode } from '../hdr-output.js';
 
+import { exportLensTexture, captureCanvas } from './image-export.js';
+import { loadGlassCatalog, inspectRecord, customLensId, CUSTOM_BRAND } from '../optics/lens-workbench.js';
+
+/** Small, clone-friendly description of the active prescription for the layout view and table. */
+function slimPrescription(lens,{stopRadiusMm,sensorZMm,focusDistanceM}){
+  return {id:lens.id,name:lens.name,configurationTitle:lens.configurationTitle,stopIndex:lens.stopIndex,stopRadiusMm,sensorZMm,
+    lastVertexZMm:lens.lastVertexZMm,objectDistanceMm:lens.objectDistanceMm,focusDistanceM,sensorMm:lens.sensorMm,glasses:lens.glasses,
+    surfaces:lens.surfaces.map(s=>({index:s.index,zMm:s.zMm,radiusMm:s.radiusMm,thicknessMm:s.thicknessMm,conic:s.conic,aspheric:s.aspheric,
+      xodd:s.xodd??null,doe:s.doe??null,apertureRadiusMm:s.apertureRadiusMm,drawRadiusMm:s.drawRadiusMm,mediumBefore:s.mediumBefore,
+      mediumAfter:s.mediumAfter,material:s.material,type:s.type}))};
+}
+
 function catalogueFocalLengthMm(lens){
   // Zooms use their short end; prefer the published focal length over small
   // differences in the paraxial model between nominally identical lenses.
@@ -32,11 +44,17 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
   const store=createControlStore(),interop=createGPUInterop(renderer),focusSolver=createFocusSolver();
   const sceneResources=createSceneResources({interop,scene,camera,starAngularRadius:STAR_ANGULAR_RADIUS,useWorker});
   const lighting=createLightingResources({interop,renderer,scene,camera,environment,refreshContext});
-  let lens=null,baseLens=null,manifest=null,engine=null,baseExposure=cameraExposure.value,interacting=false,pointerActive=false,releaseTimer;
+  let lens=null,baseLens=null,baseAsset=null,manifest=null,engine=null,baseExposure=cameraExposure.value,interacting=false,pointerActive=false,releaseTimer;
   let disposed=false,commandRevision=0,lensLoadRevision=0,statisticsRevision=0,lastStatisticsSpp=-1,statisticsBusy=false,lastError=null;
   let displayPipeline=null,imageNode=null,bloomNode=null,lightingDirty=true,sceneBuild=null;
   const viewportAspect=uniform(innerWidth/innerHeight),rawDisplay=uniform(0);
   let diagnosticDirty=false,samplesInFlight=0,rasterCameraDirty=false;
+  // Imported or edited prescriptions live only in this page session.
+  const customAssets=new Map();
+  function publishPrescription(){
+    if(!lens||!engine?.packed)return;
+    update({prescription:slimPrescription(lens,{stopRadiusMm:engine.packed.stopRadiusMm,sensorZMm:engine.packed.sensorZMm,focusDistanceM:state().optics.focusDistanceM})});
+  }
   const update=patch=>store.update(patch);
   const state=()=>store.peekState();
   function cancelFocus(){commandRevision++;const af=state().af;if(af.status==='busy')update({af:{...af,status:'idle',message:'参数改变，已取消过期对焦'}});}
@@ -115,15 +133,17 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
     // Validate and upload before committing the UI snapshot. A rejected change
     // leaves the previous optics and focus state intact.
     engine.updateOptics({fNumber:candidate.fNumber,sensorZMm:lens.lastVertexZMm+candidate.imageDistanceMm,dispersion:candidate.dispersion});
-    cancelFocus();update({optics:candidate});clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision('optics');publishEngine();requestFrame();
+    cancelFocus();update({optics:candidate});clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision('optics');publishPrescription();publishEngine();requestFrame();
   }
   async function loadLens(id,index=0){
-    const entry=manifest.lenses.find(item=>item.id===id);if(!entry?.supported)throw new Error(entry?.reason||'镜头不可用');
+    const custom=customAssets.get(id),entry=custom?null:manifest.lenses.find(item=>item.id===id);
+    if(!custom&&!entry?.supported)throw new Error(entry?.reason||'镜头不可用');
     cancelFocus();const token=++lensLoadRevision,old=state();
     update({status:'loading',error:null});
     try{
-      const response=await fetch(entry.asset);if(!response.ok)throw new Error('无法加载镜头数据');
-      const nextAsset=await response.json();if(token!==lensLoadRevision)return;
+      let nextAsset=custom;
+      if(!nextAsset){const response=await fetch(entry.asset);if(!response.ok)throw new Error('无法加载镜头数据');nextAsset=await response.json();}
+      if(token!==lensLoadRevision)return;
       const next=nextAsset.configurations[index];if(!next)throw new Error(nextAsset.configurationStatus[index]?.reason||'配置不可用');
       const limits=apertureLimits(next);
       const focusDistanceM=next.objectDistanceMm===null?null:next.objectDistanceMm/1000;
@@ -132,7 +152,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       const nextState={fNumber,sensorZMm,dispersion:old.optics.dispersion};
       await engine.prepareLens(next,nextState);if(token!==lensLoadRevision||disposed)return;
       const packed=engine.setLens(next,nextState);
-      lens=next;baseLens=next;statisticsRevision++;
+      lens=next;baseLens=next;baseAsset=nextAsset;statisticsRevision++;
       update({status:'ready',error:null,lensId:id,configurationIndex:index,configurations:nextAsset.configurationStatus.map(c=>({...c,available:c.supported})),
         warnings:[...(next.capabilityWarnings??[]),...next.warnings.filter(w=>/^(通光数据不完整|含 nd\/vd|DOE 按|380–780)/.test(w)),
           next.surfaces[next.stopIndex].apertureRadiusMm===null?`光阑半径由上游 ${next.apertureMode} 孔径参数与入瞳倍率标定，未采用绘图半径。`:'',
@@ -141,8 +161,8 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
         limits:{fNumber:[limits.minFNumber,limits.maxFNumber],imageDistanceMm:[Math.min(minimumGap,next.imageDistanceMm),Math.max(200,Math.abs(limits.focalLengthMm)*4)]},
         optics:{...old.optics,fNumber,focusDistanceM,focusDistanceKnown:true,imageDistanceMm:sensorZMm-next.lastVertexZMm,focalLengthMm:limits.focalLengthMm,
           focusModel:next.focusMotion?`镜组移动 · ${next.focusMotion.source}`:'固定镜组 · 传感器轴向调焦'},
-        af:{...old.af,status:'idle',message:'上游原始像面与物距；可使用 AF-S 对当前目标调焦'}});
-      clearMetrics();revision('optics');bindImage();publishEngine();requestFrame();
+        af:{...old.af,status:'idle',message:custom?'导入/编辑的处方：原始像面与物距；可使用 AF-S 调焦':'上游原始像面与物距；可使用 AF-S 对当前目标调焦'}});
+      clearMetrics();revision('optics');bindImage();publishPrescription();publishEngine();requestFrame();
     }catch(error){if(token!==lensLoadRevision||disposed)return;update({status:lens?'ready':'error',error:error.message});throw error;}
   }
   async function focusAt(distanceM,autofocus=false){
@@ -174,7 +194,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
           lastResult:{source:baseLens.focusMotion?.source??'lens-bench planeFocus',method:moved.method,focusDistanceM:moved.focusDistanceM,sensorZMm:next.sensorZMm,
             beforeRmsMm:moved.beforeRmsMm,afterRmsMm:moved.afterRmsMm,evaluations:moved.evaluations,solveMs:moved.solveMs,
             extrapolated:moved.extrapolated,clamped:moved.clamped,target:hit}}});
-      clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision('optics');publishEngine();requestFrame();
+      clearMetrics();statisticsRevision++;lastStatisticsSpp=-1;revision('optics');publishPrescription();publishEngine();requestFrame();
     }catch(error){if(token===commandRevision){update({af:{...state().af,status:'error',message:error.message}});}throw error;}
   }
   /** Time of day / light change: shadows and PMREM already rerendered by the
@@ -209,14 +229,55 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
     resetAccumulation('camera');
     if(interacting&&!pointerActive)scheduleRelease();
   }
+  /** Adapt + preflight an imported/edited lens-bench record in the browser, then load it like bundled data. */
+  async function loadCustomLens({record,configurationIndex=0}={}){
+    if(!record||typeof record.tx!=='string')throw new Error('缺少镜头处方');
+    const catalog=await loadGlassCatalog();
+    const asset=inspectRecord(record,catalog);
+    const usable=asset.configurationStatus.filter(c=>c.supported);
+    if(!usable.length)throw new Error(asset.configurationStatus[0]?.reason||'处方未通过预检');
+    const index=asset.configurations[configurationIndex]?configurationIndex:usable[0].index;
+    const id=customLensId(record);
+    customAssets.set(id,asset);
+    const focal=Math.abs(asset.configurations[index].capability?.initial?.focalLengthMm)||null;
+    const entry={id,name:record.name||id,brand:CUSTOM_BRAND,available:true,reason:null,custom:true,validation:'browser-preflight',
+      surfaceCount:asset.configurations[index].surfaces.length,focalLengthMm:focal};
+    update({lenses:[...state().lenses.filter(l=>l.id!==id),entry]});
+    await loadLens(id,index);
+    return {id,configurationIndex:index,warnings:asset.configurationStatus[index].warnings};
+  }
+  /** PNG of the current picture: the accumulated sensor image in lens mode, the displayed canvas in raster mode. */
+  async function exportImage(){
+    const s=state(),stamp=new Date().toISOString().replace(/[-:]/g,'').replace(/\..*/,'').replace('T','-');
+    const safe=v=>String(v).replace(/[^\w.-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,60);
+    if(s.mode==='raster'||!engine){
+      rasterPipeline.render();
+      const blob=await captureCanvas(renderer.domElement);
+      return {blob,fileName:`lens-sim_raster_${stamp}.png`,width:renderer.domElement.width,height:renderer.domElement.height,kind:'raster'};
+    }
+    if(s.status!=='ready')throw new Error('镜头图像尚未就绪');
+    const {width,height}=engine.dimensions;
+    if(!(engine.spp>0))throw new Error('还没有累计任何样本');
+    await interop.device.queue.onSubmittedWorkDone();
+    const raw=s.display.diagnostic!=='beauty';
+    const blob=await exportLensTexture({device:interop.device,texture:engine.outputGPU,width,height,exposure:cameraExposure.value,raw});
+    const lensName=s.lenses.find(l=>l.id===s.lensId)?.name??s.lensId;
+    const fileName=`lens-sim_${safe(lensName)}_f${Number(s.optics.fNumber.toFixed(2))}_${engine.spp}spp${raw?`_${s.display.diagnostic}`:''}_${stamp}.png`;
+    return {blob,fileName,width,height,spp:engine.spp,kind:raw?'diagnostic':'lens'};
+  }
   store.setHandler(async({type,value})=>{
-    const s=state();const recovery=type==='setMode'||type==='setPaused'||(engine&&['selectLens','selectConfiguration'].includes(type));
+    const s=state();
+    if(type==='exportImage')return exportImage();
+    // Read-only: the editable source record of the active lens (kept out of per-frame snapshots).
+    if(type==='getLensRecord')return baseAsset?.record?structuredClone(baseAsset.record):null;
+    const recovery=type==='setMode'||type==='setPaused'||type==='loadCustomLens'||(engine&&['selectLens','selectConfiguration'].includes(type));
     if(s.status!=='ready'&&!recovery)throw new Error('镜头后端尚未就绪');
     const finite=(min,max)=>{if(!Number.isFinite(value)||value<min||value>max)throw new Error(`参数范围 ${min}–${max}`);return value;};
     switch(type){
       case 'setMode':if(!['raster','lens'].includes(value))throw new Error('无效视图');rasterCameraDirty=false;update({mode:value});if(value==='lens')lightingDirty=true;requestFrame();break;
       case 'selectLens':await loadLens(value);break;
       case 'selectConfiguration':await loadLens(s.lensId,value);break;
+      case 'loadCustomLens':if(!engine)throw new Error('镜头后端尚未就绪');return loadCustomLens(value);
       case 'setFNumber':finite(...s.limits.fNumber);applyOpticalChange({fNumber:value});break;
       case 'setFocusDistance':if(value!==null)finite(.1,10000);await focusAt(value);break;
       case 'setImageDistance':finite(...s.limits.imageDistanceMm);applyOpticalChange({imageDistanceMm:value,focusDistanceKnown:false});update({af:{...state().af,status:'idle',message:'手动微调像面；所示物距为上次指令，未重新标定'}});break;

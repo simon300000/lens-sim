@@ -9,9 +9,9 @@ const NOMINAL_F = [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.4, 1.6, 1.8, 2, 2.2, 2.5, 2.8, 
   6.3, 7.1, 8, 9, 10, 11, 13, 14, 16, 18, 20, 22, 25, 29, 32, 36, 40, 45, 51, 57, 64];
 
 /** Allowed while status === 'error' so a person can get back to a working view; the backend may still reject. */
-export const RECOVERY_COMMANDS = new Set(['setMode', 'selectLens', 'selectConfiguration']);
+export const RECOVERY_COMMANDS = new Set(['setMode', 'selectLens', 'selectConfiguration', 'loadCustomLens']);
 
-export const OPTICS_COMMANDS = new Set(['selectLens', 'selectConfiguration', 'setFNumber', 'setFocusDistance',
+export const OPTICS_COMMANDS = new Set(['selectLens', 'selectConfiguration', 'loadCustomLens', 'setFNumber', 'setFocusDistance',
   'setImageDistance', 'autofocus', 'setDispersion']);
 
 export const DIAGNOSTIC_LABELS = { beauty: '成像', 'scene-error': '场景错误分布', status: '路径状态',
@@ -280,9 +280,11 @@ export function filterLenses(lenses = [], { query = '', availableOnly = false, b
 }
 
 /** Keyboard F → AF-S, but never while typing, with modifiers, or on auto-repeat. */
-export function isAutofocusShortcut(event) {
+export function isAutofocusShortcut(event) { return isKeyShortcut(event, 'f'); }
+/** Single-letter shortcut, ignored while typing, with modifiers or on auto-repeat. */
+export function isKeyShortcut(event, letter) {
   if (!event || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return false;
-  if (event.key !== 'f' && event.key !== 'F') return false;
+  if (String(event.key).toLowerCase() !== letter) return false;
   const target = event.target;
   const tag = target?.tagName?.toUpperCase?.();
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return false;

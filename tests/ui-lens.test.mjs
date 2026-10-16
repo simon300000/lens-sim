@@ -759,3 +759,53 @@ test('lens choices sort by increasing focal length after filtering without chang
   assert.deepEqual(filterLenses(original,{availableOnly:true,brand:'佳能 Canon'}).map(l=>l.id), ['canon-ef-50mm-f1-8-stm']);
   assert.equal(original[0].id,'zemax-55');
 });
+
+test('P toggles the floating diagnostics window; its corner cycles and is remembered', () => {
+  const memory = new Map();
+  const doc = createFakeDocument();
+  doc.defaultView.localStorage = { getItem: (k) => (memory.has(k) ? memory.get(k) : null), setItem: (k, v) => memory.set(k, v) };
+  const container = doc.createElement('div');
+  doc.body.appendChild(container);
+  const ui = createLensUI({ store: createControlStore(READY), container });
+  const $ = (ref) => container.querySelector(`[data-ref="${ref}"]`);
+  assert.equal($('hud').hidden, true, 'off by default');
+  key(doc, 'p');
+  assert.equal($('hud').hidden, false);
+  assert.equal($('hudToggle').getAttribute('aria-pressed'), 'true');
+  assert.equal($('hud').getAttribute('data-corner'), 'br');
+  $('hudCorner').click();
+  assert.equal($('hud').getAttribute('data-corner'), 'bl');
+  assert.deepEqual(JSON.parse(memory.get('lens-ui:hud')), { open: true, corner: 'bl' });
+  ui.dispose();
+  const again = doc.createElement('div'); doc.body.appendChild(again);
+  createLensUI({ store: createControlStore(READY), container: again });
+  const hud = again.querySelector('[data-ref="hud"]');
+  assert.equal(hud.hidden, false, 'reopens where it was');
+  assert.equal(hud.getAttribute('data-corner'), 'bl');
+});
+
+test('L opens the workbench, which loads the source record into an editable table', async () => {
+  const record = { id: 'r', name: 'R lens', tx: '50 5 N-BK7 10\n-50 40 - 10', stop: 1, fno: 4, apmode: 'fno' };
+  const { doc, $, calls, container } = setup({ auto: false });
+  key(doc, 'l');
+  assert.equal($('bench').hidden, false);
+  const read = calls.find((c) => c.type === 'getLensRecord');
+  assert.ok(read, 'asks the backend for the editable record');
+  read.resolve(record);
+  await flush(); await flush();
+  const cells = container.querySelectorAll('[data-field="R"]');
+  assert.deepEqual(cells.map((c) => c.value), ['50', '-50']);
+  assert.ok(cells.every((c) => c.getAttribute('aria-label')), 'every cell is labelled');
+  assert.equal($('benchApply').disabled, true, 'nothing to apply before an edit');
+});
+
+test('save picture dispatches exportImage and is disabled until a lens sample exists', async () => {
+  const { $, store, calls } = setup({ auto: false });
+  assert.equal($('exportButton').disabled, false, 'raster view can be saved');
+  store.update({ mode: 'lens', sampling: { ...store.getState().sampling, spp: 0 } });
+  assert.equal($('exportButton').disabled, true, 'no lens image yet');
+  store.update({ sampling: { ...store.getState().sampling, spp: 4 } });
+  $('exportButton').click();
+  await flush();
+  assert.ok(calls.some((c) => c.type === 'exportImage'));
+});

@@ -1,0 +1,22 @@
+! Cooke triplet test fixture (textbook-style example, lens-sim)
+TITLE 'Cooke Triplet 50mm F4'
+DIM M
+WL 656.3 587.6 486.1
+REF 2
+FNO 4
+YAN 0 14 20
+SO 0 1e10
+S 21.48138 2.0 N-SK16
+CIR 7
+S -124.1 5.996
+CIR 7
+S -19.1 1.0 N-SF2
+CIR 5
+STO
+S 22.0 4.75
+CIR 5
+S 328.9 2.952 N-SK16
+CIR 6
+S -16.7 42.2
+CIR 6
+SI 0 0

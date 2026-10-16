@@ -9,14 +9,17 @@ import {
   formatEV, formatFNumber, formatFocus, formatMm, formatMs, formatRate, isAutofocusShortcut, isCommandEnabled,
   lensOptionLabel, nearestStep, resolutionLabel, samplingText, stepsForFNumber, stepsForFocus, validateFNumber,
   validateFocus, validateImageDistance,
+  isKeyShortcut,
 } from './lens-ui-format.js';
+import { createLensBench, drawLayoutSVG, layoutFor } from './lens-bench.js';
+import { downloadBlob } from '../rendering/image-export.js';
 
 const COMMAND_LABELS = {
   setMode: '画面模式', selectLens: '选择镜头', selectConfiguration: '镜头配置', setFNumber: '光圈',
   setFocusDistance: '对焦距离', setImageDistance: '像距', autofocus: 'AF-S', setAutoFocusOnRelease: '松手自动对焦',
   setTargetSpp: '目标 spp', setResolution: '分辨率', setPaused: '暂停/继续', reset: '重置采样',
   setDispersion: '色散', setExposureEV: '显示曝光', setBloom: 'Bloom', setDiagnostic: '诊断视图', setOutput: '输出',
-  rebuildScene: '重新扫描场景',
+  rebuildScene: '重新扫描场景', exportImage: '保存图片', loadCustomLens: '载入编辑处方',
 };
 /** Slider-like commands coalesce to the latest value while one is in flight. */
 const COALESCED = new Set(['setFNumber', 'setFocusDistance', 'setImageDistance', 'setExposureEV', 'setTargetSpp',
@@ -90,9 +93,15 @@ export function createLensUI({ store, container } = {}) {
   }
 
   // ---------------------------------------------------------------- layout
+  const group = (ref, title, valueRef, ...children) => h('section', { class: 'lu-group', ref, 'aria-labelledby': id(`h-${ref}`) },
+    h('div', { class: 'lu-group-head' }, h('h3', { id: id(`h-${ref}`), text: title }), valueRef ? h('span', { class: 'lu-group-value', ref: valueRef }) : null),
+    ...children);
+  const thumb = doc.createElementNS ? doc.createElementNS('http://www.w3.org/2000/svg', 'svg') : doc.createElement('svg');
+  thumb.setAttribute('class', 'lu-thumb-svg'); thumb.setAttribute('aria-hidden', 'true');
   const root = h('section', { class: 'lens-ui', ref: 'root', 'aria-label': '镜头模拟控制' },
     h('div', { class: 'lu-head' },
       h('button', { type: 'button', class: 'lu-toggle', ref: 'toggle', id: id('toggle'), 'aria-controls': id('body') },
+        h('span', { class: 'lu-mark', 'aria-hidden': 'true' }),
         h('span', { class: 'lu-title', text: '镜头' }),
         h('span', { class: 'lu-dot', 'aria-hidden': 'true' }),
         h('span', { class: 'lu-summary', ref: 'summary' }),
@@ -101,41 +110,42 @@ export function createLensUI({ store, container } = {}) {
       h('div', { class: 'lu-alert', ref: 'fatal', role: 'alert', hidden: true }),
       h('ul', { class: 'lu-errors', ref: 'errors', 'aria-live': 'assertive', 'aria-label': '命令失败' }),
 
-      radios('mode', '画面', [['raster', 'A · 光栅近似', '现有 RGB 光栅画面，不经过镜头'], ['lens', 'B · 镜头追迹', '按镜头处方追迹，场景取几何首交点并实时着色']]),
-      // One compact line: lens mode name + real scene/BVH state (errors and building stay visible here).
+      radios('mode', '画面', [['raster', 'A · 光栅预览', '现有 RGB 光栅画面，不经过镜头'], ['lens', 'B · 镜头追迹', '按镜头处方追迹，场景取几何首交点并实时着色']]),
       h('p', { class: 'lu-hint lu-scene', ref: 'sceneStatus', role: 'status' }),
       h('ul', { class: 'lu-scene-warn', ref: 'sceneWarn', 'aria-live': 'polite', 'aria-label': '场景与光照警告', hidden: true }),
 
-      // Most-used actions stay above the fold: AF-S, pause and the real sample count.
+      // Capture bar: the actions used every few seconds stay at the top.
       h('div', { class: 'lu-quick', ref: 'quick', role: 'group', 'aria-label': '常用操作' },
         h('div', { class: 'lu-af' },
-          h('button', { type: 'button', class: 'lu-btn lu-primary', ref: 'afButton', 'aria-keyshortcuts': 'F', 'aria-label': 'AF-S 单次自动对焦（快捷键 F）', 'aria-describedby': `${id('afStatus')} ${id('afMessage')}` }, 'AF-S', h('kbd', { text: 'F' })),
+          h('button', { type: 'button', class: 'lu-btn lu-primary lu-af-btn', ref: 'afButton', 'aria-keyshortcuts': 'F', 'aria-label': 'AF-S 单次自动对焦（快捷键 F）', 'aria-describedby': `${id('afStatus')} ${id('afMessage')}` }, 'AF-S', h('kbd', { text: 'F' })),
           h('span', { class: 'lu-af-status', ref: 'afStatus', id: id('afStatus'), role: 'status' }),
-          h('button', { type: 'button', class: 'lu-btn', ref: 'pauseButton' })),
+          h('button', { type: 'button', class: 'lu-btn', ref: 'pauseButton' }),
+          h('button', { type: 'button', class: 'lu-icon-btn lu-export', ref: 'exportButton', 'aria-label': '保存当前画面为 PNG', title: '保存图片（PNG）：镜头模式为完整分辨率的累计图像' }, h('span', { class: 'lu-i-download', 'aria-hidden': 'true' }))),
         h('p', { class: 'lu-hint lu-af-message', ref: 'afMessage', id: id('afMessage') }),
         h('div', { class: 'lu-progress-row' },
           h('progress', { ref: 'progress', id: id('progress'), max: 1, value: 0, 'aria-label': '采样进度', 'aria-describedby': `${id('sppText')} ${id('sppHint')}`, title: '每像素实际尝试路径 / 目标；颗粒随 spp 增加而减弱' }),
           h('span', { class: 'lu-spp', ref: 'sppText', id: id('sppText') }))),
 
-      h('section', { class: 'lu-group', ref: 'focusGroup', 'aria-labelledby': id('h-focus') },
-        h('h3', { id: id('h-focus'), text: '对焦' }),
+      group('focusGroup', '对焦', 'focusValue',
         h('div', { class: 'lu-row lu-slider-row' }, label('focusRange', '距离'),
           h('input', { type: 'range', ref: 'focusRange', id: id('focusRange'), min: 0, max: FOCUS_STEPS.length - 1, step: 1, 'aria-describedby': id('focusHint') }),
-          h('input', { type: 'number', ref: 'focusInput', id: id('focusInput'), class: 'lu-num', step: 0.01, min: 0, inputmode: 'decimal', 'aria-label': '对焦距离（米）', 'aria-describedby': id('focusHint') }),
-          h('span', { class: 'lu-unit', 'aria-hidden': 'true', text: 'm' }),
+          h('span', { class: 'lu-field' },
+            h('input', { type: 'number', ref: 'focusInput', id: id('focusInput'), class: 'lu-num', step: 0.01, min: 0, inputmode: 'decimal', 'aria-label': '对焦距离（米）', 'aria-describedby': id('focusHint') }),
+            h('span', { class: 'lu-unit', 'aria-hidden': 'true', text: 'm' })),
           h('button', { type: 'button', class: 'lu-btn lu-inf', ref: 'focusInf', 'aria-label': '对焦到无穷远', title: '对焦到无穷远', text: '∞' })),
         h('div', { class: 'lu-row' }, label('imageInput', '像距'),
-          h('button', { type: 'button', class: 'lu-btn lu-nudge', ref: 'imageMinus', 'aria-label': `像距减 ${IMAGE_NUDGE_MM} mm`, text: '−' }),
-          h('input', { type: 'number', ref: 'imageInput', id: id('imageInput'), class: 'lu-num lu-num-wide', step: 0.001, inputmode: 'decimal', 'aria-describedby': `${id('imageHint')} ${id('focusHint')}` }),
-          h('span', { class: 'lu-unit', 'aria-hidden': 'true', text: 'mm' }),
-          h('button', { type: 'button', class: 'lu-btn lu-nudge', ref: 'imagePlus', 'aria-label': `像距加 ${IMAGE_NUDGE_MM} mm`, text: '+' })),
+          h('div', { class: 'lu-stepper' },
+            h('button', { type: 'button', class: 'lu-nudge', ref: 'imageMinus', 'aria-label': `像距减 ${IMAGE_NUDGE_MM} mm`, text: '−' }),
+            h('input', { type: 'number', ref: 'imageInput', id: id('imageInput'), class: 'lu-num lu-num-wide', step: 0.001, inputmode: 'decimal', 'aria-describedby': `${id('imageHint')} ${id('focusHint')}` }),
+            h('span', { class: 'lu-unit', 'aria-hidden': 'true', text: 'mm' }),
+            h('button', { type: 'button', class: 'lu-nudge', ref: 'imagePlus', 'aria-label': `像距加 ${IMAGE_NUDGE_MM} mm`, text: '+' }))),
         hint('imageHint'),
         hint('focusHint'),
         check('afRelease', '环视松手后自动对焦')),
 
-      h('section', { class: 'lu-group', ref: 'lensGroup', 'aria-labelledby': id('h-lens') },
-        h('h3', { id: id('h-lens'), text: '镜头与光圈' }),
-        // Two layers: brand first, then a lens of that brand. Search narrows within the chosen brand.
+      group('lensGroup', '镜头与光圈', 'lensValue',
+        h('button', { type: 'button', class: 'lu-thumb', ref: 'benchOpen', 'aria-label': '打开镜组工作台：截面、处方编辑与导入（快捷键 L）', title: '镜组工作台（L）' },
+          thumb, h('span', { class: 'lu-thumb-caption' }, h('span', { ref: 'thumbCaption', text: '镜组截面' }), h('span', { class: 'lu-thumb-action', text: '编辑 · 导入 ›' }))),
         h('div', { class: 'lu-filter' },
           label('brandSelect', '品牌', { class: 'visually-hidden' }),
           h('select', { ref: 'brandSelect', id: id('brandSelect'), class: 'lu-brand-select', title: '先选品牌，再选镜头' }),
@@ -153,13 +163,13 @@ export function createLensUI({ store, container } = {}) {
           h('ul', { class: 'lu-warnings', ref: 'warnings', 'aria-label': '镜头数据提示' })),
         h('div', { class: 'lu-row lu-slider-row' }, label('fRange', '光圈'),
           h('input', { type: 'range', ref: 'fRange', id: id('fRange'), min: 0, max: 0, step: 1, 'aria-describedby': id('fHint') }),
-          h('span', { class: 'lu-unit', 'aria-hidden': 'true', text: 'f/' }),
-          h('input', { type: 'number', ref: 'fInput', id: id('fInput'), class: 'lu-num', step: 0.1, inputmode: 'decimal', 'aria-label': '光圈 f 值', 'aria-describedby': id('fHint') })),
+          h('span', { class: 'lu-field' },
+            h('span', { class: 'lu-unit lu-unit-pre', 'aria-hidden': 'true', text: 'f/' }),
+            h('input', { type: 'number', ref: 'fInput', id: id('fInput'), class: 'lu-num', step: 0.1, inputmode: 'decimal', 'aria-label': '光圈 f 值', 'aria-describedby': id('fHint') }))),
         hint('fHint'),
         check('dispersion', '色散（每条路径单一波长）')),
 
-      h('section', { class: 'lu-group', ref: 'samplingGroup', 'aria-labelledby': id('h-sampling') },
-        h('h3', { id: id('h-sampling'), text: '采样' }),
+      group('samplingGroup', '采样', 'samplingValue',
         h('div', { class: 'lu-row lu-sampling-row' },
           label('sppSelect', '目标采样数', { class: 'visually-hidden' }),
           h('select', { ref: 'sppSelect', id: id('sppSelect'), title: '目标采样数（每像素尝试路径）' }),
@@ -170,12 +180,11 @@ export function createLensUI({ store, container } = {}) {
           '颗粒来自波长与光圈的蒙特卡罗积分，约按 ', h('span', { class: 'lu-nowrap', text: '1/√spp' }),
           ' 减弱；可选择持续采样并随时暂停。相机分辨率需较多显存（最高约 4.0 GiB），按分块逐步更新。不含传感器噪声，不做降噪。')),
 
-      h('section', { class: 'lu-group', ref: 'displayGroup', 'aria-labelledby': id('h-display') },
-        h('h3', { id: id('h-display'), text: '显示' }),
+      group('displayGroup', '显示', 'displayValue',
         h('div', { class: 'lu-row lu-slider-row' }, label('evRange', '曝光'),
           h('input', { type: 'range', ref: 'evRange', id: id('evRange'), min: -6, max: 6, step: 1 / 3, 'aria-describedby': id('evHint') }),
           h('output', { ref: 'evOut', for: id('evRange'), class: 'lu-out' }),
-          h('button', { type: 'button', class: 'lu-btn lu-nudge', ref: 'evZero', title: '曝光归零', 'aria-label': '显示曝光归零', text: '0' })),
+          h('button', { type: 'button', class: 'lu-btn lu-nudge-btn', ref: 'evZero', title: '曝光归零', 'aria-label': '显示曝光归零', text: '0' })),
         hint('evHint', '附加显示曝光，不改变光学参数，也不自动归一亮度。'),
         h('div', { class: 'lu-row lu-row-split' },
           check('bloom', 'Bloom'),
@@ -188,19 +197,37 @@ export function createLensUI({ store, container } = {}) {
         radios('output', '输出', [['auto', OUTPUT_LABELS.auto, '显示链路支持时输出 HDR'], ['sdr', OUTPUT_LABELS.sdr, '强制 SDR 色调映射']]),
         hint('outputHint')),
 
-      h('details', { class: 'lu-details', ref: 'diagDetails' },
-        h('summary', { text: '技术诊断' }),
-        h('div', { class: 'lu-rates', ref: 'rates' }),
-        h('dl', { class: 'lu-dl', ref: 'diagList' }),
-        h('ul', { class: 'lu-warnings', ref: 'lightingWarnings', 'aria-label': '光照资源提示', hidden: true }),
-        h('button', { type: 'button', class: 'lu-btn', ref: 'rebuildButton', title: '重新扫描已登记的场景对象，最小更新 BVH/材质（调试用）', text: '重新扫描场景' })),
       h('details', { class: 'lu-details' },
         h('summary', { text: '物理范围与局限' }),
         h('ul', { class: 'lu-limits' }, LIMITATIONS.map((text) => h('li', { text }))),
         h('p', { class: 'lu-rate-heading', ref: 'approxHead', hidden: true }),
-        h('ul', { class: 'lu-limits', ref: 'approxList', hidden: true })),
-      h('p', { class: 'lu-foot' }, h('kbd', { text: 'F' }), ' AF-S（不在输入框时）', h('span', { 'aria-hidden': 'true', text: ' · ' }), h('kbd', { text: 'Esc' }), ' 收起面板')),
+        h('ul', { class: 'lu-limits', ref: 'approxList', hidden: true }))),
+    h('div', { class: 'lu-foot' },
+      h('button', { type: 'button', class: 'lu-tool', ref: 'benchToggle', 'aria-pressed': 'false', title: '镜组工作台（L）' }, h('span', { class: 'lu-i-lens', 'aria-hidden': 'true' }), '镜组', h('kbd', { text: 'L' })),
+      h('button', { type: 'button', class: 'lu-tool', ref: 'hudToggle', 'aria-pressed': 'false', title: '性能诊断浮窗（P）' }, h('span', { class: 'lu-i-pulse', 'aria-hidden': 'true' }), '诊断', h('kbd', { text: 'P' }))),
     h('div', { class: 'visually-hidden', ref: 'announcer', 'aria-live': 'polite' }));
+
+  // Floating diagnostics: a separate window snapped to a viewport corner.
+  const spark = doc.createElementNS ? doc.createElementNS('http://www.w3.org/2000/svg', 'svg') : doc.createElement('svg');
+  spark.setAttribute('class', 'lu-spark'); spark.setAttribute('viewBox', '0 0 120 28'); spark.setAttribute('preserveAspectRatio', 'none'); spark.setAttribute('aria-hidden', 'true');
+  const hud = h('section', { class: 'lu-hud', ref: 'hud', 'aria-label': '性能诊断', hidden: true, 'data-corner': 'br' },
+    h('header', { class: 'lu-hud-head', ref: 'hudHead', title: '拖动到任意角落' },
+      h('span', { class: 'lu-hud-grip', 'aria-hidden': 'true' }),
+      h('span', { class: 'lu-hud-title', text: '性能诊断' }),
+      h('span', { class: 'lu-hud-live', ref: 'hudLive' }),
+      h('button', { type: 'button', class: 'lu-icon-btn', ref: 'hudCorner', 'aria-label': '移到下一个角落', title: '换角落' }, h('span', { class: 'lu-i-corner', 'aria-hidden': 'true' })),
+      h('button', { type: 'button', class: 'lu-icon-btn', ref: 'hudClose', 'aria-label': '关闭性能诊断', title: '关闭（P）' }, h('span', { class: 'lu-x', 'aria-hidden': 'true' }))),
+    h('div', { class: 'lu-hud-body' },
+      h('div', { class: 'lu-hud-metrics', ref: 'hudMetrics' }),
+      spark,
+      h('details', { class: 'lu-hud-section', open: true }, h('summary', { text: '光线去向' }), h('div', { class: 'lu-rates', ref: 'rates' })),
+      h('details', { class: 'lu-hud-section' }, h('summary', { text: '场景与资源' }),
+        h('dl', { class: 'lu-dl', ref: 'diagList' }),
+        h('ul', { class: 'lu-warnings', ref: 'lightingWarnings', 'aria-label': '光照资源提示', hidden: true }),
+        h('button', { type: 'button', class: 'lu-btn', ref: 'rebuildButton', title: '重新扫描已登记的场景对象，最小更新 BVH/材质（调试用）', text: '重新扫描场景' }))));
+
+  const bench = createLensBench({ h, refs, on, doc, win, id, store, getState: () => state, announce: (t) => announce(t),
+    onClose: () => { refs.benchToggle.setAttribute('aria-pressed', 'false'); refs.benchOpen.focus?.(); } });
 
   // Denominators differ: scene-side rates are per ray that passed the optics, the rest per attempted ray.
   const RATE_GROUPS = [
@@ -387,6 +414,79 @@ export function createLensUI({ store, container } = {}) {
     event.preventDefault();
     if (isCommandEnabled('autofocus', state, pending)) run('autofocus');
     else announce(`AF-S 当前不可用：${afUnavailableReason()}`);
+  });
+
+  // ---------------------------------------------------------------- picture export
+  let exporting = false;
+  async function exportPicture() {
+    if (exporting || disposed) return;
+    exporting = true; commandErrors.delete('exportImage'); render();
+    announce('正在导出图片…');
+    try {
+      const result = await store.dispatch('exportImage');
+      if (!result?.blob) throw new Error('没有可导出的图像');
+      downloadBlob(result.blob, result.fileName, doc);
+      announce(`已保存 ${result.width}×${result.height} PNG${result.kind === 'raster' ? '（光栅预览）' : ''}`);
+    } catch (error) { commandErrors.set('exportImage', errorMessage(error)); }
+    finally { exporting = false; if (!disposed) render(); }
+  }
+  on(refs.exportButton, 'click', exportPicture);
+
+  // ---------------------------------------------------------------- workbench + HUD
+  const openBench = () => { bench.openBench(); refs.benchToggle.setAttribute('aria-pressed', 'true'); };
+  const toggleBench = () => { if (bench.isOpen) bench.close(); else openBench(); };
+  on(refs.benchOpen, 'click', openBench);
+  on(refs.benchToggle, 'click', toggleBench);
+
+  const CORNERS = ['br', 'bl', 'tl', 'tr'];
+  const hudKey = 'lens-ui:hud';
+  function readHud() { try { return JSON.parse(win?.localStorage?.getItem(hudKey) ?? 'null'); } catch { return null; } }
+  function saveHud() { try { win?.localStorage?.setItem(hudKey, JSON.stringify({ open: !refs.hud.hidden, corner: refs.hud.getAttribute('data-corner') })); } catch { /* storage unavailable */ } }
+  function setHud(open, remember = true) {
+    refs.hud.hidden = !open;
+    refs.hudToggle.setAttribute('aria-pressed', String(open));
+    if (open) { sppHistory.length = 0; render(); }
+    if (remember) saveHud();
+  }
+  const hudSaved = readHud();
+  if (CORNERS.includes(hudSaved?.corner)) refs.hud.setAttribute('data-corner', hudSaved.corner);
+  on(refs.hudToggle, 'click', () => setHud(refs.hud.hidden));
+  on(refs.hudClose, 'click', () => { setHud(false); refs.hudToggle.focus?.(); });
+  on(refs.hudCorner, 'click', () => {
+    const next = CORNERS[(CORNERS.indexOf(refs.hud.getAttribute('data-corner')) + 1) % CORNERS.length];
+    refs.hud.setAttribute('data-corner', next); saveHud();
+  });
+  // Drag the header anywhere; on release the window snaps to the nearest corner.
+  let hudDrag = null;
+  on(refs.hudHead, 'pointerdown', (event) => {
+    if (event.button !== 0 || event.target?.closest?.('button')) return;
+    const rect = refs.hud.getBoundingClientRect?.();
+    if (!rect) return;
+    hudDrag = { id: event.pointerId, dx: event.clientX - rect.left, dy: event.clientY - rect.top, w: rect.width, h: rect.height };
+    refs.hudHead.setPointerCapture?.(event.pointerId);
+    refs.hud.classList.add('lu-hud-dragging');
+    event.preventDefault();
+  });
+  on(refs.hudHead, 'pointermove', (event) => {
+    if (!hudDrag || event.pointerId !== hudDrag.id) return;
+    refs.hud.style.setProperty('left', `${Math.max(0, event.clientX - hudDrag.dx)}px`);
+    refs.hud.style.setProperty('top', `${Math.max(0, event.clientY - hudDrag.dy)}px`);
+  });
+  const endHudDrag = (event) => {
+    if (!hudDrag || event.pointerId !== hudDrag.id) return;
+    const cx = event.clientX - hudDrag.dx + hudDrag.w / 2, cy = event.clientY - hudDrag.dy + hudDrag.h / 2;
+    const corner = `${cy < (win?.innerHeight ?? 800) / 2 ? 't' : 'b'}${cx < (win?.innerWidth ?? 1200) / 2 ? 'l' : 'r'}`;
+    hudDrag = null;
+    refs.hud.classList.remove('lu-hud-dragging');
+    refs.hud.style.removeProperty?.('left'); refs.hud.style.removeProperty?.('top');
+    refs.hud.setAttribute('data-corner', corner); saveHud();
+  };
+  on(refs.hudHead, 'pointerup', endHudDrag);
+  on(refs.hudHead, 'pointercancel', endHudDrag);
+
+  on(doc, 'keydown', (event) => {
+    if (isKeyShortcut(event, 'p')) { event.preventDefault(); setHud(refs.hud.hidden); announce(refs.hud.hidden ? '性能诊断已关闭' : '性能诊断已打开'); }
+    else if (isKeyShortcut(event, 'l')) { event.preventDefault(); toggleBench(); }
   });
 
   function radioInputs(ref) { return [...refs[ref].querySelectorAll('input[type="radio"]')]; }
@@ -579,6 +679,58 @@ export function createLensUI({ store, container } = {}) {
     setDisabled(refs.rebuildButton, !isCommandEnabled('rebuildScene', state, pending) || state.scene?.status === 'building');
   }
 
+  function renderSummaries(optics, sampling, display, focus) {
+    refs.focusValue.textContent = focus.known ? focus.text : '未标定';
+    refs.lensValue.textContent = [Number.isFinite(optics.focalLengthMm) ? `${Math.abs(optics.focalLengthMm).toFixed(1)} mm` : '', Number.isFinite(optics.fNumber) ? formatFNumber(optics.fNumber) : ''].filter(Boolean).join(' · ');
+    refs.samplingValue.textContent = samplingText(sampling);
+    refs.displayValue.textContent = formatEV(Number.isFinite(display.exposureEV) ? display.exposureEV : 0);
+  }
+  let thumbKey = '';
+  function renderThumbnail() {
+    const p = state.prescription;
+    const key = p ? JSON.stringify([p.id, p.configurationTitle, p.sensorZMm, p.stopRadiusMm]) : '';
+    if (key === thumbKey) return;
+    thumbKey = key;
+    if (!p) { thumb.replaceChildren(); refs.thumbCaption.textContent = '镜组截面'; return; }
+    const result = layoutFor(p, state.optics?.focalLengthMm);
+    if (result.layout) drawLayoutSVG(doc, thumb, result.layout, { compact: true });
+    else thumb.replaceChildren();
+    refs.thumbCaption.textContent = result.layout ? `${result.layout.elements.length} 片 · ${p.surfaces.length} 面` : '镜组截面';
+  }
+  // Rolling samples for rates shown in the HUD (client-side, from published snapshots only).
+  const sppHistory = [], computeHistory = [];
+  const now = () => (win?.performance ?? globalThis.performance)?.now?.() ?? Date.now();
+  function renderHud(d, sampling) {
+    if (refs.hud.hidden) return;
+    const t = now(), attempted = Number(d.attemptedSamples) || 0, spp = Number(sampling.spp) || 0;
+    // Accumulation restarted: start the rolling window again.
+    if (sppHistory.length && (attempted < sppHistory.at(-1).attempted || spp < sppHistory.at(-1).spp)) sppHistory.length = 0;
+    if (!sppHistory.length || t - sppHistory.at(-1).t > 200) sppHistory.push({ t, attempted, spp });
+    while (sppHistory.length > 2 && t - sppHistory[0].t > 4000) sppHistory.shift();
+    const first = sppHistory[0], span = (sppHistory.at(-1).t - first.t) / 1000;
+    const sppRate = span > 0.4 ? (sppHistory.at(-1).spp - first.spp) / span : null;
+    const rayRate = span > 0.4 ? (sppHistory.at(-1).attempted - first.attempted) / span : null;
+    if (Number.isFinite(d.computeMs) && computeHistory.at(-1) !== d.computeMs) { computeHistory.push(d.computeMs); if (computeHistory.length > 60) computeHistory.shift(); }
+    const lens = state.mode === 'lens';
+    const metric = (labelText, value, unit = '') => h('div', { class: 'lu-metric' }, h('span', { class: 'lu-metric-label', text: labelText }), h('span', { class: 'lu-metric-value' }, value, unit ? h('small', { text: unit }) : null));
+    const rate = (v) => (v === null || !lens ? '—' : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : v.toFixed(v < 10 ? 1 : 0));
+    refs.hudMetrics.replaceChildren(
+      metric('采样速度', rate(sppRate), lens && sppRate !== null ? 'spp/s' : ''),
+      metric('光线吞吐', rate(rayRate), lens && rayRate !== null ? '条/s' : ''),
+      metric('GPU 单块', Number.isFinite(d.computeMs) ? d.computeMs.toFixed(1) : '—', Number.isFinite(d.computeMs) ? 'ms' : ''),
+      metric('光照刷新', Number.isFinite(d.lightingRefreshMs) ? d.lightingRefreshMs.toFixed(1) : '—', Number.isFinite(d.lightingRefreshMs) ? 'ms' : ''),
+      metric('累积图像', d.width && d.height ? `${d.width}×${d.height}` : '—'),
+      metric('显存', formatBytes(d.memoryBytes)));
+    refs.hudLive.textContent = lens ? (sampling.paused ? '已暂停' : sppRate !== null ? `${rate(sppRate)} spp/s` : '测量中') : '光栅模式';
+    refs.hud.setAttribute('data-mode', lens ? 'lens' : 'raster');
+    const max = Math.max(1e-6, ...computeHistory);
+    const points = computeHistory.map((v, i) => `${(i / Math.max(1, computeHistory.length - 1)) * 120},${(28 - (v / max) * 24 - 2).toFixed(2)}`).join(' ');
+    const svgEl = (tag, attrs) => { const el = doc.createElementNS ? doc.createElementNS('http://www.w3.org/2000/svg', tag) : doc.createElement(tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v)); return el; };
+    spark.replaceChildren(...(computeHistory.length > 1 ? [svgEl('polyline', { points, fill: 'none', 'vector-effect': 'non-scaling-stroke' })] : []));
+    spark.setAttribute('data-empty', String(computeHistory.length < 2));
+    spark.setAttribute('aria-label', `GPU 单块耗时，最近 ${computeHistory.length} 次`);
+  }
+
   function render() {
     if (disposed) return;
     const optics = state.optics || {};
@@ -734,6 +886,12 @@ export function createLensUI({ store, container } = {}) {
 
     renderScene();
     renderDiagnostics(d, sampling);
+    renderSummaries(optics, sampling, display, focus);
+    renderThumbnail();
+    renderHud(d, sampling);
+    setDisabled(refs.exportButton, exporting || !(state.status === 'ready' && (state.mode !== 'lens' || (sampling.spp ?? 0) > 0)));
+    refs.exportButton.setAttribute('aria-busy', String(exporting));
+    bench.render();
 
     // Centre AF-S area: the 36×24 sensor is letterboxed about the viewport centre, which is where AF-S
     // evaluates. Shown only when the backend is ready; its look reflects the store's real AF status only.
@@ -744,6 +902,10 @@ export function createLensUI({ store, container } = {}) {
 
   // ---------------------------------------------------------------- mount
   container.appendChild(root);
+  container.appendChild(hud);
+  container.appendChild(bench.root);
+  // Restored without rendering: the first store snapshot renders everything once mounted.
+  if (hudSaved?.open) { refs.hud.hidden = false; refs.hudToggle.setAttribute('aria-pressed', 'true'); }
   // Sibling of the page, not inside the panel: the panel's backdrop-filter would make it the containing
   // block for position:fixed and shift the marker off the true viewport centre.
   const reticle = h('div', { class: 'lens-ui-reticle', ref: 'reticle', 'aria-hidden': 'true', hidden: true },
@@ -766,7 +928,8 @@ export function createLensUI({ store, container } = {}) {
   }
   const unsubscribe = store.subscribe((snapshot) => {
     state = snapshot || {};
-    render();
+    // Listeners run inside backend updates: a UI fault must never fail an optics command.
+    try { render(); } catch (error) { (win?.console ?? console).error('lens UI render failed', error); }
   });
 
   return {
@@ -776,6 +939,9 @@ export function createLensUI({ store, container } = {}) {
       unsubscribe?.();
       for (const cleanup of cleanups.splice(0)) cleanup();
       root.remove();
+      hud.remove();
+      bench.dispose();
+      bench.root.remove();
       reticle.remove();
       doc.body?.classList?.remove('lens-ui-mounted');
     },
