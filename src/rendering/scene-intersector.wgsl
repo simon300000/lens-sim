@@ -68,6 +68,7 @@ fn sceneSafeInverse(d: vec3f) -> vec3f {
   return 1.0 / select(d, tiny, abs(d) < vec3f(1e-30));
 }
 fn sceneBox(n: BvhNode, o: vec3f, inv: vec3f, tMin: f32, tMax: f32) -> f32 {
+  workCounters[WORK_BOX]++;
   let t0 = (n.lo - o) * inv;
   let t1 = (n.hi - o) * inv;
   let tn = min(t0, t1);
@@ -101,6 +102,7 @@ fn sceneWatertight(o: vec3f, d: vec3f) -> WatertightRay {
 }
 // Returns (t, w0, w1, w2) with t = SCENE_NO_HIT on a miss.
 fn sceneTriangle(r: WatertightRay, p0: vec3f, p1: vec3f, p2: vec3f, tMin: f32, tMax: f32) -> vec4f {
+  workCounters[WORK_TRIANGLE]++;
   let A = p0 - r.o; let B = p1 - r.o; let C = p2 - r.o;
   let ax = A[r.kx] - r.s.x * A[r.kz]; let ay = A[r.ky] - r.s.y * A[r.kz];
   let bx = B[r.kx] - r.s.x * B[r.kz]; let by = B[r.ky] - r.s.y * B[r.kz];
@@ -158,6 +160,7 @@ fn sceneIntersect(originW: vec3f, dirW: vec3f, tMin: f32, tMax: f32) -> SceneHit
       if (!inBlas) {
         if (count != 1u || n.a >= instanceCount) { return sceneError(hit, BVH_ERR_INSTANCE, visits); }
         let I = sceneInstances[n.a];
+        workCounters[WORK_INSTANCE]++;
         let lo = sceneLocalPoint(I, originW);
         let ld = sceneLocalVector(I, dirW);
         if (!sceneFinite3(lo) || !sceneFinite3(ld) || !(dot(ld, ld) > 0.0)) { return sceneError(hit, BVH_ERR_RAY, visits); }

@@ -35,7 +35,9 @@ async function createScene(){
     // The lens BVH and large sensor tiles are storage buffers; request what the
     // adapter actually offers instead of relying on the 128/256 MiB defaults.
     requiredLimits:{maxTextureDimension2D:adapter.limits.maxTextureDimension2D,
-      maxStorageBufferBindingSize:adapter.limits.maxStorageBufferBindingSize,maxBufferSize:adapter.limits.maxBufferSize}};
+      maxStorageBufferBindingSize:adapter.limits.maxStorageBufferBindingSize,maxBufferSize:adapter.limits.maxBufferSize,
+      // The optional work-counting integrator (diagnostics HUD) binds a ninth storage buffer.
+      maxStorageBuffersPerShaderStage:adapter.limits.maxStorageBuffersPerShaderStage}};
   let renderer=new THREE.WebGPURenderer({...rendererOptions,...outputRendererOptions(hdr.supported)});
   await renderer.init();
   if(hdr.supported&&(!renderer.backend.isWebGPUBackend||!isHDRConfiguration(renderer.backend.context.getConfiguration?.()))){

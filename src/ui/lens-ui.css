@@ -291,6 +291,26 @@ body[data-night="true"] .lens-ui select option,body[data-night="true"] .lens-ui 
 .lu-dl dd{margin:0;text-align:right;overflow-wrap:anywhere}
 .lu-hud .lu-btn{min-height:28px;font-size:11.5px}
 
+.lu-work-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.lu-work-value{font-size:20px;font-weight:650;letter-spacing:-.3px;white-space:nowrap}
+.lu-work-value small{margin-left:4px;font-size:11px;font-weight:500;color:var(--ui-muted)}
+.lu-work-approx{font-weight:400;color:var(--ui-muted)}
+.lu-work-timing{min-width:0;font-size:10px;color:var(--ui-muted);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lu-work-bar{display:flex;height:6px;margin:8px 0 6px;border-radius:3px;overflow:hidden;background:var(--ui-line);gap:1px}
+.lu-work-seg{flex-basis:0;min-width:0}
+.lu-work-legend{display:flex;flex-wrap:wrap;gap:3px 10px;font-size:10.5px;color:var(--ui-ink-2)}
+.lu-work-key{display:inline-flex;align-items:center;gap:5px}
+.lu-work-key i{width:8px;height:8px;border-radius:2px;background:currentColor}
+.lu-work-lens{color:var(--ray-0);background:var(--ray-0)}
+.lu-work-bvh{color:var(--ray-3);background:var(--ray-3)}
+.lu-work-shading{color:var(--ray-1);background:var(--ray-1)}
+.lu-work-sampling{color:var(--ray-4);background:var(--ray-4)}
+.lu-work-key.lu-work-lens,.lu-work-key.lu-work-bvh,.lu-work-key.lu-work-shading,.lu-work-key.lu-work-sampling{background:none;color:var(--ui-ink-2)}
+.lu-work-key.lu-work-lens i{background:var(--ray-0)}.lu-work-key.lu-work-bvh i{background:var(--ray-3)}
+.lu-work-key.lu-work-shading i{background:var(--ray-1)}.lu-work-key.lu-work-sampling i{background:var(--ray-4)}
+.lu-work-dl{margin:8px 0 2px}
+.lu-work-note{margin:0 0 8px;font-size:10px}
+
 /* ================================================================ lens workbench (drawer) */
 .lens-bench{position:fixed;z-index:5;top:16px;right:16px;bottom:16px;width:min(860px,calc(100vw - 348px - 48px));min-width:520px;
   display:flex;flex-direction:column;overflow:hidden;background:var(--ui-surface-solid);backdrop-filter:none;-webkit-backdrop-filter:none}

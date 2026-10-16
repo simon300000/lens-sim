@@ -13,6 +13,7 @@ import {
 } from './lens-ui-format.js';
 import { createLensBench, drawLayoutSVG, layoutFor } from './lens-bench.js';
 import { downloadBlob } from '../rendering/image-export.js';
+import { WORK_GROUPS } from '../rendering/work-model.js';
 
 const COMMAND_LABELS = {
   setMode: '画面模式', selectLens: '选择镜头', selectConfiguration: '镜头配置', setFNumber: '光圈',
@@ -220,6 +221,9 @@ export function createLensUI({ store, container } = {}) {
     h('div', { class: 'lu-hud-body' },
       h('div', { class: 'lu-hud-metrics', ref: 'hudMetrics' }),
       spark,
+      h('details', { class: 'lu-hud-section', open: true }, h('summary', { text: '算力估计' }),
+        h('div', { class: 'lu-work', ref: 'hudWork' }),
+        h('p', { class: 'lu-hint lu-work-note', text: 'FLOP 不是硬件计数：着色器统计每种运算的执行次数 × 按 WGSL 手工计数的每次 FLOP（FMA 计 2），再除以实测 GPU 时间；误差约 ±30%。只在此窗口打开时计数。' })),
       h('details', { class: 'lu-hud-section', open: true }, h('summary', { text: '光线去向' }), h('div', { class: 'lu-rates', ref: 'rates' })),
       h('details', { class: 'lu-hud-section' }, h('summary', { text: '场景与资源' }),
         h('dl', { class: 'lu-dl', ref: 'diagList' }),
@@ -445,7 +449,8 @@ export function createLensUI({ store, container } = {}) {
   function setHud(open, remember = true) {
     refs.hud.hidden = !open;
     refs.hudToggle.setAttribute('aria-pressed', String(open));
-    if (open) { sppHistory.length = 0; render(); }
+    if (open) sppHistory.length = 0;
+    render(); // also starts/stops GPU work counting
     if (remember) saveHud();
   }
   const hudSaved = readHud();
@@ -700,8 +705,44 @@ export function createLensUI({ store, container } = {}) {
   // Rolling samples for rates shown in the HUD (client-side, from published snapshots only).
   const sppHistory = [], computeHistory = [];
   const now = () => (win?.performance ?? globalThis.performance)?.now?.() ?? Date.now();
+  // Counting costs a little GPU time, so it runs only while the HUD is open and the backend is ready.
+  let workCountingSent = false;
+  function syncWorkCounting() {
+    const want = !refs.hud.hidden && state.status === 'ready';
+    if (want === workCountingSent) return;
+    workCountingSent = want;
+    Promise.resolve().then(() => store.dispatch('setWorkCounting', want)).catch(() => { workCountingSent = !want; });
+  }
+  const groupCount = (v) => (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2));
+  function renderWork(work) {
+    const key = JSON.stringify(work ?? null);
+    if (refs.hudWork.getAttribute('data-key') === key) return;
+    refs.hudWork.setAttribute('data-key', key);
+    if (state.mode !== 'lens') { refs.hudWork.replaceChildren(h('p', { class: 'lu-hint', text: '切换到镜头追迹后开始统计。' })); return; }
+    if (work?.status === 'unsupported') { refs.hudWork.replaceChildren(h('p', { class: 'lu-hint', text: '此 GPU 每个着色阶段最多 8 个存储缓冲，无法加入计数缓冲；不提供估计。' })); return; }
+    if (work?.status === 'compiling') { refs.hudWork.replaceChildren(h('p', { class: 'lu-hint', text: '正在编译计数版积分器（仅首次）…' })); return; }
+    if (!work || work.status !== 'ok') { refs.hudWork.replaceChildren(h('p', { class: 'lu-hint', text: '正在统计（约 1 秒）…' })); return; }
+    const g = work.gflops;
+    const value = g === null ? '—' : g >= 1000 ? `${(g / 1000).toFixed(2)}` : g >= 100 ? g.toFixed(0) : g.toFixed(1);
+    const unit = g === null ? '' : g >= 1000 ? 'TFLOP/s' : 'GFLOP/s';
+    const timing = work.timing === 'gpu' ? `GPU 时间戳 · ${work.timedChunks} 块` : work.timing === 'wall' ? '无时间戳：墙钟近似，偏低' : '尚无计时';
+    const groups = Object.entries(WORK_GROUPS);
+    refs.hudWork.replaceChildren(
+      h('div', { class: 'lu-work-head' },
+        h('span', { class: 'lu-work-value' }, h('span', { class: 'lu-work-approx', text: '≈ ' }), value, unit ? h('small', { text: unit }) : null),
+        h('span', { class: 'lu-work-timing', text: timing })),
+      h('div', { class: 'lu-work-bar', role: 'img', 'aria-label': groups.map(([k, label]) => `${label} ${(work.share[k] * 100).toFixed(0)}%`).join('，') },
+        ...groups.map(([k]) => h('span', { class: `lu-work-seg lu-work-${k}`, style: `flex-grow:${Math.max(0, work.share[k])}` }))),
+      h('div', { class: 'lu-work-legend' }, ...groups.map(([k, label]) => h('span', { class: `lu-work-key lu-work-${k}` }, h('i', { 'aria-hidden': 'true' }), `${label} ${(work.share[k] * 100).toFixed(0)}%`))),
+      h('dl', { class: 'lu-dl lu-work-dl' },
+        ...[['每条路径', `${groupCount(work.flopsPerPath)} FLOP`], ['镜面求交 / 路径', groupCount(work.perPath.lensSurfaces)], ['矢高·法线 / 路径', groupCount(work.perPath.sagEvaluations)],
+          ['BVH 包围盒 / 路径', groupCount(work.perPath.boxes)], ['三角形 / 路径', groupCount(work.perPath.triangles)], ['光源 / 着色点', groupCount(work.perPath.lights)]]
+          .flatMap(([t, v]) => [h('dt', { text: t }), h('dd', { text: v })])));
+  }
   function renderHud(d, sampling) {
+    syncWorkCounting();
     if (refs.hud.hidden) return;
+    renderWork(d.work);
     const t = now(), attempted = Number(d.attemptedSamples) || 0, spp = Number(sampling.spp) || 0;
     // Accumulation restarted: start the rolling window again.
     if (sppHistory.length && (attempted < sppHistory.at(-1).attempted || spp < sppHistory.at(-1).spp)) sppHistory.length = 0;
@@ -938,6 +979,7 @@ export function createLensUI({ store, container } = {}) {
       disposed = true;
       unsubscribe?.();
       for (const cleanup of cleanups.splice(0)) cleanup();
+      if (workCountingSent) Promise.resolve().then(() => store.dispatch('setWorkCounting', false)).catch(() => {});
       root.remove();
       hud.remove();
       bench.dispose();

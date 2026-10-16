@@ -1,4 +1,6 @@
-import opticalCore from '../src/optics/optical-core.wgsl?raw';
+import opticalCoreRaw from '../src/optics/optical-core.wgsl?raw';
+import workCounters from '../src/rendering/work-counters.wgsl?raw';
+const opticalCore=workCounters+opticalCoreRaw;
 import probeKernel from './optical-path-probe.wgsl?raw';
 import { AIR, modelGlass } from '../src/optics/glass.js';
 import { packOpticalSurfaces, packLens } from '../src/optics/lens-state.js';

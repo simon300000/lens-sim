@@ -12,6 +12,7 @@ import { createFocusSolver } from '../optics/focus-solver.js';
 import { displayOutputNode } from '../hdr-output.js';
 
 import { exportLensTexture, captureCanvas } from './image-export.js';
+import { summarizeWork } from './work-model.js';
 import { loadGlassCatalog, inspectRecord, customLensId, CUSTOM_BRAND } from '../optics/lens-workbench.js';
 
 /** Small, clone-friendly description of the active prescription for the layout view and table. */
@@ -51,6 +52,8 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
   let diagnosticDirty=false,samplesInFlight=0,rasterCameraDirty=false;
   // Imported or edited prescriptions live only in this page session.
   const customAssets=new Map();
+  // Work counting runs only while the diagnostics HUD asks for it.
+  let workCounting=false,workBusy=false,lastWorkAt=-Infinity;
   function publishPrescription(){
     if(!lens||!engine?.packed)return;
     update({prescription:slimPrescription(lens,{stopRadiusMm:engine.packed.stopRadiusMm,sensorZMm:engine.packed.sensorZMm,focusDistanceM:state().optics.focusDistanceM})});
@@ -230,6 +233,17 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
     if(interacting&&!pointerActive)scheduleRelease();
   }
   /** Adapt + preflight an imported/edited lens-bench record in the browser, then load it like bundled data. */
+  /** HUD-driven arithmetic estimate. The counting integrator variant compiles on first use. */
+  async function setWorkCounting(on){
+    workCounting=on;lastWorkAt=-Infinity;
+    const setWork=work=>update({diagnostics:{...state().diagnostics,work}});
+    if(!engine){setWork(on?{status:'pending'}:null);return on?'pending':'off';}
+    if(on&&!engine.workSupported){setWork({status:'unsupported'});return 'unsupported';}
+    if(on&&!engine.workCounting)setWork({status:'compiling'});
+    const status=await engine.setWorkCounting(on);
+    if(!on||workCounting!==on)setWork(workCounting?state().diagnostics.work:null);
+    requestFrame();return status;
+  }
   async function loadCustomLens({record,configurationIndex=0}={}){
     if(!record||typeof record.tx!=='string')throw new Error('缺少镜头处方');
     const catalog=await loadGlassCatalog();
@@ -268,6 +282,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
   store.setHandler(async({type,value})=>{
     const s=state();
     if(type==='exportImage')return exportImage();
+    if(type==='setWorkCounting')return setWorkCounting(Boolean(value));
     // Read-only: the editable source record of the active lens (kept out of per-frame snapshots).
     if(type==='getLensRecord')return baseAsset?.record?structuredClone(baseAsset.record):null;
     const recovery=type==='setMode'||type==='setPaused'||type==='loadCustomLens'||(engine&&['selectLens','selectConfiguration'].includes(type));
@@ -339,6 +354,12 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
         // queue fence per frame previously left a RAF-sized bubble after each
         // slow batch. Interaction stays single-batch to bound control latency.
         if(submitted){samplesInFlight++;interop.device.queue.onSubmittedWorkDone().then(()=>{samplesInFlight--;if(!disposed)requestFrame();},error=>{samplesInFlight--;if(!disposed)update({status:'error',error:error.message});});}
+        if(workCounting&&!workBusy&&engine.workCounting&&performance.now()-lastWorkAt>=1000){
+          workBusy=true;lastWorkAt=performance.now();
+          engine.readWork().then(result=>{
+            if(result&&result.workUnits>0&&workCounting&&!disposed)update({diagnostics:{...state().diagnostics,work:{status:'ok',...summarizeWork(result.counts,result),timedChunks:result.timedChunks}}});
+          }).catch(()=>{}).finally(()=>{workBusy=false;});
+        }
         if(!statisticsBusy&&engine.roundComplete&&engine.spp>0&&engine.spp!==lastStatisticsSpp&&((s.sampling.targetSpp>0&&engine.spp>=s.sampling.targetSpp)||engine.spp%32===0)){
           statisticsBusy=true;lastStatisticsSpp=engine.spp;const rev=statisticsRevision;
           engine.statistics().then(stats=>{if(stats&&rev===statisticsRevision){
@@ -360,6 +381,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
         validation:l.validation,surfaceCount:l.surfaceCount,focalLengthMm:catalogueFocalLengthMm(l)})),source:manifest.source});
       await onProgress(8,'编译真实镜组、光谱采样与自动对焦');
       engine=await createOpticalEngine({interop,sceneResources,lighting,width:state().sampling.resolution});
+      if(workCounting)setWorkCounting(true).catch(error=>console.warn('Work counting unavailable',error));
       await loadLens(manifest.defaultId);displayGraph();displayChanged();
       await build;
       update({status:'loading'});

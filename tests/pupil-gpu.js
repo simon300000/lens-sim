@@ -1,4 +1,6 @@
-import optical from '../src/optics/optical-core.wgsl?raw';
+import opticalRaw from '../src/optics/optical-core.wgsl?raw';
+import workCounters from '../src/rendering/work-counters.wgsl?raw';
+const optical=workCounters+opticalRaw;
 import pupil from '../src/optics/pupil-sampling.wgsl?raw';
 import kernel from './pupil-gpu.wgsl?raw';
 import {SAMPLING_WGSL} from '../src/spectral/sampler.js';
