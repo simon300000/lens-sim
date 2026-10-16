@@ -1,0 +1,12 @@
+{
+  "sourceThread": "01a1417e-dee5-7282-a265-7549ea71ca69",
+  "sourceTurn": "01a14258-2d2f-7d13-a284-311f717de56e",
+  "method": "Read-only interval analysis of saved 0ce4185 startup reports; no browser rerun",
+  "units": "ms",
+  "rounds": [
+    {"run":1,"renderUnionMs":1356.9,"maxRenderCallMs":1344.6,"wrappedNativeUnionMs":0.9,"submitUnionMs":0.2,"submitMaxMs":0.1,"finishUnionMs":0,"finishMaxMs":0,"drawUnionMs":0,"drawMaxMs":0,"drawIndexedUnionMs":0,"drawIndexedMaxMs":0,"setPipelineUnionMs":0.7,"setPipelineMaxMs":0.1,"renderPassEndUnionMs":0,"shaderOrPipelineCreates":0,"nodeBuilds":0,"largestEventFreeInterval":[13043.0,14362.1],"largestEventFreeMs":1319.1},
+    {"run":2,"renderUnionMs":1346.8,"maxRenderCallMs":1336.0,"wrappedNativeUnionMs":1.2,"submitUnionMs":0.2,"submitMaxMs":0.1,"finishUnionMs":0.1,"finishMaxMs":0.1,"drawUnionMs":0.2,"drawMaxMs":0.1,"drawIndexedUnionMs":0.3,"drawIndexedMaxMs":0.1,"setPipelineUnionMs":0.4,"setPipelineMaxMs":0.1,"renderPassEndUnionMs":0,"shaderOrPipelineCreates":0,"nodeBuilds":0,"largestEventFreeInterval":[12731.1,14038.8],"largestEventFreeMs":1307.7}
+  ],
+  "conclusion": "The covered native calls do not account for the long pause. About 97 percent is inside render with no internal instrumented event. Data cannot distinguish JS/GC from uncovered native calls such as writeBuffer, resource creation and binding updates; it does not establish shader compilation as the cause.",
+  "precision": "about 0.1 ms; a measured zero does not imply zero true cost"
+}

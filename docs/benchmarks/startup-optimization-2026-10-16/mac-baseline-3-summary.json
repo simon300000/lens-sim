@@ -1,0 +1,784 @@
+{
+  "query": "?run=mac-baseline-kernel-3&bench=1",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15",
+  "viewport": {
+    "width": 1324,
+    "height": 907,
+    "dpr": 2
+  },
+  "start": 380,
+  "finish": 39230,
+  "initializationMs": 38850,
+  "foreground": true,
+  "visibility": [
+    {
+      "t": 144,
+      "hidden": false,
+      "focused": false
+    },
+    {
+      "t": 309,
+      "hidden": false,
+      "focused": true
+    },
+    {
+      "t": 309,
+      "hidden": false,
+      "focused": true
+    }
+  ],
+  "errors": [],
+  "sceneErrors": [],
+  "pupil": {
+    "bins": 128,
+    "globalMix": 0.05,
+    "movingCenter": true,
+    "precomputeMs": 5035,
+    "deriveMs": 1,
+    "buildMs": 5036,
+    "coldBuildMs": 5036,
+    "physicalCacheHit": false,
+    "probes": 222172
+  },
+  "opticalInitializationMs": 81,
+  "counts": {
+    "createShaderModule": 798,
+    "createRenderPipeline": 771,
+    "getCompilationInfo": 6,
+    "createComputePipelineAsync": 6
+  },
+  "nodeBuildCalls": 970,
+  "nodeBuildUnionMs": 31386,
+  "gpuSynchronousUnionMs": 15,
+  "api": [
+    {
+      "name": "createShaderModule",
+      "count": 798,
+      "syncMs": 8,
+      "asyncLatencySumMs": 8
+    },
+    {
+      "name": "createRenderPipeline",
+      "count": 771,
+      "syncMs": 7,
+      "asyncLatencySumMs": 7
+    },
+    {
+      "name": "getCompilationInfo",
+      "count": 6,
+      "syncMs": 0,
+      "asyncLatencySumMs": 48
+    },
+    {
+      "name": "createComputePipelineAsync",
+      "count": 6,
+      "syncMs": 0,
+      "asyncLatencySumMs": 32
+    }
+  ],
+  "stages": [
+    {
+      "name": "检测 GPU 与 HDR 画布支持",
+      "start": 380,
+      "durationMs": 6,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "铺设庭园，栽种花木",
+      "start": 386,
+      "durationMs": 311,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "初始化天空、日照与反射",
+      "start": 697,
+      "durationMs": 58,
+      "nodeBuildMs": 26,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "预编译夜景、月亮与灯光",
+      "start": 755,
+      "durationMs": 18834,
+      "nodeBuildMs": 18197,
+      "gpuSyncMs": 10
+    },
+    {
+      "name": "预编译晨光与阴影",
+      "start": 19589,
+      "durationMs": 107,
+      "nodeBuildMs": 15,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "预编译当前时刻的场景",
+      "start": 19696,
+      "durationMs": 215,
+      "nodeBuildMs": 32,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "提取场景几何，构建光追加速结构",
+      "start": 19911,
+      "durationMs": 397,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "编译真实镜组、光谱采样与自动对焦",
+      "start": 20308,
+      "durationMs": 5194,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "预热镜头成像与首帧显示",
+      "start": 25502,
+      "durationMs": 13728,
+      "nodeBuildMs": 13116,
+      "gpuSyncMs": 5
+    }
+  ],
+  "gaps": [
+    {
+      "start": 757,
+      "end": 19581,
+      "ms": 18824,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 18197,
+      "gpuSyncMs": 10
+    },
+    {
+      "start": 25505,
+      "end": 39170,
+      "ms": 13665,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 13116,
+      "gpuSyncMs": 5
+    },
+    {
+      "start": 20391,
+      "end": 25484,
+      "ms": 5093,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 19915,
+      "end": 20280,
+      "ms": 365,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 380,
+      "end": 700,
+      "ms": 320,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 19790,
+      "end": 19915,
+      "ms": 125,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 19581,
+      "end": 19681,
+      "ms": 100,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 15,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 19696,
+      "end": 19790,
+      "ms": 94,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 32,
+      "gpuSyncMs": 0
+    }
+  ],
+  "sourceCommit": "fddd6ff (production=5bb9e04)",
+  "renderBenchmark": {
+    "rows": [
+      {
+        "trial": 0,
+        "wallMs": 4450,
+        "spp": 256,
+        "attempts": 39321600,
+        "attemptedPerSecond": 8836314.606741572,
+        "gpuTimestampMs": [
+          23.844666,
+          30.520334,
+          28.934583,
+          18.239583,
+          19.468625,
+          20.943709,
+          5.900417,
+          24.93825,
+          18.0115,
+          9.691792,
+          24.907,
+          31.969125,
+          12.909833,
+          29.988041,
+          27.895416,
+          29.196542,
+          31.894209,
+          18.186333,
+          30.962208,
+          21.938167,
+          25.246958,
+          24.221208,
+          18.355,
+          26.143666,
+          25.020875,
+          20.113458,
+          30.887041,
+          31.097291,
+          24.200542,
+          39.258958,
+          38.085208,
+          23.978167,
+          28.918792,
+          19.158666,
+          10.414958,
+          19.079166,
+          12.107209,
+          33.922958,
+          35.943458,
+          32.911,
+          20.025917,
+          25.923125,
+          22.914584,
+          34.364417,
+          19.919625,
+          16.651292,
+          31.03225,
+          27.95475,
+          28.934,
+          7.041208,
+          21.951416,
+          10.699625,
+          16.248208,
+          36.869167,
+          18.016959,
+          13.077584,
+          16.08575,
+          30.892375,
+          19.530125,
+          10.029209,
+          21.97475,
+          20.925417,
+          17.118916
+        ],
+        "stats": {
+          "attemptedSamples": 39321600,
+          "opticalBlockedRate": 0.3024267323811849,
+          "tirRate": 1.0782877604166667e-05,
+          "numericalErrorRate": 0,
+          "bvhErrorRate": 0,
+          "hitRate": 0.6975623575846354,
+          "backgroundRate": 0,
+          "opticalPassRate": 0.6975624593098958,
+          "unsupportedRate": 0,
+          "transparencyLimitRate": 2.1874441290312043e-07,
+          "radianceInvalidRate": 0,
+          "reflectionOutsideRate": 0,
+          "sceneHitOfPassed": 0.9999998541703914,
+          "backgroundOfPassed": 0
+        },
+        "pixelAccumSHA256": "6beadb2b6856493089f689f20abdd5ab600ad3505b909073372839663d05052c"
+      },
+      {
+        "trial": 1,
+        "wallMs": 4481,
+        "spp": 256,
+        "attempts": 39321600,
+        "attemptedPerSecond": 8775184.110689579,
+        "gpuTimestampMs": [
+          20.970083,
+          40.916083,
+          21.007542,
+          28.976375,
+          33.998417,
+          39.903917,
+          28.90075,
+          8.259417,
+          22.987916,
+          26.255166,
+          18.443625,
+          31.909708,
+          33.396542,
+          38.9885,
+          30.901167,
+          22.895792,
+          30.053667,
+          38.90125,
+          38.278917,
+          31.907,
+          34.909584,
+          34.921542,
+          20.17025,
+          33.040625,
+          23.309458,
+          40.911791,
+          20.913292,
+          14.963167,
+          20.341584,
+          27.801542,
+          16.906709,
+          36.915125,
+          28.615208,
+          22.910584,
+          17.993583,
+          37.926458,
+          13.936958,
+          22.06075,
+          23.962209,
+          17.632,
+          7.096917,
+          18.130834,
+          26.712917,
+          18.213,
+          30.891625,
+          18.157292,
+          26.317292,
+          23.286083,
+          17.142792,
+          34.990375,
+          26.905459,
+          19.89525,
+          17.012333,
+          39.925958,
+          17.058375,
+          17.93375,
+          25.9815,
+          10.193,
+          17.81075,
+          20.916959,
+          27.395834,
+          17.303208,
+          16.536042
+        ],
+        "stats": {
+          "attemptedSamples": 39321600,
+          "opticalBlockedRate": 0.3024267323811849,
+          "tirRate": 1.0782877604166667e-05,
+          "numericalErrorRate": 0,
+          "bvhErrorRate": 0,
+          "hitRate": 0.6975623575846354,
+          "backgroundRate": 0,
+          "opticalPassRate": 0.6975624593098958,
+          "unsupportedRate": 0,
+          "transparencyLimitRate": 2.1874441290312043e-07,
+          "radianceInvalidRate": 0,
+          "reflectionOutsideRate": 0,
+          "sceneHitOfPassed": 0.9999998541703914,
+          "backgroundOfPassed": 0
+        },
+        "pixelAccumSHA256": "6beadb2b6856493089f689f20abdd5ab600ad3505b909073372839663d05052c"
+      },
+      {
+        "trial": 2,
+        "wallMs": 4531,
+        "spp": 256,
+        "attempts": 39321600,
+        "attemptedPerSecond": 8678349.150297947,
+        "gpuTimestampMs": [
+          26.160542,
+          25.898708,
+          18.012708,
+          26.918666,
+          40.98225,
+          37.981042,
+          27.91525,
+          29.10125,
+          22.891875,
+          33.171667,
+          29.898791,
+          42.91275,
+          37.926792,
+          30.886583,
+          32.910375,
+          34.082,
+          39.951875,
+          25.92675,
+          28.897125,
+          34.006666,
+          18.19175,
+          8.241333,
+          33.910709,
+          19.905458,
+          9.18625,
+          18.102333,
+          26.892458,
+          36.947583,
+          30.902708,
+          20.986541,
+          20.924417,
+          20.916583,
+          13.971375,
+          19.930042,
+          34.019167,
+          15.903583,
+          24.025208,
+          19.898542,
+          21.344667,
+          29.288084,
+          16.978709,
+          23.912875,
+          15.92525,
+          21.0725,
+          23.908292,
+          19.315542,
+          18.916083,
+          29.923875,
+          19.9285,
+          16.159791,
+          35.944625,
+          23.9125,
+          22.891208,
+          22.984625,
+          19.147875,
+          25.934375,
+          28.096458,
+          23.727458,
+          9.189208,
+          21.02375,
+          17.016375,
+          17.158084,
+          28.056292
+        ],
+        "stats": {
+          "attemptedSamples": 39321600,
+          "opticalBlockedRate": 0.3024267323811849,
+          "tirRate": 1.0782877604166667e-05,
+          "numericalErrorRate": 0,
+          "bvhErrorRate": 0,
+          "hitRate": 0.6975623575846354,
+          "backgroundRate": 0,
+          "opticalPassRate": 0.6975624593098958,
+          "unsupportedRate": 0,
+          "transparencyLimitRate": 2.1874441290312043e-07,
+          "radianceInvalidRate": 0,
+          "reflectionOutsideRate": 0,
+          "sceneHitOfPassed": 0.9999998541703914,
+          "backgroundOfPassed": 0
+        },
+        "pixelAccumSHA256": "6beadb2b6856493089f689f20abdd5ab600ad3505b909073372839663d05052c"
+      }
+    ],
+    "kernel": [
+      {
+        "trial": 0,
+        "batches": [
+          {
+            "wallMs": 51,
+            "gpuMs": 50.363833
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 49.096916
+          },
+          {
+            "wallMs": 45,
+            "gpuMs": 44.8665
+          },
+          {
+            "wallMs": 52,
+            "gpuMs": 50.363042
+          },
+          {
+            "wallMs": 47,
+            "gpuMs": 46.780333
+          },
+          {
+            "wallMs": 50,
+            "gpuMs": 47.746417
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 49.625959
+          },
+          {
+            "wallMs": 57,
+            "gpuMs": 52.3445
+          },
+          {
+            "wallMs": 48,
+            "gpuMs": 47.311542
+          },
+          {
+            "wallMs": 47,
+            "gpuMs": 45.839625
+          },
+          {
+            "wallMs": 55,
+            "gpuMs": 51.817083
+          },
+          {
+            "wallMs": 56,
+            "gpuMs": 55.375208
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 48.058084
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 44.170417
+          },
+          {
+            "wallMs": 52,
+            "gpuMs": 50.810625
+          },
+          {
+            "wallMs": 54,
+            "gpuMs": 52.719084
+          }
+        ],
+        "spp": 64,
+        "pixelAccumSHA256": "fbc400703e7d97efb444e3ee355549e4a154ea370f0a8ace3f192709451e7765",
+        "stats": {
+          "attemptedSamples": 9830400,
+          "opticalBlockedRate": 0.30231852213541666,
+          "tirRate": 1.068115234375e-05,
+          "numericalErrorRate": 0,
+          "bvhErrorRate": 0,
+          "hitRate": 0.6976706949869792,
+          "backgroundRate": 0,
+          "opticalPassRate": 0.6976707967122396,
+          "unsupportedRate": 0,
+          "transparencyLimitRate": 1.4580696353644876e-07,
+          "radianceInvalidRate": 0,
+          "reflectionOutsideRate": 0,
+          "sceneHitOfPassed": 0.9999998541930365,
+          "backgroundOfPassed": 0
+        }
+      },
+      {
+        "trial": 1,
+        "batches": [
+          {
+            "wallMs": 40,
+            "gpuMs": 39.019334
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 47.553708
+          },
+          {
+            "wallMs": 45,
+            "gpuMs": 43.631542
+          },
+          {
+            "wallMs": 54,
+            "gpuMs": 51.943792
+          },
+          {
+            "wallMs": 48,
+            "gpuMs": 47.129708
+          },
+          {
+            "wallMs": 43,
+            "gpuMs": 42.531
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 50.196792
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 46.60275
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 48.803416
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 46.713584
+          },
+          {
+            "wallMs": 48,
+            "gpuMs": 47.485083
+          },
+          {
+            "wallMs": 53,
+            "gpuMs": 51.795
+          },
+          {
+            "wallMs": 45,
+            "gpuMs": 44.343584
+          },
+          {
+            "wallMs": 50,
+            "gpuMs": 48.713125
+          },
+          {
+            "wallMs": 47,
+            "gpuMs": 43.296334
+          },
+          {
+            "wallMs": 50,
+            "gpuMs": 49.465417
+          }
+        ],
+        "spp": 64,
+        "pixelAccumSHA256": "fbc400703e7d97efb444e3ee355549e4a154ea370f0a8ace3f192709451e7765",
+        "stats": {
+          "attemptedSamples": 9830400,
+          "opticalBlockedRate": 0.30231852213541666,
+          "tirRate": 1.068115234375e-05,
+          "numericalErrorRate": 0,
+          "bvhErrorRate": 0,
+          "hitRate": 0.6976706949869792,
+          "backgroundRate": 0,
+          "opticalPassRate": 0.6976707967122396,
+          "unsupportedRate": 0,
+          "transparencyLimitRate": 1.4580696353644876e-07,
+          "radianceInvalidRate": 0,
+          "reflectionOutsideRate": 0,
+          "sceneHitOfPassed": 0.9999998541930365,
+          "backgroundOfPassed": 0
+        }
+      },
+      {
+        "trial": 2,
+        "batches": [
+          {
+            "wallMs": 51,
+            "gpuMs": 49.251583
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 48.273833
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 47.891542
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 47.9635
+          },
+          {
+            "wallMs": 53,
+            "gpuMs": 51.5355
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 48.678708
+          },
+          {
+            "wallMs": 47,
+            "gpuMs": 46.13375
+          },
+          {
+            "wallMs": 50,
+            "gpuMs": 49.09125
+          },
+          {
+            "wallMs": 50,
+            "gpuMs": 45.723416
+          },
+          {
+            "wallMs": 52,
+            "gpuMs": 50.992041
+          },
+          {
+            "wallMs": 44,
+            "gpuMs": 39.880792
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 48.229291
+          },
+          {
+            "wallMs": 48,
+            "gpuMs": 41.710541
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 49.452458
+          },
+          {
+            "wallMs": 50,
+            "gpuMs": 48.214667
+          },
+          {
+            "wallMs": 52,
+            "gpuMs": 52.059958
+          }
+        ],
+        "spp": 64,
+        "pixelAccumSHA256": "fbc400703e7d97efb444e3ee355549e4a154ea370f0a8ace3f192709451e7765",
+        "stats": {
+          "attemptedSamples": 9830400,
+          "opticalBlockedRate": 0.30231852213541666,
+          "tirRate": 1.068115234375e-05,
+          "numericalErrorRate": 0,
+          "bvhErrorRate": 0,
+          "hitRate": 0.6976706949869792,
+          "backgroundRate": 0,
+          "opticalPassRate": 0.6976707967122396,
+          "unsupportedRate": 0,
+          "transparencyLimitRate": 1.4580696353644876e-07,
+          "radianceInvalidRate": 0,
+          "reflectionOutsideRate": 0,
+          "sceneHitOfPassed": 0.9999998541930365,
+          "backgroundOfPassed": 0
+        }
+      }
+    ],
+    "visibility": [
+      {
+        "t": 40239,
+        "hidden": false,
+        "focused": true
+      }
+    ],
+    "foreground": true,
+    "dimensions": {
+      "width": 480,
+      "height": 320
+    },
+    "lens": "canon-fl-50mm-f1-8",
+    "optics": {
+      "fNumber": 1.86,
+      "focusDistanceM": null,
+      "imageDistanceMm": 33.825199999999995,
+      "focalLengthMm": 49.06159461340178,
+      "sensorMm": [
+        36,
+        24
+      ],
+      "dispersion": true,
+      "focusModel": "固定镜组 · 传感器轴向调焦",
+      "distanceReference": "物方第一面顶点",
+      "focusDistanceKnown": true
+    },
+    "batchSpp": 4,
+    "seed": 1,
+    "passed": true
+  },
+  "readyAt": 39229
+}

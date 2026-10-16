@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { pass, mrt, normalView, vec4, Fn, float, builtinAOContext, screenUV, uniform, convertToTexture } from 'three/tsl';
+import { pass, mrt, normalView, vec4, Fn, float, builtinAOContext, uniform } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';

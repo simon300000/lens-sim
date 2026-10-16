@@ -1,0 +1,197 @@
+{
+  "query": "?run=cleared-restart-1",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15",
+  "viewport": {
+    "width": 1324,
+    "height": 907,
+    "dpr": 2
+  },
+  "start": 604,
+  "finish": 47139,
+  "initializationMs": 46535,
+  "foreground": true,
+  "visibility": [
+    {
+      "t": 406,
+      "hidden": false,
+      "focused": false
+    },
+    {
+      "t": 478,
+      "hidden": false,
+      "focused": true
+    },
+    {
+      "t": 478,
+      "hidden": false,
+      "focused": true
+    }
+  ],
+  "errors": [],
+  "sceneErrors": [],
+  "counts": {
+    "createShaderModule": 798,
+    "createRenderPipeline": 771,
+    "getCompilationInfo": 6,
+    "createComputePipelineAsync": 6
+  },
+  "nodeBuildCalls": 0,
+  "nodeBuildUnionMs": 0,
+  "gpuSynchronousUnionMs": 21,
+  "api": [
+    {
+      "name": "createShaderModule",
+      "count": 798,
+      "syncMs": 3,
+      "asyncLatencySumMs": 3
+    },
+    {
+      "name": "createRenderPipeline",
+      "count": 771,
+      "syncMs": 17,
+      "asyncLatencySumMs": 17
+    },
+    {
+      "name": "getCompilationInfo",
+      "count": 6,
+      "syncMs": 1,
+      "asyncLatencySumMs": 21
+    },
+    {
+      "name": "createComputePipelineAsync",
+      "count": 6,
+      "syncMs": 0,
+      "asyncLatencySumMs": 16
+    }
+  ],
+  "stages": [
+    {
+      "name": "检测 GPU 与 HDR 画布支持",
+      "start": 604,
+      "durationMs": 11,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "铺设庭园，栽种花木",
+      "start": 615,
+      "durationMs": 327,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "初始化天空、日照与反射",
+      "start": 942,
+      "durationMs": 807,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "预编译夜景、月亮与灯光",
+      "start": 1749,
+      "durationMs": 22931,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 15
+    },
+    {
+      "name": "预编译晨光与阴影",
+      "start": 24680,
+      "durationMs": 129,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "预编译当前时刻的场景",
+      "start": 24809,
+      "durationMs": 446,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "提取场景几何，构建光追加速结构",
+      "start": 25255,
+      "durationMs": 78,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "编译真实镜组、光谱采样与自动对焦",
+      "start": 25333,
+      "durationMs": 6988,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 1
+    },
+    {
+      "name": "预热镜头成像与首帧显示",
+      "start": 32321,
+      "durationMs": 14818,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 5
+    }
+  ],
+  "gaps": [
+    {
+      "start": 1761,
+      "end": 24680,
+      "ms": 22919,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 15
+    },
+    {
+      "start": 32323,
+      "end": 47077,
+      "ms": 14754,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 5
+    },
+    {
+      "start": 25371,
+      "end": 32275,
+      "ms": 6904,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 1
+    },
+    {
+      "start": 945,
+      "end": 1761,
+      "ms": 816,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 24853,
+      "end": 25262,
+      "ms": 409,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 604,
+      "end": 945,
+      "ms": 341,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 24680,
+      "end": 24779,
+      "ms": 99,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    }
+  ]
+}

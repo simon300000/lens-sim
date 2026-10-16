@@ -1,0 +1,121 @@
+{
+  "kind": "startup-reuse-gpu",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15",
+  "errors": [],
+  "passed": true,
+  "normal": [
+    {
+      "view": 0,
+      "max": 0,
+      "different": 0,
+      "nonzero": 50292
+    },
+    {
+      "view": 1,
+      "max": 0,
+      "different": 0,
+      "nonzero": 53080
+    },
+    {
+      "view": 2,
+      "max": 0,
+      "different": 0,
+      "nonzero": 55731
+    }
+  ],
+  "reflection": [
+    {
+      "change": 0,
+      "max": 0,
+      "different": 0,
+      "nonzero": 996,
+      "status": {
+        "ok": true,
+        "errors": [],
+        "warnings": [
+          "未注册天空/日月环境：背景辐亮度为 0（仅诊断场景）"
+        ],
+        "lights": {
+          "directional": 1,
+          "point": 0,
+          "pointShadows": 0,
+          "hemisphere": 1
+        },
+        "environment": false,
+        "reflection": true
+      }
+    },
+    {
+      "change": 1,
+      "max": 0,
+      "different": 0,
+      "nonzero": 1077,
+      "status": {
+        "ok": true,
+        "errors": [],
+        "warnings": [
+          "未注册天空/日月环境：背景辐亮度为 0（仅诊断场景）"
+        ],
+        "lights": {
+          "directional": 1,
+          "point": 0,
+          "pointShadows": 0,
+          "hemisphere": 1
+        },
+        "environment": false,
+        "reflection": true
+      }
+    },
+    {
+      "change": 2,
+      "max": 0,
+      "different": 0,
+      "nonzero": 1120,
+      "status": {
+        "ok": true,
+        "errors": [],
+        "warnings": [
+          "未注册天空/日月环境：背景辐亮度为 0（仅诊断场景）"
+        ],
+        "lights": {
+          "directional": 1,
+          "point": 0,
+          "pointShadows": 0,
+          "hemisphere": 1
+        },
+        "environment": false,
+        "reflection": true
+      }
+    }
+  ],
+  "ao": [
+    {
+      "width": 192,
+      "height": 128,
+      "max": 0,
+      "different": 0,
+      "nonzero": 49152
+    },
+    {
+      "width": 240,
+      "height": 160,
+      "max": 0,
+      "different": 0,
+      "nonzero": 76800
+    },
+    {
+      "width": 144,
+      "height": 96,
+      "max": 0,
+      "different": 0,
+      "nonzero": 27648
+    }
+  ],
+  "pupil": {
+    "bins": 128,
+    "movingCenter": true,
+    "globalMix": 0.05,
+    "workerBuildMs": 719,
+    "bytewiseEqual": true
+  }
+}

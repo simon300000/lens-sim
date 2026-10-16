@@ -1,0 +1,990 @@
+{
+  "query": "?run=mac-final-original-order-2&bench=1",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15",
+  "viewport": {
+    "width": 1324,
+    "height": 907,
+    "dpr": 2
+  },
+  "start": 504,
+  "finish": 17140,
+  "initializationMs": 16636,
+  "foreground": true,
+  "visibility": [
+    {
+      "t": 132,
+      "hidden": false,
+      "focused": false
+    },
+    {
+      "t": 426,
+      "hidden": false,
+      "focused": true
+    },
+    {
+      "t": 426,
+      "hidden": false,
+      "focused": true
+    }
+  ],
+  "errors": [],
+  "sceneErrors": [],
+  "pupil": {
+    "bins": 128,
+    "globalMix": 0.05,
+    "movingCenter": true,
+    "precomputeMs": 792,
+    "deriveMs": 1,
+    "buildMs": 793,
+    "coldBuildMs": 793,
+    "physicalCacheHit": false,
+    "probes": 222172
+  },
+  "opticalInitializationMs": 19,
+  "counts": {
+    "createShaderModule": 565,
+    "createRenderPipeline": 527,
+    "getCompilationInfo": 6,
+    "createComputePipelineAsync": 6
+  },
+  "nodeBuildCalls": 625,
+  "nodeBuildUnionMs": 12085,
+  "gpuSynchronousUnionMs": 14,
+  "api": [
+    {
+      "name": "createShaderModule",
+      "count": 565,
+      "syncMs": 2,
+      "asyncLatencySumMs": 2
+    },
+    {
+      "name": "createRenderPipeline",
+      "count": 527,
+      "syncMs": 12,
+      "asyncLatencySumMs": 12
+    },
+    {
+      "name": "getCompilationInfo",
+      "count": 6,
+      "syncMs": 0,
+      "asyncLatencySumMs": 84
+    },
+    {
+      "name": "createComputePipelineAsync",
+      "count": 6,
+      "syncMs": 0,
+      "asyncLatencySumMs": 108
+    }
+  ],
+  "warmup": [
+    {
+      "rounds": 230,
+      "variants": 1256,
+      "wallMs": 14558,
+      "finalSubmitMs": 35,
+      "finalStartMs": 15449,
+      "finalEndMs": 15484,
+      "finalNodeCacheDelta": 0,
+      "finalPipelineCacheDelta": 0,
+      "finalNodeBuildCalls": 0,
+      "finalPipelineCreates": 0
+    },
+    {
+      "rounds": 1,
+      "variants": 1250,
+      "wallMs": 47,
+      "finalSubmitMs": 19,
+      "finalStartMs": 15543,
+      "finalEndMs": 15562,
+      "finalNodeCacheDelta": 0,
+      "finalPipelineCacheDelta": 0,
+      "finalNodeBuildCalls": 0,
+      "finalPipelineCreates": 0
+    },
+    {
+      "rounds": 2,
+      "variants": 1250,
+      "wallMs": 109,
+      "finalSubmitMs": 20,
+      "finalStartMs": 15679,
+      "finalEndMs": 15699,
+      "finalNodeCacheDelta": 0,
+      "finalPipelineCacheDelta": 0,
+      "finalNodeBuildCalls": 0,
+      "finalPipelineCreates": 0
+    }
+  ],
+  "stages": [
+    {
+      "name": "检测 GPU 与 HDR 画布支持",
+      "start": 504,
+      "durationMs": 6,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "铺设庭园，栽种花木",
+      "start": 510,
+      "durationMs": 348,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "初始化天空、日照与反射",
+      "start": 858,
+      "durationMs": 58,
+      "nodeBuildMs": 28,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "预编译夜景、月亮与灯光",
+      "start": 916,
+      "durationMs": 14593,
+      "nodeBuildMs": 11834,
+      "gpuSyncMs": 13
+    },
+    {
+      "name": "预编译晨光与阴影",
+      "start": 15509,
+      "durationMs": 75,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "预编译当前时刻的场景",
+      "start": 15584,
+      "durationMs": 140,
+      "nodeBuildMs": 28,
+      "gpuSyncMs": 1
+    },
+    {
+      "name": "提取场景几何，构建光追加速结构",
+      "start": 15724,
+      "durationMs": 63,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "编译真实镜组、光谱采样与自动对焦",
+      "start": 15787,
+      "durationMs": 1076,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "预热镜头成像与首帧显示",
+      "start": 16863,
+      "durationMs": 277,
+      "nodeBuildMs": 195,
+      "gpuSyncMs": 0
+    }
+  ],
+  "gaps": [
+    {
+      "start": 504,
+      "end": 859,
+      "ms": 355,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 11096,
+      "end": 11371,
+      "ms": 275,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 50,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 16849,
+      "end": 17116,
+      "ms": 267,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 195,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 1278,
+      "end": 1536,
+      "ms": 258,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 188,
+      "gpuSyncMs": 2
+    },
+    {
+      "start": 3720,
+      "end": 3943,
+      "ms": 223,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 51,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 8194,
+      "end": 8344,
+      "ms": 150,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 130,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 7928,
+      "end": 8071,
+      "ms": 143,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 129,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 919,
+      "end": 1056,
+      "ms": 137,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 38,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 7673,
+      "end": 7790,
+      "ms": 117,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 111,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 14148,
+      "end": 14263,
+      "ms": 115,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 51,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 13017,
+      "end": 13127,
+      "ms": 110,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 49,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 15326,
+      "end": 15435,
+      "ms": 109,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 34,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 10290,
+      "end": 10395,
+      "ms": 105,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 49,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 11946,
+      "end": 12050,
+      "ms": 104,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 49,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 9444,
+      "end": 9546,
+      "ms": 102,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 50,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 6518,
+      "end": 6617,
+      "ms": 99,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 93,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 8549,
+      "end": 8648,
+      "ms": 99,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 49,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 15227,
+      "end": 15326,
+      "ms": 99,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 92,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 5771,
+      "end": 5867,
+      "ms": 96,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 90,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 6867,
+      "end": 6963,
+      "ms": 96,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 90,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 5624,
+      "end": 5719,
+      "ms": 95,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 91,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 6176,
+      "end": 6271,
+      "ms": 95,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 90,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 6719,
+      "end": 6814,
+      "ms": 95,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 90,
+      "gpuSyncMs": 1
+    },
+    {
+      "start": 6271,
+      "end": 6365,
+      "ms": 94,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 90,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 1953,
+      "end": 2046,
+      "ms": 93,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 82,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 8648,
+      "end": 8741,
+      "ms": 93,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 77,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 1861,
+      "end": 1953,
+      "ms": 92,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 87,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 15136,
+      "end": 15227,
+      "ms": 91,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 85,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 8401,
+      "end": 8491,
+      "ms": 90,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 74,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 14707,
+      "end": 14797,
+      "ms": 90,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 80,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 14562,
+      "end": 14649,
+      "ms": 87,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 79,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 14931,
+      "end": 15016,
+      "ms": 85,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 77,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 1588,
+      "end": 1671,
+      "ms": 83,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 64,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 7014,
+      "end": 7097,
+      "ms": 83,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 76,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 14850,
+      "end": 14931,
+      "ms": 81,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 75,
+      "gpuSyncMs": 0
+    }
+  ],
+  "sourceCommit": "0ce4185",
+  "renderBenchmark": {
+    "rows": [
+      {
+        "trial": 0,
+        "wallMs": 3017,
+        "spp": 256,
+        "attempts": 39321600,
+        "attemptedPerSecond": 13033344.381836262,
+        "gpuTimestampMs": [
+          28.816458,
+          32.236542,
+          17.958833,
+          20.260042,
+          21.146708,
+          34.414292,
+          24.603833,
+          36.53925,
+          16.405,
+          39.223833,
+          23.713292,
+          30.7245,
+          25.512042,
+          33.623375,
+          18.380792,
+          37.311208,
+          22.675625,
+          28.793792,
+          46.233375,
+          25.419708,
+          28.397834,
+          15.657208,
+          27.150875,
+          14.065542,
+          24.957292,
+          28.143,
+          38.085916,
+          40.11975,
+          42.492334,
+          36.738917,
+          27.755667,
+          35.656416,
+          21.335625,
+          36.457125,
+          15.9825,
+          32.801542,
+          20.52625
+        ],
+        "stats": {
+          "attemptedSamples": 39321600,
+          "opticalBlockedRate": 0.3024267323811849,
+          "tirRate": 1.0782877604166667e-05,
+          "numericalErrorRate": 0,
+          "bvhErrorRate": 0,
+          "hitRate": 0.6975623575846354,
+          "backgroundRate": 0,
+          "opticalPassRate": 0.6975624593098958,
+          "unsupportedRate": 0,
+          "transparencyLimitRate": 2.1874441290312043e-07,
+          "radianceInvalidRate": 0,
+          "reflectionOutsideRate": 0,
+          "sceneHitOfPassed": 0.9999998541703914,
+          "backgroundOfPassed": 0
+        },
+        "pixelAccumSHA256": "6beadb2b6856493089f689f20abdd5ab600ad3505b909073372839663d05052c"
+      },
+      {
+        "trial": 1,
+        "wallMs": 3292,
+        "spp": 256,
+        "attempts": 39321600,
+        "attemptedPerSecond": 11944592.952612394,
+        "gpuTimestampMs": [
+          21.897916,
+          46.088,
+          42.804375,
+          32.413416,
+          37.529625,
+          15.735042,
+          44.341,
+          16.983792,
+          26.696292,
+          17.223875,
+          43.597166,
+          30.333167,
+          30.934,
+          19.493208,
+          32.525208,
+          25.024458,
+          44.8195,
+          18.107333,
+          23.932167,
+          21.900708,
+          29.463667,
+          12.000542,
+          37.985458,
+          27.755459,
+          33.656208,
+          27.058667,
+          36.393291,
+          21.931833,
+          30.883042,
+          25.044583,
+          35.50525,
+          12.241625,
+          32.37125,
+          19.606459,
+          24.532417,
+          19.991583,
+          50.471875,
+          27.567417,
+          28.848292
+        ],
+        "stats": {
+          "attemptedSamples": 39321600,
+          "opticalBlockedRate": 0.3024267323811849,
+          "tirRate": 1.0782877604166667e-05,
+          "numericalErrorRate": 0,
+          "bvhErrorRate": 0,
+          "hitRate": 0.6975623575846354,
+          "backgroundRate": 0,
+          "opticalPassRate": 0.6975624593098958,
+          "unsupportedRate": 0,
+          "transparencyLimitRate": 2.1874441290312043e-07,
+          "radianceInvalidRate": 0,
+          "reflectionOutsideRate": 0,
+          "sceneHitOfPassed": 0.9999998541703914,
+          "backgroundOfPassed": 0
+        },
+        "pixelAccumSHA256": "6beadb2b6856493089f689f20abdd5ab600ad3505b909073372839663d05052c"
+      },
+      {
+        "trial": 2,
+        "wallMs": 3035,
+        "spp": 256,
+        "attempts": 39321600,
+        "attemptedPerSecond": 12956046.128500823,
+        "gpuTimestampMs": [
+          17.016375,
+          33.446666,
+          23.732875,
+          44.516709,
+          49.608084,
+          21.611541,
+          22.011416,
+          13.587167,
+          21.077667,
+          31.123208,
+          19.922083,
+          34.331917,
+          23.453333,
+          32.508167,
+          40.022708,
+          48.934375,
+          42.896708,
+          27.475125,
+          31.93075,
+          15.839875,
+          38.977584,
+          41.482917,
+          19.157875,
+          30.490209,
+          20.506709,
+          23.9325,
+          43.713834,
+          37.769,
+          15.500167,
+          30.726083,
+          30.981084,
+          24.9375,
+          41.977584,
+          19.327666,
+          16.985584,
+          34.991166,
+          36.603625,
+          16.584667
+        ],
+        "stats": {
+          "attemptedSamples": 39321600,
+          "opticalBlockedRate": 0.3024267323811849,
+          "tirRate": 1.0782877604166667e-05,
+          "numericalErrorRate": 0,
+          "bvhErrorRate": 0,
+          "hitRate": 0.6975623575846354,
+          "backgroundRate": 0,
+          "opticalPassRate": 0.6975624593098958,
+          "unsupportedRate": 0,
+          "transparencyLimitRate": 2.1874441290312043e-07,
+          "radianceInvalidRate": 0,
+          "reflectionOutsideRate": 0,
+          "sceneHitOfPassed": 0.9999998541703914,
+          "backgroundOfPassed": 0
+        },
+        "pixelAccumSHA256": "6beadb2b6856493089f689f20abdd5ab600ad3505b909073372839663d05052c"
+      }
+    ],
+    "kernel": [
+      {
+        "trial": 0,
+        "batches": [
+          {
+            "wallMs": 47,
+            "gpuMs": 41.016958
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 49.77325
+          },
+          {
+            "wallMs": 48,
+            "gpuMs": 46.506958
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 47.370875
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 50.07925
+          },
+          {
+            "wallMs": 48,
+            "gpuMs": 44.066667
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 47.51375
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 49.008375
+          },
+          {
+            "wallMs": 47,
+            "gpuMs": 45.94
+          },
+          {
+            "wallMs": 50,
+            "gpuMs": 48.764083
+          },
+          {
+            "wallMs": 45,
+            "gpuMs": 44.345292
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 42.737625
+          },
+          {
+            "wallMs": 47,
+            "gpuMs": 45.827417
+          },
+          {
+            "wallMs": 47,
+            "gpuMs": 42.626542
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 43.736459
+          },
+          {
+            "wallMs": 45,
+            "gpuMs": 45.194375
+          }
+        ],
+        "spp": 64,
+        "pixelAccumSHA256": "fbc400703e7d97efb444e3ee355549e4a154ea370f0a8ace3f192709451e7765",
+        "stats": {
+          "attemptedSamples": 9830400,
+          "opticalBlockedRate": 0.30231852213541666,
+          "tirRate": 1.068115234375e-05,
+          "numericalErrorRate": 0,
+          "bvhErrorRate": 0,
+          "hitRate": 0.6976706949869792,
+          "backgroundRate": 0,
+          "opticalPassRate": 0.6976707967122396,
+          "unsupportedRate": 0,
+          "transparencyLimitRate": 1.4580696353644876e-07,
+          "radianceInvalidRate": 0,
+          "reflectionOutsideRate": 0,
+          "sceneHitOfPassed": 0.9999998541930365,
+          "backgroundOfPassed": 0
+        }
+      },
+      {
+        "trial": 1,
+        "batches": [
+          {
+            "wallMs": 47,
+            "gpuMs": 46.665
+          },
+          {
+            "wallMs": 46,
+            "gpuMs": 39.724167
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 50.625333
+          },
+          {
+            "wallMs": 48,
+            "gpuMs": 47.245542
+          },
+          {
+            "wallMs": 52,
+            "gpuMs": 51.105375
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 50.141792
+          },
+          {
+            "wallMs": 48,
+            "gpuMs": 45.90125
+          },
+          {
+            "wallMs": 47,
+            "gpuMs": 46.278625
+          },
+          {
+            "wallMs": 46,
+            "gpuMs": 45.743667
+          },
+          {
+            "wallMs": 55,
+            "gpuMs": 54.09175
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 50.697542
+          },
+          {
+            "wallMs": 53,
+            "gpuMs": 52.030209
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 50.232208
+          },
+          {
+            "wallMs": 47,
+            "gpuMs": 45.830834
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 48.605042
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 48.083084
+          }
+        ],
+        "spp": 64,
+        "pixelAccumSHA256": "fbc400703e7d97efb444e3ee355549e4a154ea370f0a8ace3f192709451e7765",
+        "stats": {
+          "attemptedSamples": 9830400,
+          "opticalBlockedRate": 0.30231852213541666,
+          "tirRate": 1.068115234375e-05,
+          "numericalErrorRate": 0,
+          "bvhErrorRate": 0,
+          "hitRate": 0.6976706949869792,
+          "backgroundRate": 0,
+          "opticalPassRate": 0.6976707967122396,
+          "unsupportedRate": 0,
+          "transparencyLimitRate": 1.4580696353644876e-07,
+          "radianceInvalidRate": 0,
+          "reflectionOutsideRate": 0,
+          "sceneHitOfPassed": 0.9999998541930365,
+          "backgroundOfPassed": 0
+        }
+      },
+      {
+        "trial": 2,
+        "batches": [
+          {
+            "wallMs": 52,
+            "gpuMs": 51.334291
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 46.859083
+          },
+          {
+            "wallMs": 54,
+            "gpuMs": 47.15525
+          },
+          {
+            "wallMs": 50,
+            "gpuMs": 48.391458
+          },
+          {
+            "wallMs": 48,
+            "gpuMs": 46.363583
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 50.433125
+          },
+          {
+            "wallMs": 49,
+            "gpuMs": 48.376
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 50.627584
+          },
+          {
+            "wallMs": 44,
+            "gpuMs": 39.096916
+          },
+          {
+            "wallMs": 50,
+            "gpuMs": 49.612916
+          },
+          {
+            "wallMs": 54,
+            "gpuMs": 53.414041
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 48.655875
+          },
+          {
+            "wallMs": 50,
+            "gpuMs": 49.214833
+          },
+          {
+            "wallMs": 46,
+            "gpuMs": 44.8925
+          },
+          {
+            "wallMs": 45,
+            "gpuMs": 44.229167
+          },
+          {
+            "wallMs": 51,
+            "gpuMs": 49.807917
+          }
+        ],
+        "spp": 64,
+        "pixelAccumSHA256": "fbc400703e7d97efb444e3ee355549e4a154ea370f0a8ace3f192709451e7765",
+        "stats": {
+          "attemptedSamples": 9830400,
+          "opticalBlockedRate": 0.30231852213541666,
+          "tirRate": 1.068115234375e-05,
+          "numericalErrorRate": 0,
+          "bvhErrorRate": 0,
+          "hitRate": 0.6976706949869792,
+          "backgroundRate": 0,
+          "opticalPassRate": 0.6976707967122396,
+          "unsupportedRate": 0,
+          "transparencyLimitRate": 1.4580696353644876e-07,
+          "radianceInvalidRate": 0,
+          "reflectionOutsideRate": 0,
+          "sceneHitOfPassed": 0.9999998541930365,
+          "backgroundOfPassed": 0
+        }
+      }
+    ],
+    "visibility": [
+      {
+        "t": 18148,
+        "hidden": false,
+        "focused": true
+      }
+    ],
+    "foreground": true,
+    "dimensions": {
+      "width": 480,
+      "height": 320
+    },
+    "lens": "canon-fl-50mm-f1-8",
+    "optics": {
+      "fNumber": 1.86,
+      "focusDistanceM": null,
+      "imageDistanceMm": 33.825199999999995,
+      "focalLengthMm": 49.06159461340178,
+      "sensorMm": [
+        36,
+        24
+      ],
+      "dispersion": true,
+      "focusModel": "固定镜组 · 传感器轴向调焦",
+      "distanceReference": "物方第一面顶点",
+      "focusDistanceKnown": true
+    },
+    "batchSpp": 4,
+    "seed": 1,
+    "passed": true
+  },
+  "readyAt": 17140
+}

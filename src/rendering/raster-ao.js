@@ -11,6 +11,7 @@ export function createRasterAO(renderer,denoised){
   const target=new THREE.RenderTarget(1,1,{type:THREE.HalfFloatType,depthBuffer:false});
   target.texture.name='AO dependency preparation';
   return {
+    texture:result.value,
     sample:texture(result.value,screenUV).r,
     prepare(){
       const previous=renderer.getRenderTarget(),mrt=renderer.getMRT();

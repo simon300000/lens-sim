@@ -1,4 +1,5 @@
-// Opt-in full-application startup probe. No changes to production execution order.
+// Opt-in production initialization probe; boot preloads Three to instrument it.
+// Application rendering order is unchanged; module loading is separate.
 (()=>{
  const events=[],gaps=[],visibility=[],errors=[],sources=new Map(),moduleIds=new WeakMap();let stopped=false,last=performance.now();
  const profile=window.__startupProfile={events,gaps,visibility,errors,started:last,userAgent:navigator.userAgent,query:location.search};
@@ -46,6 +47,10 @@
  async function finish(){if(stopped)return;stopped=true;clearInterval(heartbeat);observer.disconnect();profile.finished=performance.now();profile.scene=window.__SANTEI__?.diagnostics;profile.viewport={width:innerWidth,height:innerHeight,dpr:devicePixelRatio};profile.state=state();
   const table=window.__SANTEI__?.hybrid?.engine?.pupilTable;
   profile.pupil=table?Object.fromEntries(['bins','globalMix','movingCenter','precomputeMs','deriveMs','buildMs','coldBuildMs','physicalCacheHit','probes'].map(k=>[k,table[k]])):null;
+  profile.sceneBuild=window.__SANTEI__?.hybrid?.sceneResources?.stats;
+  const info=window.__SANTEI__?.renderer?.backend?.adapter?.info,hdr=profile.scene?.hdr;
+  profile.environment={adapter:info?{vendor:info.vendor,architecture:info.architecture,device:info.device,description:info.description}:null,
+    hdr:{supported:hdr?.canvasSupported,format:hdr?.canvasConfiguration?.format,toneMapping:hdr?.canvasConfiguration?.toneMapping?.mode}};
   profile.opticalInitializationMs=window.__SANTEI__?.hybrid?.engine?.initializationMs;
   profile.sources=[...sources.values()];
   const report={...profile,wrap:undefined,scene:{ready:profile.scene?.ready,initializationWallMs:profile.scene?.initializationWallMs,errors:profile.scene?.errors,meshes:profile.scene?.meshes,triangles:profile.scene?.triangles,warmup:profile.scene?.warmup}};

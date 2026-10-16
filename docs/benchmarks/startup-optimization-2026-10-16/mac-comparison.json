@@ -1,0 +1,125 @@
+{
+  "environment": {
+    "hardware": "Apple M2 Pro",
+    "os": "macOS 27.0.1",
+    "browser": "Safari Technology Preview 27.0 / 22627.1.2.1",
+    "viewport": [
+      1324,
+      907,
+      2
+    ],
+    "renderPixelRatioCap": 1.5,
+    "cachePolicy": "same STP process, repeated navigation; OS/driver cache not cleared between accepted A/B runs"
+  },
+  "baselineCommit": "fddd6ff (production 5bb9e04)",
+  "candidateCommit": "0ce4185",
+  "baseline": {
+    "startupRuns": 3,
+    "applicationTrials": 9,
+    "foreground": true,
+    "startupMs": [
+      33209,
+      34784,
+      38850
+    ],
+    "startupMeanMs": 35614.333333333336,
+    "nodeBuildMs": [
+      29549,
+      29205,
+      31386
+    ],
+    "nodeBuildMeanMs": 30046.666666666668,
+    "nodeBuildCalls": 970,
+    "pipelineCounts": {
+      "createShaderModule": 798,
+      "createRenderPipeline": 771,
+      "getCompilationInfo": 6,
+      "createComputePipelineAsync": 6
+    },
+    "maxMainThreadGapsMs": [
+      18455,
+      17518,
+      18824
+    ],
+    "applicationMs": [
+      5256,
+      4648,
+      4512,
+      4825,
+      4603,
+      4592,
+      4450,
+      4481,
+      4531
+    ],
+    "applicationMeanMs": 4655.333333333333,
+    "applicationMedianMs": 4592,
+    "applicationHashes": [
+      "6beadb2b6856493089f689f20abdd5ab600ad3505b909073372839663d05052c"
+    ],
+    "kernelBatches": 48,
+    "kernelWallMeanMs": 49.5625,
+    "kernelWallMedianMs": 49.5,
+    "kernelGpuMeanMs": 47.94992014583333,
+    "kernelGpuMedianMs": 48.221979000000005,
+    "kernelHashes": [
+      "fbc400703e7d97efb444e3ee355549e4a154ea370f0a8ace3f192709451e7765"
+    ],
+    "errors": []
+  },
+  "final": {
+    "startupRuns": 2,
+    "applicationTrials": 6,
+    "foreground": true,
+    "startupMs": [
+      16809,
+      16636
+    ],
+    "startupMeanMs": 16722.5,
+    "nodeBuildMs": [
+      12060,
+      12085
+    ],
+    "nodeBuildMeanMs": 12072.5,
+    "nodeBuildCalls": 625,
+    "pipelineCounts": {
+      "createShaderModule": 565,
+      "createRenderPipeline": 527,
+      "getCompilationInfo": 6,
+      "createComputePipelineAsync": 6
+    },
+    "maxMainThreadGapsMs": [
+      346,
+      355
+    ],
+    "applicationMs": [
+      3103,
+      3074,
+      3019,
+      3017,
+      3292,
+      3035
+    ],
+    "applicationMeanMs": 3090,
+    "applicationMedianMs": 3054.5,
+    "applicationHashes": [
+      "6beadb2b6856493089f689f20abdd5ab600ad3505b909073372839663d05052c"
+    ],
+    "kernelBatches": 96,
+    "kernelWallMeanMs": 49.53125,
+    "kernelWallMedianMs": 49.0,
+    "kernelGpuMeanMs": 47.791107187499996,
+    "kernelGpuMedianMs": 48.0590835,
+    "kernelHashes": [
+      "fbc400703e7d97efb444e3ee355549e4a154ea370f0a8ace3f192709451e7765"
+    ],
+    "errors": []
+  },
+  "comparison": {
+    "startupReductionPercent": 53.045590258603745,
+    "applicationThroughputRatio": 1.5065803667745414,
+    "applicationAllHashesEqual": true,
+    "kernelAllHashesEqual": true,
+    "renderPipelinesReductionPercent": 31.647211413748376
+  }
+}

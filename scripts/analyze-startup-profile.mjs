@@ -1,5 +1,7 @@
 import {readFileSync} from 'node:fs';
-const report=JSON.parse(readFileSync(process.argv[2],'utf8'));
+import {gunzipSync} from 'node:zlib';
+const input=readFileSync(process.argv[2]);
+const report=JSON.parse(process.argv[2].endsWith('.gz')?gunzipSync(input):input);
 const events=report.events;
 function union(spans,start=-Infinity,end=Infinity){
  const intervals=spans.map(e=>[Math.max(start,e.start),Math.min(end,e.end??e.start)]).filter(([a,b])=>b>a).sort((a,b)=>a[0]-b[0]);

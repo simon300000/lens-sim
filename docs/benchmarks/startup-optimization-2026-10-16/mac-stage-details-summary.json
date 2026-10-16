@@ -1,0 +1,603 @@
+{
+  "query": "?run=mac-final-stage-details",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15",
+  "viewport": {
+    "width": 1324,
+    "height": 907,
+    "dpr": 2
+  },
+  "start": 290,
+  "finish": 17111,
+  "initializationMs": 16821,
+  "foreground": true,
+  "visibility": [
+    {
+      "t": 145,
+      "hidden": false,
+      "focused": false
+    },
+    {
+      "t": 199,
+      "hidden": false,
+      "focused": true
+    },
+    {
+      "t": 199,
+      "hidden": false,
+      "focused": true
+    }
+  ],
+  "errors": [],
+  "sceneErrors": [],
+  "pupil": {
+    "bins": 128,
+    "globalMix": 0.05,
+    "movingCenter": true,
+    "precomputeMs": 724,
+    "deriveMs": 0,
+    "buildMs": 725,
+    "coldBuildMs": 724,
+    "physicalCacheHit": false,
+    "probes": 222172
+  },
+  "opticalInitializationMs": 33,
+  "counts": {
+    "createShaderModule": 565,
+    "createRenderPipeline": 527,
+    "getCompilationInfo": 6,
+    "createComputePipelineAsync": 6
+  },
+  "nodeBuildCalls": 625,
+  "nodeBuildUnionMs": 12078,
+  "gpuSynchronousUnionMs": 14,
+  "api": [
+    {
+      "name": "createShaderModule",
+      "count": 565,
+      "syncMs": 4,
+      "asyncLatencySumMs": 4
+    },
+    {
+      "name": "createRenderPipeline",
+      "count": 527,
+      "syncMs": 10,
+      "asyncLatencySumMs": 10
+    },
+    {
+      "name": "getCompilationInfo",
+      "count": 6,
+      "syncMs": 0,
+      "asyncLatencySumMs": 169
+    },
+    {
+      "name": "createComputePipelineAsync",
+      "count": 6,
+      "syncMs": 0,
+      "asyncLatencySumMs": 186
+    }
+  ],
+  "warmup": [
+    {
+      "rounds": 230,
+      "variants": 1256,
+      "wallMs": 14383,
+      "finalSubmitMs": 55,
+      "finalStartMs": 15054,
+      "finalEndMs": 15109,
+      "finalNodeCacheDelta": 0,
+      "finalPipelineCacheDelta": 0,
+      "finalNodeBuildCalls": 0,
+      "finalPipelineCreates": 0
+    },
+    {
+      "rounds": 1,
+      "variants": 1250,
+      "wallMs": 82,
+      "finalSubmitMs": 26,
+      "finalStartMs": 15253,
+      "finalEndMs": 15279,
+      "finalNodeCacheDelta": 0,
+      "finalPipelineCacheDelta": 0,
+      "finalNodeBuildCalls": 0,
+      "finalPipelineCreates": 0
+    },
+    {
+      "rounds": 2,
+      "variants": 1250,
+      "wallMs": 158,
+      "finalSubmitMs": 24,
+      "finalStartMs": 15443,
+      "finalEndMs": 15467,
+      "finalNodeCacheDelta": 0,
+      "finalPipelineCacheDelta": 0,
+      "finalNodeBuildCalls": 0,
+      "finalPipelineCreates": 0
+    }
+  ],
+  "stages": [
+    {
+      "name": "检测 GPU 与 HDR 画布支持",
+      "start": 290,
+      "durationMs": 7,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "铺设庭园，栽种花木",
+      "start": 297,
+      "durationMs": 359,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "初始化天空、日照与反射",
+      "start": 656,
+      "durationMs": 65,
+      "nodeBuildMs": 26,
+      "gpuSyncMs": 2
+    },
+    {
+      "name": "预编译夜景、月亮与灯光",
+      "start": 721,
+      "durationMs": 14421,
+      "nodeBuildMs": 11800,
+      "gpuSyncMs": 11
+    },
+    {
+      "name": "预编译晨光与阴影",
+      "start": 15142,
+      "durationMs": 163,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "预编译当前时刻的场景",
+      "start": 15305,
+      "durationMs": 190,
+      "nodeBuildMs": 48,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "提取场景几何，构建光追加速结构",
+      "start": 15495,
+      "durationMs": 241,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "编译真实镜组、光谱采样与自动对焦",
+      "start": 15736,
+      "durationMs": 1017,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "name": "预热镜头成像与首帧显示",
+      "start": 16753,
+      "durationMs": 358,
+      "nodeBuildMs": 204,
+      "gpuSyncMs": 1
+    }
+  ],
+  "gaps": [
+    {
+      "start": 290,
+      "end": 658,
+      "ms": 368,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 16737,
+      "end": 17061,
+      "ms": 324,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 204,
+      "gpuSyncMs": 1
+    },
+    {
+      "start": 15486,
+      "end": 15736,
+      "ms": 250,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 1120,
+      "end": 1330,
+      "ms": 210,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 142,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 11077,
+      "end": 11242,
+      "ms": 165,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 50,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 7720,
+      "end": 7875,
+      "ms": 155,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 124,
+      "gpuSyncMs": 1
+    },
+    {
+      "start": 7992,
+      "end": 8145,
+      "ms": 153,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 136,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 723,
+      "end": 869,
+      "ms": 146,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 34,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 6852,
+      "end": 6969,
+      "ms": 117,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 48,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 3289,
+      "end": 3403,
+      "ms": 114,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 105,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 14869,
+      "end": 14975,
+      "ms": 106,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 97,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 15300,
+      "end": 15404,
+      "ms": 104,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 48,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 10417,
+      "end": 10514,
+      "ms": 97,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 91,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 3193,
+      "end": 3289,
+      "ms": 96,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 91,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 5139,
+      "end": 5235,
+      "ms": 96,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 90,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 5726,
+      "end": 5822,
+      "ms": 96,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 91,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 2991,
+      "end": 3086,
+      "ms": 95,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 90,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 14373,
+      "end": 14468,
+      "ms": 95,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 49,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 14774,
+      "end": 14869,
+      "ms": 95,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 90,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 2716,
+      "end": 2810,
+      "ms": 94,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 88,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 14468,
+      "end": 14562,
+      "ms": 94,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 78,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 4115,
+      "end": 4208,
+      "ms": 93,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 48,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 6764,
+      "end": 6852,
+      "ms": 88,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 82,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 13449,
+      "end": 13537,
+      "ms": 88,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 48,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 14146,
+      "end": 14234,
+      "ms": 88,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 76,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 1709,
+      "end": 1796,
+      "ms": 87,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 76,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 8204,
+      "end": 8291,
+      "ms": 87,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 76,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 14562,
+      "end": 14648,
+      "ms": 86,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 78,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 12588,
+      "end": 12673,
+      "ms": 85,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 49,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 15026,
+      "end": 15111,
+      "ms": 85,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 0,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 1036,
+      "end": 1120,
+      "ms": 84,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 51,
+      "gpuSyncMs": 1
+    },
+    {
+      "start": 8347,
+      "end": 8430,
+      "ms": 83,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 75,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 10563,
+      "end": 10646,
+      "ms": 83,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 49,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 8481,
+      "end": 8563,
+      "ms": 82,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 49,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 9801,
+      "end": 9882,
+      "ms": 81,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 49,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 11790,
+      "end": 11871,
+      "ms": 81,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 49,
+      "gpuSyncMs": 0
+    },
+    {
+      "start": 14292,
+      "end": 14373,
+      "ms": 81,
+      "hidden": false,
+      "focused": true,
+      "nodeBuildMs": 75,
+      "gpuSyncMs": 0
+    }
+  ],
+  "sceneBuild": {
+    "nodes": 588546,
+    "tlasNodes": 528155,
+    "blasNodes": 60391,
+    "triangles": 103879,
+    "vertices": 66609,
+    "instances": 264078,
+    "tlasDepth": 29,
+    "maxBlasDepth": 16,
+    "stackBound": 45,
+    "tlasLargestLeaf": 1,
+    "bytes": {
+      "nodes": 18833472,
+      "triangles": 6648256,
+      "vertices": 3197232,
+      "instances": 33801984
+    },
+    "timing": {
+      "blasMs": 121,
+      "tlasMs": 679,
+      "packMs": 71,
+      "totalMs": 879,
+      "blasRebuilt": 279,
+      "blasReused": 0,
+      "expandMs": 110
+    },
+    "report": {
+      "meshes": 443,
+      "instances": 264078,
+      "expandedTriangles": 3399513,
+      "environment": [
+        {
+          "name": "Procedural atmosphere",
+          "role": "environment-sky"
+        },
+        {
+          "name": "Procedural night stars",
+          "role": "environment-stars"
+        },
+        {
+          "name": "Moon with true illuminated limb",
+          "role": "environment-moon"
+        }
+      ],
+      "excluded": [],
+      "degenerate": 0,
+      "unsupported": [],
+      "negativeDeterminant": 0,
+      "nonIndexed": 53,
+      "multiMaterial": 0,
+      "vertexColorMeshes": 19,
+      "instanceColorMeshes": 33,
+      "sides": [
+        174180,
+        0,
+        89898
+      ],
+      "blas": 279,
+      "uniqueTriangles": 103879,
+      "materials": 127,
+      "extractMs": 22
+    },
+    "reason": "initial",
+    "worker": true,
+    "extractMs": 22,
+    "buildWallMs": 1219,
+    "uploadSubmitMs": 25,
+    "gpuBytes": 62535040,
+    "counters": {
+      "fullBuilds": 1,
+      "tlasRebuilds": 0,
+      "blasBuilt": 279,
+      "blasReused": 0,
+      "materialUploads": 1
+    }
+  },
+  "environment": {
+    "adapter": null,
+    "hdr": {
+      "supported": true,
+      "format": "rgba16float",
+      "toneMapping": "extended"
+    }
+  },
+  "readyAt": 17111,
+  "sourceCommit": "0ce4185 + diagnostic metadata/getter only"
+}

@@ -1,5 +1,8 @@
 import * as THREE from 'three/webgpu';
-import {pass,mrt,normalView,vec4,builtinAOContext,Fn,float} from 'three/tsl';
+import {pass,mrt,normalView,vec4,builtinAOContext,Fn,float,convertToTexture,screenUV} from 'three/tsl';
+import {ao} from 'three/addons/tsl/display/GTAONode.js';
+import {denoise} from 'three/addons/tsl/display/DenoiseNode.js';
+import {createRasterAO} from '../src/rendering/raster-ao.js';
 import {woodMat} from '../src/kit.js';
 import {applyWaterSurface} from '../src/scene/procedural-materials.js';
 import {installNormalPassReuse} from '../src/rendering/pass-reuse.js';
@@ -8,7 +11,7 @@ import {createLightingResources} from '../src/rendering/lighting-resources.js';
 import {createPupilPrecomputer} from '../src/optics/pupil-precompute.js';
 import {buildPupilTable} from '../src/optics/pupil-sampling.js';
 import {packLens} from '../src/optics/lens-state.js';
-const report={kind:'startup-reuse-gpu',userAgent:navigator.userAgent,errors:[],passed:false,normal:[],reflection:[]};
+const report={kind:'startup-reuse-gpu',userAgent:navigator.userAgent,errors:[],passed:false,normal:[],reflection:[],ao:[]};
 let renderer,interop,reuse,lighting,precomputer;const check=(ok,text)=>{if(!ok)throw Error(text);};
 function compare(a,b){check(a.length===b.length,'Image dimensions changed');let max=0,different=0,nonzero=0;for(let i=0;i<a.length;i++){check(Number.isFinite(a[i]+b[i]),'Nonfinite pixel');const d=Math.abs(a[i]-b[i]);max=Math.max(max,d);if(d>0)different++;if(Math.abs(a[i])>.001)nonzero++;}return {max,different,nonzero};}
 try{
@@ -30,6 +33,17 @@ try{
   const diff=compare(a,b);report.normal.push({view,...diff});check(diff.max===0&&diff.nonzero>1000,'Wood/water normal prepass changed');
  }
  reuse.dispose();reuse=null;
+ const ambient=ao(old.getTextureNode('depth'),old.getTextureNode('output'),camera);ambient.resolutionScale=.5;ambient.radius.value=.45;ambient.thickness.value=.8;ambient.samples.value=8;
+ const denoised=denoise(ambient.getTextureNode(),old.getTextureNode('depth'),old.getTextureNode('output'),camera);
+ const legacyAO=convertToTexture(denoised),legacyAOPipeline=new THREE.RenderPipeline(renderer);legacyAOPipeline.outputNode=vec4(legacyAO.sample(screenUV).r);
+ const separateAO=createRasterAO(renderer,denoised);
+ for(const [width,height]of [[192,128],[240,160],[144,96]]){
+  renderer.setSize(width,height);camera.aspect=width/height;camera.updateProjectionMatrix();
+  await new Promise(requestAnimationFrame);legacyAOPipeline.render();await interop.device.queue.onSubmittedWorkDone();const a=await interop.readTexture(interop.texture(legacyAO.value));
+  await new Promise(requestAnimationFrame);separateAO.prepare();await interop.device.queue.onSubmittedWorkDone();const b=await interop.readTexture(interop.texture(separateAO.texture));
+  const diff=compare(a,b);report.ao.push({width,height,...diff});check(a.length===width*height*4&&diff.max===0,'Separate AO preparation changed pixels after resize');
+ }
+ separateAO.dispose();legacyAOPipeline.dispose();
  const baseContext=renderer.contextNode,mainAO=float(.2),cameraAO=Fn(builder=>builder.camera===camera?mainAO:float(1))();
  const beautyContext=builtinAOContext(cameraAO);
  lighting=createLightingResources({interop,renderer,scene,camera,refreshContext:()=>beautyContext});
@@ -38,8 +52,8 @@ try{
  for(let change=0;change<3;change++){
   camera.position.x=3-change*.7;camera.lookAt(0,.5,0);camera.updateMatrixWorld();sun.position.x=3-change*2;sun.intensity=3-change*.8;sun.shadow.needsUpdate=true;
   // Legacy full refresh has no view-space AO. New sparse refresh must match it.
-  renderer.contextNode=baseContext;renderer.setRenderTarget(target);renderer.render(scene,camera);renderer.setRenderTarget(null);await interop.device.queue.onSubmittedWorkDone();const a=await reflection();
-  sun.shadow.needsUpdate=true;lighting.refresh();await interop.device.queue.onSubmittedWorkDone();const b=await reflection();
+  await new Promise(requestAnimationFrame);renderer.contextNode=baseContext;renderer.setRenderTarget(target);renderer.render(scene,camera);renderer.setRenderTarget(null);await interop.device.queue.onSubmittedWorkDone();const a=await reflection();
+  await new Promise(requestAnimationFrame);sun.shadow.needsUpdate=true;lighting.refresh();await interop.device.queue.onSubmittedWorkDone();const b=await reflection();
   const diff=compare(a,b);report.reflection.push({change,...diff,status:lighting.status});check(diff.max===0&&lighting.status.ok,'Sparse refresh changed reflected radiance');
  }
  const asset=await(await fetch('/lenses/canon-fl-50mm-f1-8.json')).json(),lens=asset.configurations[0],packed=packLens(lens,{sensorZMm:lens.sensorZMm,dispersion:true});

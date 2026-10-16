@@ -1,0 +1,191 @@
+{
+  "kind": "runtime-gpu",
+  "passed": true,
+  "boundedSubmission": {
+    "submittedBeforeReset": 8,
+    "afterReset": 4,
+    "loadingRecovered": true
+  },
+  "counters": {
+    "fullBuilds": 2,
+    "tlasRebuilds": 1,
+    "blasBuilt": 3,
+    "blasReused": 3,
+    "materialUploads": 6
+  },
+  "lightingRefreshes": 6,
+  "lightingStatus": {
+    "ok": true,
+    "errors": [],
+    "warnings": [
+      "未注册天空/日月环境：背景辐亮度为 0（仅诊断场景）"
+    ],
+    "lights": {
+      "directional": 1,
+      "point": 0,
+      "pointShadows": 0,
+      "hemisphere": 0
+    },
+    "environment": false,
+    "reflection": false
+  },
+  "scene": {
+    "instances": 3,
+    "uniqueTriangles": 20,
+    "expandedTriangles": 32,
+    "meshes": 2,
+    "blas": 2,
+    "materials": 2,
+    "bvhNodes": 17,
+    "tlasNodes": 5,
+    "blasNodes": 12,
+    "tlasDepth": 3,
+    "maxBlasDepth": 5,
+    "gpuBytes": 8096,
+    "buildWallMs": 4,
+    "extractMs": 0,
+    "uploadSubmitMs": 11,
+    "timing": {
+      "blasMs": 0,
+      "tlasMs": 0,
+      "packMs": 0,
+      "totalMs": 0,
+      "blasRebuilt": 1,
+      "blasReused": 1,
+      "expandMs": 0
+    },
+    "worker": true,
+    "environmentObjects": 0,
+    "unsupported": [],
+    "counters": {
+      "fullBuilds": 2,
+      "tlasRebuilds": 1,
+      "blasBuilt": 3,
+      "blasReused": 3,
+      "materialUploads": 6
+    },
+    "reason": "topology"
+  },
+  "afRealTarget": {
+    "world": [
+      0,
+      0,
+      -10
+    ],
+    "local": [
+      0,
+      0,
+      -10000
+    ],
+    "distanceM": 10,
+    "hitDistanceM": 10,
+    "transparentLayers": 0,
+    "status": 4
+  },
+  "afMovedTarget": {
+    "world": [
+      0.009999999776482582,
+      0,
+      -5.849999904632568
+    ],
+    "local": [
+      -2.2351741811588166e-07,
+      0,
+      -5849.999904632568
+    ],
+    "distanceM": 5.849999904632568,
+    "hitDistanceM": 5.849999904632568,
+    "transparentLayers": 0,
+    "status": 4
+  },
+  "manualFocus": {
+    "nearMm": 34.31131879612089,
+    "farMm": 33.989696186963144
+  },
+  "smallApertureInfinity": {
+    "sensorZMm": 67.44266087195265,
+    "imageDistanceMm": 33.84266087195266,
+    "beams": 326,
+    "beamBudget": 65536,
+    "beforeRmsMm": 0.0023596298057078475,
+    "afterRmsMm": 5.207091231727332e-06,
+    "rmsResolutionMm": 3.337014379542148e-05,
+    "quadratic": {
+      "A": 0.00025753859324487795,
+      "B": 3.7867268185119317e-05,
+      "C": 5.567852819984854e-06,
+      "originSensorZMm": 67.58969618696314
+    },
+    "target": null
+  },
+  "nativeFiniteConfiguration": {
+    "focusDistanceM": 6.4,
+    "imageDistanceMm": 1,
+    "failedFocusReason": "对焦镜组超出有效行程（负间隔）；保留原焦点"
+  },
+  "configurationMotion": {
+    "source": "cfgs.thi / cfgs.obj",
+    "focusDistanceM": 5.849999904632568,
+    "sensorZMm": 147.80679099999998,
+    "extrapolated": false,
+    "clamped": false,
+    "target": {
+      "world": [
+        0.009999999776482582,
+        0,
+        -5.849999904632568
+      ],
+      "local": [
+        -2.2351741811588166e-07,
+        0,
+        -5849.999904632568
+      ],
+      "distanceM": 5.849999904632568,
+      "hitDistanceM": 5.849999904632568,
+      "transparentLayers": 0,
+      "status": 4
+    }
+  },
+  "tableMotion": {
+    "source": "zoomcam.focus",
+    "focusDistanceM": 1,
+    "sensorZMm": 135.25088359876003,
+    "extrapolated": false,
+    "clamped": false,
+    "target": null
+  },
+  "contactNativeConfiguration": {
+    "fNumber": 2.7999999999999994,
+    "focusDistanceM": null,
+    "imageDistanceMm": 0,
+    "focalLengthMm": 65.01743241474631,
+    "sensorMm": [
+      36,
+      24
+    ],
+    "dispersion": true,
+    "focusModel": "镜组移动 · cfgs.thi / cfgs.obj",
+    "distanceReference": "物方第一面顶点",
+    "focusDistanceKnown": true
+  },
+  "stats": {
+    "attemptedSamples": 307200,
+    "opticalBlockedRate": 0.2922233072916667,
+    "tirRate": 3.2552083333333335e-06,
+    "numericalErrorRate": 0,
+    "bvhErrorRate": 0,
+    "hitRate": 0.7077734375,
+    "backgroundRate": 0,
+    "opticalPassRate": 0.7077734375,
+    "unsupportedRate": 0,
+    "transparencyLimitRate": 0,
+    "radianceInvalidRate": 0,
+    "reflectionOutsideRate": 0,
+    "sceneHitOfPassed": 1,
+    "backgroundOfPassed": 0
+  },
+  "liveBuffers": 18,
+  "pipelines": 6,
+  "wakes": 82,
+  "errors": []
+}

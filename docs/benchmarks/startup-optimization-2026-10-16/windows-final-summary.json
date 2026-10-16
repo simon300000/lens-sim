@@ -1,0 +1,834 @@
+{
+  "provenance": {
+    "threadId": "01a1417e-dee5-7282-a265-7549ea71ca69",
+    "turnId": "01a1423c-9f7b-7301-b1b0-a7145183f5e9",
+    "source": "Complete rounds extracted from the command's output; original raw reports retained on Windows."
+  },
+  "finalCommit": "0ce4185",
+  "baselineProduction": "5bb9e04",
+  "baselineInstrumentation": "fddd6ff",
+  "environment": {
+    "node": "v26.7.0",
+    "three": "0.183.2",
+    "driverCacheCleared": false,
+    "freshChromeProfilePerRun": true,
+    "launchArgs": [
+      "--enable-unsafe-webgpu"
+    ]
+  },
+  "rounds": [
+    {
+      "run": 1,
+      "foreground": true,
+      "errors": [],
+      "sceneErrors": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "browserVersion": "155.0.8059.82",
+      "gpu": {
+        "model": "RTX4090",
+        "driver": "610.88",
+        "vendor": "nvidia",
+        "architecture": "lovelace",
+        "device": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 720,
+        "dpr": 1
+      },
+      "hdr": {
+        "canvasSupported": true,
+        "displayHigh": false,
+        "internalFormat": "rgba16float",
+        "canvasFormat": "rgba16float",
+        "colorSpace": "srgb",
+        "toneMapping": {
+          "mode": "extended"
+        },
+        "canvasMode": "hdr",
+        "fullFrameReadback": "on-demand-only"
+      },
+      "startupMs": 17587.600000023842,
+      "maxHeartbeatGapMs": 1358.4000000357628,
+      "nodeBuildMs": 7068.699999630451,
+      "nodeBuildCalls": 625,
+      "pipelineCounts": {
+        "createShaderModule": 565,
+        "createRenderPipeline": 527,
+        "getCompilationInfo": 6,
+        "createComputePipelineAsync": 6
+      },
+      "pipelineApi": [
+        {
+          "name": "createShaderModule",
+          "count": 565,
+          "syncMs": 14.00000011920929,
+          "asyncLatencySumMs": 14.00000011920929
+        },
+        {
+          "name": "createRenderPipeline",
+          "count": 527,
+          "syncMs": 8.70000046491623,
+          "asyncLatencySumMs": 8.70000046491623
+        },
+        {
+          "name": "getCompilationInfo",
+          "count": 6,
+          "syncMs": 0.09999996423721313,
+          "asyncLatencySumMs": 150.30000001192093
+        },
+        {
+          "name": "createComputePipelineAsync",
+          "count": 6,
+          "syncMs": 0.10000002384185791,
+          "asyncLatencySumMs": 2192.5
+        }
+      ],
+      "opticalPipelineInitMs": 1305.699999988079,
+      "pupil": {
+        "bins": 128,
+        "globalMix": 0.05,
+        "movingCenter": true,
+        "precomputeMs": 745.1000000238419,
+        "deriveMs": 0.3999999761581421,
+        "buildMs": 745.6000000238419,
+        "coldBuildMs": 745.5,
+        "physicalCacheHit": false,
+        "probes": 222106
+      },
+      "bvh": {
+        "instances": 264078,
+        "uniqueTriangles": 103879,
+        "expandedTriangles": 3399513,
+        "meshes": 443,
+        "blas": 279,
+        "materials": 127,
+        "bvhNodes": 588546,
+        "tlasNodes": 528155,
+        "blasNodes": 60391,
+        "tlasDepth": 29,
+        "maxBlasDepth": 16,
+        "gpuBytes": 62535040,
+        "buildWallMs": 1238.0999999642372,
+        "extractMs": 28.599999964237213,
+        "uploadSubmitMs": 63.90000003576279,
+        "timing": {
+          "blasMs": 167,
+          "tlasMs": 865,
+          "packMs": 55,
+          "totalMs": 1096,
+          "blasRebuilt": 279,
+          "blasReused": 0,
+          "expandMs": 90
+        },
+        "worker": true,
+        "environmentObjects": 3,
+        "unsupported": [],
+        "counters": {
+          "fullBuilds": 1,
+          "tlasRebuilds": 0,
+          "blasBuilt": 279,
+          "blasReused": 0,
+          "materialUploads": 1
+        },
+        "reason": "initial"
+      },
+      "stages": [
+        {
+          "name": "检测 GPU 与 HDR 画布支持",
+          "durationMs": 211.60000002384186,
+          "nodeBuildMs": 0,
+          "gpuSyncMs": 0
+        },
+        {
+          "name": "铺设庭园，栽种花木",
+          "durationMs": 275.69999998807907,
+          "nodeBuildMs": 0,
+          "gpuSyncMs": 0
+        },
+        {
+          "name": "初始化天空、日照与反射",
+          "durationMs": 61,
+          "nodeBuildMs": 30.000000059604645,
+          "gpuSyncMs": 0.20000004768371582
+        },
+        {
+          "name": "预编译夜景、月亮与灯光",
+          "durationMs": 13451.100000023842,
+          "nodeBuildMs": 6913.400000154972,
+          "gpuSyncMs": 20.90000033378601
+        },
+        {
+          "name": "预编译晨光与阴影",
+          "durationMs": 69.19999998807907,
+          "nodeBuildMs": 0,
+          "gpuSyncMs": 0
+        },
+        {
+          "name": "预编译当前时刻的场景",
+          "durationMs": 620.5999999642372,
+          "nodeBuildMs": 25.199999570846558,
+          "gpuSyncMs": 0.9000001549720764
+        },
+        {
+          "name": "提取场景几何，构建光追加速结构",
+          "durationMs": 92.40000003576279,
+          "nodeBuildMs": 0,
+          "gpuSyncMs": 0
+        },
+        {
+          "name": "编译真实镜组、光谱采样与自动对焦",
+          "durationMs": 2099.899999976158,
+          "nodeBuildMs": 0,
+          "gpuSyncMs": 0.5
+        },
+        {
+          "name": "预热镜头成像与首帧显示",
+          "durationMs": 706.1000000238419,
+          "nodeBuildMs": 100.09999984502792,
+          "gpuSyncMs": 0.40000003576278687
+        }
+      ],
+      "warmup": [
+        {
+          "rounds": 125,
+          "variants": 1256,
+          "wallMs": 13421.5,
+          "finalSubmitMs": 1356.8999999761581,
+          "finalStartMs": 13027.199999988079,
+          "finalEndMs": 14384.099999964237,
+          "finalNodeCacheDelta": 0,
+          "finalPipelineCacheDelta": 0,
+          "finalNodeBuildCalls": 0,
+          "finalPipelineCreates": 0
+        },
+        {
+          "rounds": 1,
+          "variants": 1250,
+          "wallMs": 44.69999998807907,
+          "finalSubmitMs": 14.5,
+          "finalStartMs": 14452.899999976158,
+          "finalEndMs": 14467.399999976158,
+          "finalNodeCacheDelta": 0,
+          "finalPipelineCacheDelta": 0,
+          "finalNodeBuildCalls": 0,
+          "finalPipelineCreates": 0
+        },
+        {
+          "rounds": 2,
+          "variants": 1250,
+          "wallMs": 82,
+          "finalSubmitMs": 14.400000035762787,
+          "finalStartMs": 14553.099999964237,
+          "finalEndMs": 14567.5,
+          "finalNodeCacheDelta": 0,
+          "finalPipelineCacheDelta": 0,
+          "finalNodeBuildCalls": 0,
+          "finalPipelineCreates": 0
+        }
+      ],
+      "application": {
+        "passed": true,
+        "foreground": true,
+        "dimensions": {
+          "width": 480,
+          "height": 320
+        },
+        "lens": "canon-fl-50mm-f1-8",
+        "optics": {
+          "fNumber": 1.86,
+          "focusDistanceM": null,
+          "imageDistanceMm": 33.825199999999995,
+          "focalLengthMm": 49.06159461340178,
+          "sensorMm": [
+            36,
+            24
+          ],
+          "dispersion": true,
+          "focusModel": "固定镜组 · 传感器轴向调焦",
+          "distanceReference": "物方第一面顶点",
+          "focusDistanceKnown": true
+        },
+        "seed": 1,
+        "batchSpp": 4,
+        "rows": [
+          {
+            "trial": 0,
+            "wallMs": 2005.300000011921,
+            "spp": 256,
+            "attempts": 39321600,
+            "sha256": "c4b1e108c38bb455cb24c5d429461ae19a63a8a412911f3e1a73ae4cf949f894",
+            "stats": {
+              "attemptedSamples": 39321600,
+              "opticalBlockedRate": 0.3024267832438151,
+              "tirRate": 0.000010782877604166667,
+              "numericalErrorRate": 0,
+              "bvhErrorRate": 0,
+              "hitRate": 0.697562255859375,
+              "backgroundRate": 0,
+              "opticalPassRate": 0.6975624593098958,
+              "unsupportedRate": 0,
+              "transparencyLimitRate": 2.1874441290312043e-7,
+              "radianceInvalidRate": 0,
+              "reflectionOutsideRate": 0,
+              "sceneHitOfPassed": 0.9999997083407828,
+              "backgroundOfPassed": 0
+            },
+            "gpuTimestampSamples": 62
+          },
+          {
+            "trial": 1,
+            "wallMs": 2002.8999999761581,
+            "spp": 256,
+            "attempts": 39321600,
+            "sha256": "c4b1e108c38bb455cb24c5d429461ae19a63a8a412911f3e1a73ae4cf949f894",
+            "stats": {
+              "attemptedSamples": 39321600,
+              "opticalBlockedRate": 0.3024267832438151,
+              "tirRate": 0.000010782877604166667,
+              "numericalErrorRate": 0,
+              "bvhErrorRate": 0,
+              "hitRate": 0.697562255859375,
+              "backgroundRate": 0,
+              "opticalPassRate": 0.6975624593098958,
+              "unsupportedRate": 0,
+              "transparencyLimitRate": 2.1874441290312043e-7,
+              "radianceInvalidRate": 0,
+              "reflectionOutsideRate": 0,
+              "sceneHitOfPassed": 0.9999997083407828,
+              "backgroundOfPassed": 0
+            },
+            "gpuTimestampSamples": 62
+          },
+          {
+            "trial": 2,
+            "wallMs": 2002.4000000357628,
+            "spp": 256,
+            "attempts": 39321600,
+            "sha256": "c4b1e108c38bb455cb24c5d429461ae19a63a8a412911f3e1a73ae4cf949f894",
+            "stats": {
+              "attemptedSamples": 39321600,
+              "opticalBlockedRate": 0.3024267832438151,
+              "tirRate": 0.000010782877604166667,
+              "numericalErrorRate": 0,
+              "bvhErrorRate": 0,
+              "hitRate": 0.697562255859375,
+              "backgroundRate": 0,
+              "opticalPassRate": 0.6975624593098958,
+              "unsupportedRate": 0,
+              "transparencyLimitRate": 2.1874441290312043e-7,
+              "radianceInvalidRate": 0,
+              "reflectionOutsideRate": 0,
+              "sceneHitOfPassed": 0.9999997083407828,
+              "backgroundOfPassed": 0
+            },
+            "gpuTimestampSamples": 62
+          }
+        ]
+      },
+      "nativeKernel64": {
+        "description": "same application/device, paused RAF optical sampling; direct4spp batches with queue fence,16batches pertrial",
+        "rows": [
+          {
+            "trial": 0,
+            "spp": 64,
+            "sha256": "6f65843677435ff6ffc80b7fe799e0ad316f603efc4f1fd663cb01e7b001a130",
+            "meanGpuMs": 4.722239999999999,
+            "minGpuMs": 4.215808,
+            "maxGpuMs": 7.678976,
+            "meanWallMs": 6.125,
+            "stats": {
+              "attemptedSamples": 9830400,
+              "opticalBlockedRate": 0.3023186238606771,
+              "tirRate": 0.00001068115234375,
+              "numericalErrorRate": 0,
+              "bvhErrorRate": 0,
+              "hitRate": 0.6976705932617188,
+              "backgroundRate": 0,
+              "opticalPassRate": 0.6976706949869792,
+              "unsupportedRate": 0,
+              "transparencyLimitRate": 1.4580698479612248e-7,
+              "radianceInvalidRate": 0,
+              "reflectionOutsideRate": 0,
+              "sceneHitOfPassed": 0.9999998541930152,
+              "backgroundOfPassed": 0
+            }
+          },
+          {
+            "trial": 1,
+            "spp": 64,
+            "sha256": "6f65843677435ff6ffc80b7fe799e0ad316f603efc4f1fd663cb01e7b001a130",
+            "meanGpuMs": 4.170048,
+            "minGpuMs": 2.78016,
+            "maxGpuMs": 4.595712,
+            "meanWallMs": 5.587500002235174,
+            "stats": {
+              "attemptedSamples": 9830400,
+              "opticalBlockedRate": 0.3023186238606771,
+              "tirRate": 0.00001068115234375,
+              "numericalErrorRate": 0,
+              "bvhErrorRate": 0,
+              "hitRate": 0.6976705932617188,
+              "backgroundRate": 0,
+              "opticalPassRate": 0.6976706949869792,
+              "unsupportedRate": 0,
+              "transparencyLimitRate": 1.4580698479612248e-7,
+              "radianceInvalidRate": 0,
+              "reflectionOutsideRate": 0,
+              "sceneHitOfPassed": 0.9999998541930152,
+              "backgroundOfPassed": 0
+            }
+          },
+          {
+            "trial": 2,
+            "spp": 64,
+            "sha256": "6f65843677435ff6ffc80b7fe799e0ad316f603efc4f1fd663cb01e7b001a130",
+            "meanGpuMs": 2.810176,
+            "minGpuMs": 2.704384,
+            "maxGpuMs": 3.038208,
+            "meanWallMs": 4.368749998509884,
+            "stats": {
+              "attemptedSamples": 9830400,
+              "opticalBlockedRate": 0.3023186238606771,
+              "tirRate": 0.00001068115234375,
+              "numericalErrorRate": 0,
+              "bvhErrorRate": 0,
+              "hitRate": 0.6976705932617188,
+              "backgroundRate": 0,
+              "opticalPassRate": 0.6976706949869792,
+              "unsupportedRate": 0,
+              "transparencyLimitRate": 1.4580698479612248e-7,
+              "radianceInvalidRate": 0,
+              "reflectionOutsideRate": 0,
+              "sceneHitOfPassed": 0.9999998541930152,
+              "backgroundOfPassed": 0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "run": 2,
+      "foreground": true,
+      "errors": [],
+      "sceneErrors": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "browserVersion": "155.0.8059.82",
+      "gpu": {
+        "model": "RTX4090",
+        "driver": "610.88",
+        "vendor": "nvidia",
+        "architecture": "lovelace",
+        "device": ""
+      },
+      "viewport": {
+        "width": 1280,
+        "height": 720,
+        "dpr": 1
+      },
+      "hdr": {
+        "canvasSupported": true,
+        "displayHigh": false,
+        "internalFormat": "rgba16float",
+        "canvasFormat": "rgba16float",
+        "colorSpace": "srgb",
+        "toneMapping": {
+          "mode": "extended"
+        },
+        "canvasMode": "hdr",
+        "fullFrameReadback": "on-demand-only"
+      },
+      "startupMs": 17447.899999976158,
+      "maxHeartbeatGapMs": 1348.2999999523163,
+      "nodeBuildMs": 7131.799999833107,
+      "nodeBuildCalls": 625,
+      "pipelineCounts": {
+        "createShaderModule": 565,
+        "createRenderPipeline": 527,
+        "getCompilationInfo": 6,
+        "createComputePipelineAsync": 6
+      },
+      "pipelineApi": [
+        {
+          "name": "createShaderModule",
+          "count": 565,
+          "syncMs": 16.200000047683716,
+          "asyncLatencySumMs": 16.200000047683716
+        },
+        {
+          "name": "createRenderPipeline",
+          "count": 527,
+          "syncMs": 11.000000596046448,
+          "asyncLatencySumMs": 11.000000596046448
+        },
+        {
+          "name": "getCompilationInfo",
+          "count": 6,
+          "syncMs": 0,
+          "asyncLatencySumMs": 146.0999999642372
+        },
+        {
+          "name": "createComputePipelineAsync",
+          "count": 6,
+          "syncMs": 0,
+          "asyncLatencySumMs": 2207.699999988079
+        }
+      ],
+      "opticalPipelineInitMs": 1302.3999999761581,
+      "pupil": {
+        "bins": 128,
+        "globalMix": 0.05,
+        "movingCenter": true,
+        "precomputeMs": 710.8000000119209,
+        "deriveMs": 0.3999999761581421,
+        "buildMs": 711.1999999880791,
+        "coldBuildMs": 711.1999999880791,
+        "physicalCacheHit": false,
+        "probes": 222106
+      },
+      "bvh": {
+        "instances": 264078,
+        "uniqueTriangles": 103879,
+        "expandedTriangles": 3399513,
+        "meshes": 443,
+        "blas": 279,
+        "materials": 127,
+        "bvhNodes": 588546,
+        "tlasNodes": 528155,
+        "blasNodes": 60391,
+        "tlasDepth": 29,
+        "maxBlasDepth": 16,
+        "gpuBytes": 62535040,
+        "buildWallMs": 1232.5,
+        "extractMs": 30.19999998807907,
+        "uploadSubmitMs": 57.69999998807907,
+        "timing": {
+          "blasMs": 172,
+          "tlasMs": 873,
+          "packMs": 51,
+          "totalMs": 1104,
+          "blasRebuilt": 279,
+          "blasReused": 0,
+          "expandMs": 79
+        },
+        "worker": true,
+        "environmentObjects": 3,
+        "unsupported": [],
+        "counters": {
+          "fullBuilds": 1,
+          "tlasRebuilds": 0,
+          "blasBuilt": 279,
+          "blasReused": 0,
+          "materialUploads": 1
+        },
+        "reason": "initial"
+      },
+      "stages": [
+        {
+          "name": "检测 GPU 与 HDR 画布支持",
+          "durationMs": 186.80000001192093,
+          "nodeBuildMs": 0,
+          "gpuSyncMs": 0
+        },
+        {
+          "name": "铺设庭园，栽种花木",
+          "durationMs": 278.2999999523163,
+          "nodeBuildMs": 0,
+          "gpuSyncMs": 0
+        },
+        {
+          "name": "初始化天空、日照与反射",
+          "durationMs": 57.700000047683716,
+          "nodeBuildMs": 29.80000001192093,
+          "gpuSyncMs": 0.30000001192092896
+        },
+        {
+          "name": "预编译夜景、月亮与灯光",
+          "durationMs": 13346.699999988079,
+          "nodeBuildMs": 6967.8999999165535,
+          "gpuSyncMs": 24.70000058412552
+        },
+        {
+          "name": "预编译晨光与阴影",
+          "durationMs": 78.09999996423721,
+          "nodeBuildMs": 0,
+          "gpuSyncMs": 0
+        },
+        {
+          "name": "预编译当前时刻的场景",
+          "durationMs": 624.8000000119209,
+          "nodeBuildMs": 28.19999998807907,
+          "gpuSyncMs": 1.5000001788139343
+        },
+        {
+          "name": "提取场景几何，构建光追加速结构",
+          "durationMs": 86,
+          "nodeBuildMs": 0,
+          "gpuSyncMs": 0
+        },
+        {
+          "name": "编译真实镜组、光谱采样与自动对焦",
+          "durationMs": 2069.300000011921,
+          "nodeBuildMs": 0,
+          "gpuSyncMs": 0.3999999165534973
+        },
+        {
+          "name": "预热镜头成像与首帧显示",
+          "durationMs": 720.1999999880791,
+          "nodeBuildMs": 105.8999999165535,
+          "gpuSyncMs": 0.2999999523162842
+        }
+      ],
+      "warmup": [
+        {
+          "rounds": 125,
+          "variants": 1256,
+          "wallMs": 13316.399999976158,
+          "finalSubmitMs": 1346.800000011921,
+          "finalStartMs": 12717,
+          "finalEndMs": 14063.900000035763,
+          "finalNodeCacheDelta": 0,
+          "finalPipelineCacheDelta": 0,
+          "finalNodeBuildCalls": 0,
+          "finalPipelineCreates": 0
+        },
+        {
+          "rounds": 1,
+          "variants": 1250,
+          "wallMs": 45.10000002384186,
+          "finalSubmitMs": 14.800000011920929,
+          "finalStartMs": 14140.5,
+          "finalEndMs": 14155.300000011921,
+          "finalNodeCacheDelta": 0,
+          "finalPipelineCacheDelta": 0,
+          "finalNodeBuildCalls": 0,
+          "finalPipelineCreates": 0
+        },
+        {
+          "rounds": 2,
+          "variants": 1250,
+          "wallMs": 87.40000003576279,
+          "finalSubmitMs": 13.5,
+          "finalStartMs": 14247.100000023842,
+          "finalEndMs": 14260.600000023842,
+          "finalNodeCacheDelta": 0,
+          "finalPipelineCacheDelta": 0,
+          "finalNodeBuildCalls": 0,
+          "finalPipelineCreates": 0
+        }
+      ],
+      "application": {
+        "passed": true,
+        "foreground": true,
+        "dimensions": {
+          "width": 480,
+          "height": 320
+        },
+        "lens": "canon-fl-50mm-f1-8",
+        "optics": {
+          "fNumber": 1.86,
+          "focusDistanceM": null,
+          "imageDistanceMm": 33.825199999999995,
+          "focalLengthMm": 49.06159461340178,
+          "sensorMm": [
+            36,
+            24
+          ],
+          "dispersion": true,
+          "focusModel": "固定镜组 · 传感器轴向调焦",
+          "distanceReference": "物方第一面顶点",
+          "focusDistanceKnown": true
+        },
+        "seed": 1,
+        "batchSpp": 4,
+        "rows": [
+          {
+            "trial": 0,
+            "wallMs": 2005.6000000238419,
+            "spp": 256,
+            "attempts": 39321600,
+            "sha256": "c4b1e108c38bb455cb24c5d429461ae19a63a8a412911f3e1a73ae4cf949f894",
+            "stats": {
+              "attemptedSamples": 39321600,
+              "opticalBlockedRate": 0.3024267832438151,
+              "tirRate": 0.000010782877604166667,
+              "numericalErrorRate": 0,
+              "bvhErrorRate": 0,
+              "hitRate": 0.697562255859375,
+              "backgroundRate": 0,
+              "opticalPassRate": 0.6975624593098958,
+              "unsupportedRate": 0,
+              "transparencyLimitRate": 2.1874441290312043e-7,
+              "radianceInvalidRate": 0,
+              "reflectionOutsideRate": 0,
+              "sceneHitOfPassed": 0.9999997083407828,
+              "backgroundOfPassed": 0
+            },
+            "gpuTimestampSamples": 62
+          },
+          {
+            "trial": 1,
+            "wallMs": 2000.800000011921,
+            "spp": 256,
+            "attempts": 39321600,
+            "sha256": "c4b1e108c38bb455cb24c5d429461ae19a63a8a412911f3e1a73ae4cf949f894",
+            "stats": {
+              "attemptedSamples": 39321600,
+              "opticalBlockedRate": 0.3024267832438151,
+              "tirRate": 0.000010782877604166667,
+              "numericalErrorRate": 0,
+              "bvhErrorRate": 0,
+              "hitRate": 0.697562255859375,
+              "backgroundRate": 0,
+              "opticalPassRate": 0.6975624593098958,
+              "unsupportedRate": 0,
+              "transparencyLimitRate": 2.1874441290312043e-7,
+              "radianceInvalidRate": 0,
+              "reflectionOutsideRate": 0,
+              "sceneHitOfPassed": 0.9999997083407828,
+              "backgroundOfPassed": 0
+            },
+            "gpuTimestampSamples": 62
+          },
+          {
+            "trial": 2,
+            "wallMs": 2001.7999999523163,
+            "spp": 256,
+            "attempts": 39321600,
+            "sha256": "c4b1e108c38bb455cb24c5d429461ae19a63a8a412911f3e1a73ae4cf949f894",
+            "stats": {
+              "attemptedSamples": 39321600,
+              "opticalBlockedRate": 0.3024267832438151,
+              "tirRate": 0.000010782877604166667,
+              "numericalErrorRate": 0,
+              "bvhErrorRate": 0,
+              "hitRate": 0.697562255859375,
+              "backgroundRate": 0,
+              "opticalPassRate": 0.6975624593098958,
+              "unsupportedRate": 0,
+              "transparencyLimitRate": 2.1874441290312043e-7,
+              "radianceInvalidRate": 0,
+              "reflectionOutsideRate": 0,
+              "sceneHitOfPassed": 0.9999997083407828,
+              "backgroundOfPassed": 0
+            },
+            "gpuTimestampSamples": 62
+          }
+        ]
+      },
+      "nativeKernel64": {
+        "description": "same application/device, paused RAF optical sampling; direct4spp batches with queue fence,16batches pertrial",
+        "rows": [
+          {
+            "trial": 0,
+            "spp": 64,
+            "sha256": "6f65843677435ff6ffc80b7fe799e0ad316f603efc4f1fd663cb01e7b001a130",
+            "meanGpuMs": 4.178687999999999,
+            "minGpuMs": 3.734528,
+            "maxGpuMs": 6.90176,
+            "meanWallMs": 5.618749998509884,
+            "stats": {
+              "attemptedSamples": 9830400,
+              "opticalBlockedRate": 0.3023186238606771,
+              "tirRate": 0.00001068115234375,
+              "numericalErrorRate": 0,
+              "bvhErrorRate": 0,
+              "hitRate": 0.6976705932617188,
+              "backgroundRate": 0,
+              "opticalPassRate": 0.6976706949869792,
+              "unsupportedRate": 0,
+              "transparencyLimitRate": 1.4580698479612248e-7,
+              "radianceInvalidRate": 0,
+              "reflectionOutsideRate": 0,
+              "sceneHitOfPassed": 0.9999998541930152,
+              "backgroundOfPassed": 0
+            }
+          },
+          {
+            "trial": 1,
+            "spp": 64,
+            "sha256": "6f65843677435ff6ffc80b7fe799e0ad316f603efc4f1fd663cb01e7b001a130",
+            "meanGpuMs": 2.9570559999999997,
+            "minGpuMs": 2.8416,
+            "maxGpuMs": 3.226624,
+            "meanWallMs": 4.34375,
+            "stats": {
+              "attemptedSamples": 9830400,
+              "opticalBlockedRate": 0.3023186238606771,
+              "tirRate": 0.00001068115234375,
+              "numericalErrorRate": 0,
+              "bvhErrorRate": 0,
+              "hitRate": 0.6976705932617188,
+              "backgroundRate": 0,
+              "opticalPassRate": 0.6976706949869792,
+              "unsupportedRate": 0,
+              "transparencyLimitRate": 1.4580698479612248e-7,
+              "radianceInvalidRate": 0,
+              "reflectionOutsideRate": 0,
+              "sceneHitOfPassed": 0.9999998541930152,
+              "backgroundOfPassed": 0
+            }
+          },
+          {
+            "trial": 2,
+            "spp": 64,
+            "sha256": "6f65843677435ff6ffc80b7fe799e0ad316f603efc4f1fd663cb01e7b001a130",
+            "meanGpuMs": 3.1720319999999993,
+            "minGpuMs": 2.819072,
+            "maxGpuMs": 4.615168,
+            "meanWallMs": 4.34375,
+            "stats": {
+              "attemptedSamples": 9830400,
+              "opticalBlockedRate": 0.3023186238606771,
+              "tirRate": 0.00001068115234375,
+              "numericalErrorRate": 0,
+              "bvhErrorRate": 0,
+              "hitRate": 0.6976705932617188,
+              "backgroundRate": 0,
+              "opticalPassRate": 0.6976706949869792,
+              "unsupportedRate": 0,
+              "transparencyLimitRate": 1.4580698479612248e-7,
+              "radianceInvalidRate": 0,
+              "reflectionOutsideRate": 0,
+              "sceneHitOfPassed": 0.9999998541930152,
+              "backgroundOfPassed": 0
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "comparison": {
+    "meanStartupMs": [
+      26390.59999999404,
+      17517.75
+    ],
+    "startupReductionPercent": 33.62125150620313,
+    "meanApplication256SppMs": [
+      2001.4999999900658,
+      2003.1333333353202
+    ],
+    "meanOldKernelGpuMs": [
+      10.731328000000001,
+      10.855744000000001
+    ],
+    "oldKernelGpuRatio": 1.0115937188761726,
+    "meanOldKernelWallMs": [
+      12.868750002235174,
+      13.537500001490116
+    ],
+    "oldKernelWallRatio": 1.0519669741924265,
+    "all6ApplicationHashesMatchBaseline": true
+  },
+  "reportedChecks": {
+    "updatedRuntimePassed": true,
+    "numericalBVHRadianceErrors": [
+      0,
+      0,
+      0
+    ],
+    "old32BytesEqual": true
+  }
+}
