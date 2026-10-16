@@ -6,6 +6,7 @@ import { buildSceneBuffers, buildBVH, LEAF_BIT, STACK_SIZE, f32Down, f32Up } fro
 import { bruteForceIntersect, traversePacked, invertAffine, applyAffine } from '../src/scene/scene-reference.js';
 
 import { rng, diagnosticScene } from './scene-fixtures.js';
+import isoChart from '../src/scene/iso-chart-geometry.json' with {type:'json'};
 const mat = (side = THREE.FrontSide, extra = {}) => new THREE.MeshStandardNodeMaterial({ color: 0xffffff, side, ...extra });
 
 test('f32 outward rounding is conservative', () => {
@@ -138,5 +139,5 @@ test('full villa/forest scene: extraction + BVH build within stack bound, real c
   assert.equal(ex.report.negativeDeterminant, 0);
   console.log(JSON.stringify({ report: { ...ex.report, unsupported: ex.report.unsupported.length }, stats: s }));
   // Same instance count as raster draw: expanded triangles must match the raster inventory.
-  assert.equal(ex.report.expandedTriangles, 3399513 + 248);
+  assert.equal(ex.report.expandedTriangles, 3399513 + 246 + isoChart.indices.length/3);
 });
