@@ -15,6 +15,7 @@ import { createRasterAO } from './rendering/raster-ao.js';
 import { warmRender } from './rendering/startup-warmup.js';
 import { installNormalPassReuse } from './rendering/pass-reuse.js';
 import { startup } from './startup-progress.js';
+import { installURLState } from './url-state.js';
 import { installCameraWheelTravel, installCameraLookAround, installCameraKeyboardTravel } from './camera-controls.js';
 
 const faults=[];
@@ -235,6 +236,7 @@ async function createScene(){
     diagnostics.hybrid=state;
   });
   try{await hybrid.initialize({onProgress:(step,label)=>startup.stage(step,label)});}catch(error){hybrid.store.update({status:'error',error:error.message});faults.push(error.message);console.error(error);}
+  const urlState=await installURLState({camera,controls,store:hybrid.store,requestFrame:wake});
   sceneElement.dataset.renderedHour=sceneElement.dataset.hour;
   sceneElement.dataset.gpuErrors=String(faults.length);
   document.querySelector('#time-controls').setAttribute('aria-busy','false');
@@ -252,7 +254,7 @@ async function createScene(){
   sceneElement.dataset.koi=garden.koi.length;
   console.info('SANTEI scene ready',diagnostics);
   startup.complete();
-  addEventListener('pagehide',()=>{ready=false;keyboardTravel.dispose();disposeWheelTravel();disposeLookAround();lensUI.dispose();hybrid.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
+  addEventListener('pagehide',()=>{urlState.dispose();ready=false;keyboardTravel.dispose();disposeWheelTravel();disposeLookAround();lensUI.dispose();hybrid.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
   // Initialization captured the current scene and prepared its first lens
   // sample. Schedule display without throwing away that prepared state.
   wake();
