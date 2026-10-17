@@ -6,6 +6,8 @@ import rawIntegratorSource from './optical-integrator.wgsl?raw';
 import resolveSource from './resolve.wgsl?raw';
 import targetSource from '../optics/focus-target.wgsl?raw';
 import statisticsSource from './statistics.wgsl?raw';
+import statisticsReduceSource from './statistics-reduce.wgsl?raw';
+import {statisticsConfiguration,specializeStatistics} from './statistics-plan.js';
 import { SPECTRAL_WGSL } from '../spectral/reconstruction.js';
 import { SAMPLING_WGSL } from '../spectral/sampler.js';
 import {createPupilPrecomputer} from '../optics/pupil-precompute.js';
@@ -27,6 +29,7 @@ const uniformBinding=(binding,buffer)=>({binding,resource:{buffer}});
 export async function createOpticalEngine({interop,sceneResources,lighting,width=480,accumulationBindingBytes=Infinity,integrationMode='fused',splitStageTiming=false,splitRayBufferBytes=128*1024**2}) {
   const started=performance.now(),{device}=interop;
   if(!['fused','split'].includes(integrationMode))throw new RangeError('Unknown integration mode');
+  const statisticsConfig=statisticsConfiguration(device.limits);
   const integratorSource=integrationMode==='split'?linearMirrorGroups(rawIntegratorSource):rawIntegratorSource;
   // A smaller binding cap is useful for validating paired bands on small
   // images. It can only reduce, never exceed the actual device limits.
@@ -56,7 +59,8 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     ...(splitSources?Object.entries(splitSources).map(([name,code])=>['split_'+name,code,'Split mirror '+name+' batch']):[['sampleMirror',sampleSource+mirrorSource,'Four-quadrant real lens + scene integrate']]),
     ['resolve',SPECTRAL_WGSL+resolveSource,'XYZ display-only resolve'],
     ['target',WORK_COUNTERS_WGSL+opticalSource+SCENE_INTERSECTOR_WGSL+targetSource,'AF reference ray -> BVH first opaque surface'],
-    ['statistics',statisticsSource,'Attempt statistics reduction'],
+    ['statistics',specializeStatistics(statisticsSource,statisticsConfig),'Attempt statistics partial reduction'],
+    ['statisticsReduce',specializeStatistics(statisticsReduceSource,statisticsConfig),'Attempt statistics final reduction'],
   ];
   const compiled=await Promise.allSettled(jobs.map(([,code,label])=>interop.computePipeline(code,label)));
   const failure=compiled.find(result=>result.status==='rejected');if(failure)throw failure.reason;
@@ -313,10 +317,19 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     async statistics(){
       if(statsPending)return statsPending;if(!tiles[0]?.sample)return null;const revision=currentRevision;
       const snapshot=tiles.slice();
-      statsPending=(async()=>{const totals=interop.storage(snapshot.length*256,'Tile statistics snapshot');try{const data=new Float64Array(12);
+      const pending=(async()=>{let totals;const partials=[];try{const data=new Float64Array(12);
+        totals=interop.storage(snapshot.length*256,'Tile statistics snapshot');
         // Enqueue the entire snapshot before yielding, so subsequent frames
         // cannot mix counters from different accumulation rounds.
-        for(let i=0;i<snapshot.length;i++)submit(pipelines.statistics,group(pipelines.statistics,[uniformBinding(0,snapshot[i].buffer),{binding:1,resource:{buffer:totals,offset:i*256,size:48}}]));
+        for(let i=0;i<snapshot.length;i++){
+          const count=Math.ceil(snapshot[i].bytes/(PIXEL_BYTES*statisticsConfig.pixels));
+          const output={binding:1,resource:{buffer:totals,offset:i*256,size:48}};
+          if(count===1){submit(pipelines.statistics,group(pipelines.statistics,[uniformBinding(0,snapshot[i].buffer),output]));continue;}
+          const partial=interop.storage(count*48,'Parallel statistics partials');partials.push(partial);
+          const grid=chunkDispatch(count,device.limits.maxComputeWorkgroupsPerDimension);
+          submit(pipelines.statistics,group(pipelines.statistics,[uniformBinding(0,snapshot[i].buffer),uniformBinding(1,partial)]),grid.x,grid.y);
+          submit(pipelines.statisticsReduce,group(pipelines.statisticsReduce,[uniformBinding(0,partial),output]));
+        }
         const part=new Float32Array(await interop.readBuffer(totals,snapshot.length*256));
         for(let t=0;t<snapshot.length;t++)for(let i=0;i<12;i++)data[i]+=part[t*64+i];
         if(revision!==currentRevision)return null;const n=Math.max(1,data[4]),passed=Math.max(1,data[7]);
@@ -325,7 +338,8 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
           bvhErrorRate:data[3]/passed,hitRate:data[5]/n,backgroundRate:data[6]/n,opticalPassRate:data[7]/n,
           unsupportedRate:data[8]/passed,transparencyLimitRate:data[9]/passed,radianceInvalidRate:data[10]/n,reflectionOutsideRate:data[11]/passed,
           sceneHitOfPassed:data[5]/passed,backgroundOfPassed:data[6]/passed};
-      }finally{interop.release(totals);statsPending=null;}})();return statsPending;
+      }finally{for(const partial of partials)interop.release(partial);if(totals)interop.release(totals);}})();
+      statsPending=pending;const clear=()=>{if(statsPending===pending)statsPending=null;};pending.then(clear,clear);return pending;
     },
     async referenceTarget(){
       bindScene();if(!groups.target)throw new Error('场景 BVH 不可用');submit(pipelines.target,groups.target);
