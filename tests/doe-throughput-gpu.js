@@ -20,7 +20,8 @@ try {
     const checkpoints=[];
     for(const spp of [32,1024]) {
       const previous=checkpoints.at(-1)?.spp??0;
-      for(let i=previous;i<spp;i+=4)engine.sample({batchSpp:4,targetSpp:spp,seed:185,constantEnvironment:[1,1,1]});
+      // Match the independent per-pixel f64 sequence below, not shared mirror samples.
+      for(let i=previous;i<spp;i+=4)engine.sample({batchSpp:4,targetSpp:spp,seed:185,constantEnvironment:[1,1,1],mirrorReuse:false});
       const statistics=await engine.statistics(),raw=await engine.readAccumulation(),f=new Float32Array(raw),u=new Uint32Array(raw);
       let meanY=0;for(let pixel=0;pixel<48*32;pixel++){check(u[pixel*16+3]===spp,'fixed attempt budget');meanY+=f[pixel*16+1]/spp/(48*32);}
       checkpoints.push({spp,meanY,...statistics});

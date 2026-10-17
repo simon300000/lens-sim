@@ -44,6 +44,13 @@ fn opticalSag(s: OpticalSurface, xy: vec2f) -> vec2f {
   let q = 1.0 - (1.0 + s.geometry.z) * c*c*r2;
   if (q < 0.0) { return vec2f(0.0); }
   var z = c*r2 / (1.0 + sqrt(q));
+  // Pure conics need no normalized radius or polynomial dependency chain.
+  // Retain the same finite/domain checks and diagnostic operation convention.
+  if(s.media.z==0u){
+    workCounters[WORK_POLY_FLOPS]+=select(3u,0u,s.bounds.z==3.0);
+    if(!(abs(z)<1e30)){return vec2f(0.0);}
+    return vec2f(z,1.0);
+  }
   let u2=r2/(s.bounds.y*s.bounds.y);
   let degree=min(s.media.z,28u);
   if(s.bounds.z==3.0){z+=opticalBernstein(s,sqrt(u2)).x;workCounters[WORK_POLY_FLOPS]+=3u*degree*degree/2u;}
@@ -65,6 +72,11 @@ fn opticalNormal(s: OpticalSurface, xy: vec2f) -> vec4f {
   let q = 1.0 - (1.0+s.geometry.z)*c*c*r2;
   if (q <= 0.0) { return vec4f(0.0); }
   var derivative = c/sqrt(q);
+  if(s.media.z==0u){
+    let n=vec3f(-xy*derivative,1.0);
+    if(!opticalFinite(n)){return vec4f(0.0);}
+    return vec4f(normalize(n),1.0);
+  }
   let scale2=s.bounds.y*s.bounds.y;
   let u2=r2/scale2;
   var polynomial=0.0;
