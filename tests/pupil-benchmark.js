@@ -8,7 +8,6 @@ import {SAMPLING_WGSL} from '../src/spectral/sampler.js';
 import {SPECTRAL_WGSL} from '../src/spectral/reconstruction.js';
 import {packLens} from '../src/optics/lens-state.js';
 import {buildPupilTable,PUPIL_TABLE_BYTES} from '../src/optics/pupil-sampling.js';
-import {buildPupilTable as legacyBuild} from './fixtures/pupil-sampling-legacy.js';
 import {sweepIds} from './pupil-sweep.js';
 import {experimentCases,experimentVariants,prescriptionSummary} from './pupil-diverse-cases.js';
 const button=document.querySelector('#run'),progress=document.querySelector('#progress'),output=document.querySelector('#result');

@@ -2,16 +2,17 @@
  * Arithmetic estimate for the diagnostics HUD.
  *
  * WebGPU exposes no hardware performance counters, so FLOPs are never measured.
- * The fused integrator tallies how often each primitive runs (work-counters.wgsl);
+ * The selected integrator tallies how often each primitive runs (work-counters.wgsl);
  * each tally is multiplied by a FLOP weight hand-counted from the WGSL below and
  * divided by measured GPU time. Counting convention: add/sub/mul/div/min/max/
  * clamp = 1 per component, fma/mix = 2 (mix 3), sqrt/rsqrt/exp/sin/cos/pow = 1,
- * comparisons, integer hashing and texture fetches = 0. Expect ±30 %: the
- * compiler fuses and eliminates operations, and idle SIMD lanes are not seen.
+ * comparisons, integer hashing and texture fetches = 0. These heuristic weights
+ * have no calibrated error bound: compiler expansion, fusion and idle SIMD
+ * lanes are not a hardware instruction count.
  */
 export const WORK_COUNTERS = Object.freeze([
   // key, FLOPs per event, group, label
-  ['path', 110, 'sampling', '路径采样'],          // 5 sample dims, sensor point, pupil proposal, launch weight, camera transform
+  ['path', 0, 'sampling', '尝试路径'],          // denominator only; count shared launch and successful transforms separately
   ['lensSurface', 115, 'lens', '镜面求交'],        // tolerance, conic quadratic, root check, aperture, 2 LUT indices, Snell + normalize
   ['sag', 18, 'lens', '矢高'],                     // conic sag without polynomial
   ['normal', 27, 'lens', '法线'],                  // conic slope + normalize, without polynomial
@@ -25,6 +26,8 @@ export const WORK_COUNTERS = Object.freeze([
   ['noise', 90, 'shading', '噪声'],                // 3D gradient noise: fades, 8 gradients, trilinear
   ['spectral', 60, 'sampling', '光谱'],            // RGB -> non-negative spectrum -> XYZ for one wavelength
   ['environment', 80, 'shading', '环境'],          // sky / stars / moon (noise octaves counted separately)
+  ['opticalLaunch', 70, 'sampling', '光学发射'],   // sensor/pupil sampling and launch PDF, once per shared optical sample
+  ['cameraTransform', 40, 'sampling', '相机变换'], // successful destination ray; weights retain the former 110 total
 ]);
 export const WORK_GROUPS = Object.freeze({ lens: '镜头', bvh: 'BVH', shading: '着色', sampling: '采样与光谱' });
 

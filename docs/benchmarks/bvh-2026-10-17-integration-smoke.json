@@ -1,0 +1,2954 @@
+{
+  "schema": 2,
+  "baselineChanges": [
+    "Exact parallel-axis slab handling; original failing baseline retained by optional original variant"
+  ],
+  "sourceCommit": "dbfdffb702bf50c03ed7bd109734946bf146a87b",
+  "createdAt": "2026-10-17T05:14:46.309Z",
+  "methodology": {
+    "rayCount": 512,
+    "rounds": 3,
+    "warmups": 2,
+    "selected": [
+      "baseline",
+      "branchless-slabs",
+      "leaf8",
+      "stack-proved"
+    ],
+    "workloadRevision": "2026-10-17-restored-v2; compare only identical ray and geometry hashes within this report",
+    "timing": "Timestamp-query around one isolated nearest-hit compute pass; compilation, scene build, warmups and readback excluded.",
+    "ordering": "Each round rotates variants and reverses every second round; one untimed warm dispatch precedes every sample; paired baseline ratios retained. Interleaved, not fully position-balanced.",
+    "instrumentation": "Work counters and stack peak are measured in a separate untimed pipeline.",
+    "scope": "Static scene geometry, deterministic diagnostic and camera/aperture rays. No complete-render or actual lens-exit-ray speedup claim.",
+    "thresholds": {
+      "relativeT": 0.00002,
+      "barycentric": 0.001,
+      "sameInstanceSharedTopologyBoundaryTie": 0.0001
+    }
+  },
+  "workloads": [
+    {
+      "name": "diagnostic",
+      "rays": 512,
+      "rayHashFNV1a": "2d743e38",
+      "metadata": {
+        "name": "diagnostic",
+        "rayCorpusVersion": "reconstructed-2026-10-17-v1",
+        "corpusNote": "Reconstructed after runtime reset; not asserted byte-identical to the initial corpus.",
+        "sceneSource": "diagnosticScene()",
+        "sceneBuildMs": 10.399999999441206,
+        "sceneCounts": {
+          "meshes": 6,
+          "instances": 16,
+          "blas": 11,
+          "uniqueTriangles": 216,
+          "expandedTriangles": 616
+        },
+        "rayCount": 512,
+        "rayStride": 8,
+        "rayFormat": "f32: origin.xyz,tMin,direction.xyz,tMax",
+        "stackBound": 15,
+        "stackCapacity": 64,
+        "bvh": {
+          "nodes": 170,
+          "tlasNodes": 31,
+          "blasNodes": 139,
+          "triangles": 216,
+          "vertices": 514,
+          "instances": 16,
+          "tlasDepth": 8,
+          "maxBlasDepth": 7,
+          "stackBound": 15,
+          "tlasLargestLeaf": 1,
+          "bytes": {
+            "nodes": 5440,
+            "triangles": 13824,
+            "vertices": 24672,
+            "instances": 2048
+          },
+          "timing": {
+            "blasMs": 15,
+            "tlasMs": 0,
+            "packMs": 1,
+            "totalMs": 18,
+            "blasRebuilt": 11,
+            "blasReused": 0
+          }
+        },
+        "referenceRayCount": 512,
+        "referenceMs": 54.39999999944121,
+        "referenceMapping": "Prefix-aligned f64 bruteForceIntersect on f32 input rays; source instance/primitive IDs.",
+        "seed": 20261017,
+        "distribution": {
+          "sphere": 240,
+          "aimed": 210,
+          "axisParallel": 30,
+          "hidden": 32
+        },
+        "hiddenTemplates": 4,
+        "directionsNormalized": false
+      },
+      "baselineBvh": {
+        "nodes": 170,
+        "tlasNodes": 31,
+        "blasNodes": 139,
+        "triangles": 216,
+        "vertices": 514,
+        "instances": 16,
+        "tlasDepth": 8,
+        "maxBlasDepth": 7,
+        "stackBound": 15,
+        "tlasLargestLeaf": 1,
+        "bytes": {
+          "nodes": 5440,
+          "triangles": 13824,
+          "vertices": 24672,
+          "instances": 2048
+        },
+        "timing": {
+          "blasMs": 15,
+          "tlasMs": 0,
+          "packMs": 1,
+          "totalMs": 18,
+          "blasRebuilt": 11,
+          "blasReused": 0
+        }
+      },
+      "baselineBufferHashesFNV1a": {
+        "nodes": "7c246d17",
+        "triangles": "881efbe5",
+        "instances": "d6485269"
+      },
+      "variants": [
+        {
+          "name": "baseline",
+          "shaderName": "baseline",
+          "leafTarget": 4,
+          "stackCapacity": 64,
+          "provedStackCapacity": 12,
+          "bvh": {
+            "nodes": 170,
+            "tlasNodes": 31,
+            "blasNodes": 139,
+            "triangles": 216,
+            "vertices": 514,
+            "instances": 16,
+            "tlasDepth": 8,
+            "maxBlasDepth": 7,
+            "stackBound": 15,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 5440,
+              "triangles": 13824,
+              "vertices": 24672,
+              "instances": 2048
+            },
+            "timing": {
+              "blasMs": 15,
+              "tlasMs": 0,
+              "packMs": 1,
+              "totalMs": 18,
+              "blasRebuilt": 11,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 352,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 2.1746709713098666e-7,
+            "maxBarycentricError": 0.000012078795862235925,
+            "examples": [],
+            "passed": true
+          },
+          "observed": {
+            "visitsPerRay": 6.865234375,
+            "boxesPerRay": 11.958984375,
+            "trianglesPerRay": 2.7578125,
+            "instancesPerRay": 0.841796875,
+            "peakStack": 7,
+            "tlasBoxesPerRay": 6.7890625,
+            "blasBoxesPerRay": 5.169921875,
+            "found": 247,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            5.943374,
+            5.957544,
+            6.319349
+          ],
+          "rawWallMs": [
+            23.299999999813735,
+            7.7000000001862645,
+            7.599999999627471
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "uninstrumentedReference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 2.1746709713098666e-7,
+            "maxBarycentricError": 0.000012078795862235925,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 5.957544,
+            "min": 5.943374,
+            "max": 6.319349,
+            "mean": 6.073422333333333,
+            "p25": 5.943374,
+            "p75": 5.957544
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 7.7000000001862645,
+            "min": 7.599999999627471,
+            "max": 23.299999999813735,
+            "mean": 12.866666666542491,
+            "p25": 7.599999999627471,
+            "p75": 7.7000000001862645
+          },
+          "medianSpeedup": 1,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1,
+            "min": 1,
+            "max": 1,
+            "mean": 1,
+            "p25": 1,
+            "p75": 1
+          },
+          "timeSavedPercent": 0,
+          "passed": true
+        },
+        {
+          "name": "branchless-slabs",
+          "shaderName": "branchless-slabs",
+          "leafTarget": 4,
+          "stackCapacity": 64,
+          "provedStackCapacity": 12,
+          "bvh": {
+            "nodes": 170,
+            "tlasNodes": 31,
+            "blasNodes": 139,
+            "triangles": 216,
+            "vertices": 514,
+            "instances": 16,
+            "tlasDepth": 8,
+            "maxBlasDepth": 7,
+            "stackBound": 15,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 5440,
+              "triangles": 13824,
+              "vertices": 24672,
+              "instances": 2048
+            },
+            "timing": {
+              "blasMs": 15,
+              "tlasMs": 0,
+              "packMs": 1,
+              "totalMs": 18,
+              "blasRebuilt": 11,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 272,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 2.1746709713098666e-7,
+            "maxBarycentricError": 0.000012078795862235925,
+            "examples": [],
+            "passed": true
+          },
+          "observed": {
+            "visitsPerRay": 6.865234375,
+            "boxesPerRay": 11.958984375,
+            "trianglesPerRay": 2.7578125,
+            "instancesPerRay": 0.841796875,
+            "peakStack": 7,
+            "tlasBoxesPerRay": 6.7890625,
+            "blasBoxesPerRay": 5.169921875,
+            "found": 247,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            5.462793,
+            6.0161,
+            5.647847
+          ],
+          "rawWallMs": [
+            6.6000000005587935,
+            8.299999999813735,
+            6.099999999627471
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "uninstrumentedReference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 2.1746709713098666e-7,
+            "maxBarycentricError": 0.000012078795862235925,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 5.647847,
+            "min": 5.462793,
+            "max": 6.0161,
+            "mean": 5.708913333333332,
+            "p25": 5.462793,
+            "p75": 5.647847
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 6.6000000005587935,
+            "min": 6.099999999627471,
+            "max": 8.299999999813735,
+            "mean": 7,
+            "p25": 6.099999999627471,
+            "p75": 6.6000000005587935
+          },
+          "medianSpeedup": 1.054834523668931,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1.0879734963415235,
+            "min": 0.9902667841292533,
+            "max": 1.1188952179476535,
+            "mean": 1.0657118328061435,
+            "p25": 0.9902667841292533,
+            "p75": 1.0879734963415235
+          },
+          "timeSavedPercent": 5.198400548951055,
+          "passed": true
+        },
+        {
+          "name": "leaf8",
+          "shaderName": "baseline",
+          "leafTarget": 8,
+          "stackCapacity": 64,
+          "provedStackCapacity": 11,
+          "bvh": {
+            "nodes": 112,
+            "tlasNodes": 31,
+            "blasNodes": 81,
+            "triangles": 216,
+            "vertices": 514,
+            "instances": 16,
+            "tlasDepth": 8,
+            "maxBlasDepth": 6,
+            "stackBound": 14,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 3584,
+              "triangles": 13824,
+              "vertices": 24672,
+              "instances": 2048
+            },
+            "requestedMaxLeaf": 8,
+            "largestBLASLeaf": 8,
+            "rootLeafInstanceCount": 7,
+            "rootLeafInstanceRatio": 0.4375,
+            "buildMs": 18.700000000186265,
+            "timing": {
+              "blasMs": 4,
+              "tlasMs": 14,
+              "packMs": 0.30000000074505806,
+              "tlasReused": false,
+              "blasRebuilt": 11,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 352,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 2.1746709713098666e-7,
+            "maxBarycentricError": 0.000012078795862235925,
+            "examples": [],
+            "passed": true
+          },
+          "observed": {
+            "visitsPerRay": 6.11328125,
+            "boxesPerRay": 10.537109375,
+            "trianglesPerRay": 4.416015625,
+            "instancesPerRay": 0.841796875,
+            "peakStack": 6,
+            "tlasBoxesPerRay": 6.7890625,
+            "blasBoxesPerRay": 3.748046875,
+            "found": 247,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            5.228116,
+            5.743197,
+            5.815373
+          ],
+          "rawWallMs": [
+            6.400000000372529,
+            7.199999999254942,
+            6.3999999994412065
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "uninstrumentedReference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 2.1746709713098666e-7,
+            "maxBarycentricError": 0.000012078795862235925,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 5.743197,
+            "min": 5.228116,
+            "max": 5.815373,
+            "mean": 5.595562,
+            "p25": 5.228116,
+            "p75": 5.743197
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 6.400000000372529,
+            "min": 6.3999999994412065,
+            "max": 7.199999999254942,
+            "mean": 6.6666666663562255,
+            "p25": 6.3999999994412065,
+            "p75": 6.400000000372529
+          },
+          "medianSpeedup": 1.0373218958012411,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1.0866627127786987,
+            "min": 1.0373218958012411,
+            "max": 1.136809894807231,
+            "mean": 1.086931501129057,
+            "p25": 1.0373218958012411,
+            "p75": 1.0866627127786987
+          },
+          "timeSavedPercent": 3.5979088026878325,
+          "passed": true
+        },
+        {
+          "name": "stack-proved",
+          "shaderName": "stack-size",
+          "leafTarget": 4,
+          "stackCapacity": 12,
+          "provedStackCapacity": 12,
+          "bvh": {
+            "nodes": 170,
+            "tlasNodes": 31,
+            "blasNodes": 139,
+            "triangles": 216,
+            "vertices": 514,
+            "instances": 16,
+            "tlasDepth": 8,
+            "maxBlasDepth": 7,
+            "stackBound": 15,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 5440,
+              "triangles": 13824,
+              "vertices": 24672,
+              "instances": 2048
+            },
+            "timing": {
+              "blasMs": 15,
+              "tlasMs": 0,
+              "packMs": 1,
+              "totalMs": 18,
+              "blasRebuilt": 11,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 268.40000000037253,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 2.1746709713098666e-7,
+            "maxBarycentricError": 0.000012078795862235925,
+            "examples": [],
+            "passed": true
+          },
+          "observed": {
+            "visitsPerRay": 6.865234375,
+            "boxesPerRay": 11.958984375,
+            "trianglesPerRay": 2.7578125,
+            "instancesPerRay": 0.841796875,
+            "peakStack": 7,
+            "tlasBoxesPerRay": 6.7890625,
+            "blasBoxesPerRay": 5.169921875,
+            "found": 247,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            5.63027,
+            6.074667,
+            5.614937
+          ],
+          "rawWallMs": [
+            7.900000000372529,
+            6.6000000005587935,
+            7.199999999254942
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "uninstrumentedReference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 2.1746709713098666e-7,
+            "maxBarycentricError": 0.000012078795862235925,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 5.63027,
+            "min": 5.614937,
+            "max": 6.074667,
+            "mean": 5.773291333333333,
+            "p25": 5.614937,
+            "p75": 5.63027
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 7.199999999254942,
+            "min": 6.6000000005587935,
+            "max": 7.900000000372529,
+            "mean": 7.2333333333954215,
+            "p25": 6.6000000005587935,
+            "p75": 7.199999999254942
+          },
+          "medianSpeedup": 1.058127585355587,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1.0556108321625783,
+            "min": 0.9807194369666684,
+            "max": 1.1254532330460698,
+            "mean": 1.0539278340584388,
+            "p25": 0.9807194369666684,
+            "p75": 1.0556108321625783
+          },
+          "timeSavedPercent": 5.493438235621939,
+          "passed": true
+        }
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "order": [
+            "baseline",
+            "branchless-slabs",
+            "leaf8",
+            "stack-proved"
+          ],
+          "samples": {
+            "baseline": {
+              "gpuMs": 5.943374,
+              "wallMs": 23.299999999813735
+            },
+            "branchless-slabs": {
+              "gpuMs": 5.462793,
+              "wallMs": 6.6000000005587935
+            },
+            "leaf8": {
+              "gpuMs": 5.228116,
+              "wallMs": 6.400000000372529
+            },
+            "stack-proved": {
+              "gpuMs": 5.63027,
+              "wallMs": 7.900000000372529
+            }
+          }
+        },
+        {
+          "round": 1,
+          "order": [
+            "baseline",
+            "stack-proved",
+            "leaf8",
+            "branchless-slabs"
+          ],
+          "samples": {
+            "baseline": {
+              "gpuMs": 5.957544,
+              "wallMs": 7.7000000001862645
+            },
+            "stack-proved": {
+              "gpuMs": 6.074667,
+              "wallMs": 6.6000000005587935
+            },
+            "leaf8": {
+              "gpuMs": 5.743197,
+              "wallMs": 7.199999999254942
+            },
+            "branchless-slabs": {
+              "gpuMs": 6.0161,
+              "wallMs": 8.299999999813735
+            }
+          }
+        },
+        {
+          "round": 2,
+          "order": [
+            "leaf8",
+            "stack-proved",
+            "baseline",
+            "branchless-slabs"
+          ],
+          "samples": {
+            "leaf8": {
+              "gpuMs": 5.815373,
+              "wallMs": 6.3999999994412065
+            },
+            "stack-proved": {
+              "gpuMs": 5.614937,
+              "wallMs": 7.199999999254942
+            },
+            "baseline": {
+              "gpuMs": 6.319349,
+              "wallMs": 7.599999999627471
+            },
+            "branchless-slabs": {
+              "gpuMs": 5.647847,
+              "wallMs": 6.099999999627471
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "edges",
+      "rays": 512,
+      "rayHashFNV1a": "9109a0c6",
+      "metadata": {
+        "name": "edges",
+        "rayCorpusVersion": "reconstructed-2026-10-17-v1",
+        "corpusNote": "Reconstructed after runtime reset; not asserted byte-identical to the initial corpus.",
+        "sceneSource": "benchmark edgeScene()",
+        "sceneBuildMs": 0.599999999627471,
+        "sceneCounts": {
+          "meshes": 4,
+          "instances": 4,
+          "blas": 3,
+          "uniqueTriangles": 6,
+          "expandedTriangles": 8
+        },
+        "rayCount": 512,
+        "rayStride": 8,
+        "rayFormat": "f32: origin.xyz,tMin,direction.xyz,tMax",
+        "stackBound": 4,
+        "stackCapacity": 64,
+        "bvh": {
+          "nodes": 10,
+          "tlasNodes": 7,
+          "blasNodes": 3,
+          "triangles": 6,
+          "vertices": 12,
+          "instances": 4,
+          "tlasDepth": 3,
+          "maxBlasDepth": 1,
+          "stackBound": 4,
+          "tlasLargestLeaf": 1,
+          "bytes": {
+            "nodes": 320,
+            "triangles": 384,
+            "vertices": 576,
+            "instances": 512
+          },
+          "timing": {
+            "blasMs": 0,
+            "tlasMs": 0,
+            "packMs": 0,
+            "totalMs": 0,
+            "blasRebuilt": 3,
+            "blasReused": 0
+          }
+        },
+        "referenceRayCount": 512,
+        "referenceMs": 7.8999999994412065,
+        "referenceMapping": "Prefix-aligned f64 bruteForceIntersect on f32 input rays; source instance/primitive IDs.",
+        "purpose": "Correctness only: shared edges/vertices, parallel/coplanar rays, strict ray intervals, negative/nonuniform transforms.",
+        "uniqueRayCount": 24,
+        "repeatedForRequestedCount": true,
+        "allowEqualDistanceEdgeTies": true
+      },
+      "baselineBvh": {
+        "nodes": 10,
+        "tlasNodes": 7,
+        "blasNodes": 3,
+        "triangles": 6,
+        "vertices": 12,
+        "instances": 4,
+        "tlasDepth": 3,
+        "maxBlasDepth": 1,
+        "stackBound": 4,
+        "tlasLargestLeaf": 1,
+        "bytes": {
+          "nodes": 320,
+          "triangles": 384,
+          "vertices": 576,
+          "instances": 512
+        },
+        "timing": {
+          "blasMs": 0,
+          "tlasMs": 0,
+          "packMs": 0,
+          "totalMs": 0,
+          "blasRebuilt": 3,
+          "blasReused": 0
+        }
+      },
+      "baselineBufferHashesFNV1a": {
+        "nodes": "23b7a163",
+        "triangles": "27e5e106",
+        "instances": "258bdf5a"
+      },
+      "variants": [
+        {
+          "name": "baseline",
+          "shaderName": "baseline",
+          "leafTarget": 4,
+          "stackCapacity": 64,
+          "provedStackCapacity": 4,
+          "bvh": {
+            "nodes": 10,
+            "tlasNodes": 7,
+            "blasNodes": 3,
+            "triangles": 6,
+            "vertices": 12,
+            "instances": 4,
+            "tlasDepth": 3,
+            "maxBlasDepth": 1,
+            "stackBound": 4,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 320,
+              "triangles": 384,
+              "vertices": 576,
+              "instances": 512
+            },
+            "timing": {
+              "blasMs": 0,
+              "tlasMs": 0,
+              "packMs": 0,
+              "totalMs": 0,
+              "blasRebuilt": 3,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 355.40000000037253,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 1.999999943436137e-9,
+            "examples": [],
+            "passed": true
+          },
+          "observed": {
+            "visitsPerRay": 3.9140625,
+            "boxesPerRay": 6.12890625,
+            "trianglesPerRay": 1.7421875,
+            "instancesPerRay": 0.95703125,
+            "peakStack": 1,
+            "tlasBoxesPerRay": 5.171875,
+            "blasBoxesPerRay": 0.95703125,
+            "found": 382,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            1.546505,
+            1.640895,
+            1.500888
+          ],
+          "rawWallMs": [
+            4,
+            4,
+            2.2000000001862645
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "uninstrumentedReference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 1.999999943436137e-9,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 1.546505,
+            "min": 1.500888,
+            "max": 1.640895,
+            "mean": 1.5627626666666667,
+            "p25": 1.500888,
+            "p75": 1.546505
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 4,
+            "min": 2.2000000001862645,
+            "max": 4,
+            "mean": 3.400000000062088,
+            "p25": 2.2000000001862645,
+            "p75": 4
+          },
+          "medianSpeedup": 1,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1,
+            "min": 1,
+            "max": 1,
+            "mean": 1,
+            "p25": 1,
+            "p75": 1
+          },
+          "timeSavedPercent": 0,
+          "passed": true
+        },
+        {
+          "name": "branchless-slabs",
+          "shaderName": "branchless-slabs",
+          "leafTarget": 4,
+          "stackCapacity": 64,
+          "provedStackCapacity": 4,
+          "bvh": {
+            "nodes": 10,
+            "tlasNodes": 7,
+            "blasNodes": 3,
+            "triangles": 6,
+            "vertices": 12,
+            "instances": 4,
+            "tlasDepth": 3,
+            "maxBlasDepth": 1,
+            "stackBound": 4,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 320,
+              "triangles": 384,
+              "vertices": 576,
+              "instances": 512
+            },
+            "timing": {
+              "blasMs": 0,
+              "tlasMs": 0,
+              "packMs": 0,
+              "totalMs": 0,
+              "blasRebuilt": 3,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 248.5,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 1.999999943436137e-9,
+            "examples": [],
+            "passed": true
+          },
+          "observed": {
+            "visitsPerRay": 3.9140625,
+            "boxesPerRay": 6.12890625,
+            "trianglesPerRay": 1.7421875,
+            "instancesPerRay": 0.95703125,
+            "peakStack": 1,
+            "tlasBoxesPerRay": 5.171875,
+            "blasBoxesPerRay": 0.95703125,
+            "found": 382,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            1.364105,
+            1.419948,
+            1.643719
+          ],
+          "rawWallMs": [
+            2.2000000001862645,
+            2.199999999254942,
+            3.900000000372529
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "uninstrumentedReference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 1.999999943436137e-9,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 1.419948,
+            "min": 1.364105,
+            "max": 1.643719,
+            "mean": 1.475924,
+            "p25": 1.364105,
+            "p75": 1.419948
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 2.2000000001862645,
+            "min": 2.199999999254942,
+            "max": 3.900000000372529,
+            "mean": 2.7666666666045785,
+            "p25": 2.199999999254942,
+            "p75": 2.2000000001862645
+          },
+          "medianSpeedup": 1.0891279117263448,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1.133714046939202,
+            "min": 0.9131049771889235,
+            "max": 1.1556021769811289,
+            "mean": 1.0674737337030848,
+            "p25": 0.9131049771889235,
+            "p75": 1.133714046939202
+          },
+          "timeSavedPercent": 8.183420034206158,
+          "passed": true
+        },
+        {
+          "name": "leaf8",
+          "shaderName": "baseline",
+          "leafTarget": 8,
+          "stackCapacity": 64,
+          "provedStackCapacity": 4,
+          "bvh": {
+            "nodes": 10,
+            "tlasNodes": 7,
+            "blasNodes": 3,
+            "triangles": 6,
+            "vertices": 12,
+            "instances": 4,
+            "tlasDepth": 3,
+            "maxBlasDepth": 1,
+            "stackBound": 4,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 320,
+              "triangles": 384,
+              "vertices": 576,
+              "instances": 512
+            },
+            "requestedMaxLeaf": 8,
+            "largestBLASLeaf": 2,
+            "rootLeafInstanceCount": 4,
+            "rootLeafInstanceRatio": 1,
+            "buildMs": 0.30000000074505806,
+            "timing": {
+              "blasMs": 0.09999999962747097,
+              "tlasMs": 0,
+              "packMs": 0.10000000055879354,
+              "tlasReused": false,
+              "blasRebuilt": 3,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 355.40000000037253,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 1.999999943436137e-9,
+            "examples": [],
+            "passed": true
+          },
+          "observed": {
+            "visitsPerRay": 3.9140625,
+            "boxesPerRay": 6.12890625,
+            "trianglesPerRay": 1.7421875,
+            "instancesPerRay": 0.95703125,
+            "peakStack": 1,
+            "tlasBoxesPerRay": 5.171875,
+            "blasBoxesPerRay": 0.95703125,
+            "found": 382,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            1.52936,
+            1.490623,
+            1.535419
+          ],
+          "rawWallMs": [
+            3.800000000745058,
+            2.2999999998137355,
+            2
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "uninstrumentedReference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 1.999999943436137e-9,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 1.52936,
+            "min": 1.490623,
+            "max": 1.535419,
+            "mean": 1.5184673333333334,
+            "p25": 1.490623,
+            "p75": 1.52936
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 2.2999999998137355,
+            "min": 2,
+            "max": 3.800000000745058,
+            "mean": 2.7000000001862645,
+            "p25": 2,
+            "p75": 2.2999999998137355
+          },
+          "medianSpeedup": 1.0112105717424282,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1.0112105717424282,
+            "min": 0.9775103733899345,
+            "max": 1.1008115398729257,
+            "mean": 1.0298441616684295,
+            "p25": 0.9775103733899345,
+            "p75": 1.0112105717424282
+          },
+          "timeSavedPercent": 1.108628811416712,
+          "passed": true
+        },
+        {
+          "name": "stack-proved",
+          "shaderName": "stack-size",
+          "leafTarget": 4,
+          "stackCapacity": 4,
+          "provedStackCapacity": 4,
+          "bvh": {
+            "nodes": 10,
+            "tlasNodes": 7,
+            "blasNodes": 3,
+            "triangles": 6,
+            "vertices": 12,
+            "instances": 4,
+            "tlasDepth": 3,
+            "maxBlasDepth": 1,
+            "stackBound": 4,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 320,
+              "triangles": 384,
+              "vertices": 576,
+              "instances": 512
+            },
+            "timing": {
+              "blasMs": 0,
+              "tlasMs": 0,
+              "packMs": 0,
+              "totalMs": 0,
+              "blasRebuilt": 3,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 260,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 1.999999943436137e-9,
+            "examples": [],
+            "passed": true
+          },
+          "observed": {
+            "visitsPerRay": 3.9140625,
+            "boxesPerRay": 6.12890625,
+            "trianglesPerRay": 1.7421875,
+            "instancesPerRay": 0.95703125,
+            "peakStack": 1,
+            "tlasBoxesPerRay": 5.171875,
+            "blasBoxesPerRay": 0.95703125,
+            "found": 382,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            1.471264,
+            1.489842,
+            1.416994
+          ],
+          "rawWallMs": [
+            2.099999999627471,
+            2.2999999998137355,
+            2.099999999627471
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "uninstrumentedReference": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 1.999999943436137e-9,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 1.471264,
+            "min": 1.416994,
+            "max": 1.489842,
+            "mean": 1.4593666666666667,
+            "p25": 1.416994,
+            "p75": 1.471264
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 2.099999999627471,
+            "min": 2.099999999627471,
+            "max": 2.2999999998137355,
+            "mean": 2.166666666356226,
+            "p25": 2.099999999627471,
+            "p75": 2.099999999627471
+          },
+          "medianSpeedup": 1.0511403799725951,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1.0592056141380979,
+            "min": 1.0511403799725951,
+            "max": 1.10138860362374,
+            "mean": 1.070578199244811,
+            "p25": 1.0511403799725951,
+            "p75": 1.0592056141380979
+          },
+          "timeSavedPercent": 4.865228369775732,
+          "passed": true
+        }
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "order": [
+            "baseline",
+            "branchless-slabs",
+            "leaf8",
+            "stack-proved"
+          ],
+          "samples": {
+            "baseline": {
+              "gpuMs": 1.546505,
+              "wallMs": 4
+            },
+            "branchless-slabs": {
+              "gpuMs": 1.364105,
+              "wallMs": 2.2000000001862645
+            },
+            "leaf8": {
+              "gpuMs": 1.52936,
+              "wallMs": 3.800000000745058
+            },
+            "stack-proved": {
+              "gpuMs": 1.471264,
+              "wallMs": 2.099999999627471
+            }
+          }
+        },
+        {
+          "round": 1,
+          "order": [
+            "baseline",
+            "stack-proved",
+            "leaf8",
+            "branchless-slabs"
+          ],
+          "samples": {
+            "baseline": {
+              "gpuMs": 1.640895,
+              "wallMs": 4
+            },
+            "stack-proved": {
+              "gpuMs": 1.489842,
+              "wallMs": 2.2999999998137355
+            },
+            "leaf8": {
+              "gpuMs": 1.490623,
+              "wallMs": 2.2999999998137355
+            },
+            "branchless-slabs": {
+              "gpuMs": 1.419948,
+              "wallMs": 2.199999999254942
+            }
+          }
+        },
+        {
+          "round": 2,
+          "order": [
+            "leaf8",
+            "stack-proved",
+            "baseline",
+            "branchless-slabs"
+          ],
+          "samples": {
+            "leaf8": {
+              "gpuMs": 1.535419,
+              "wallMs": 2
+            },
+            "stack-proved": {
+              "gpuMs": 1.416994,
+              "wallMs": 2.099999999627471
+            },
+            "baseline": {
+              "gpuMs": 1.500888,
+              "wallMs": 2.2000000001862645
+            },
+            "branchless-slabs": {
+              "gpuMs": 1.643719,
+              "wallMs": 3.900000000372529
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "villa",
+      "rays": 512,
+      "rayHashFNV1a": "a1642fbb",
+      "metadata": {
+        "name": "villa",
+        "rayCorpusVersion": "reconstructed-2026-10-17-v1",
+        "corpusNote": "Reconstructed after runtime reset; not asserted byte-identical to the initial corpus.",
+        "sceneSource": "buildSanteiScene()",
+        "sceneBuildMs": 1258.7000000001863,
+        "sceneCounts": {
+          "meshes": 315,
+          "instances": 263992,
+          "blas": 213,
+          "uniqueTriangles": 175654,
+          "expandedTriangles": 3471208
+        },
+        "rayCount": 512,
+        "rayStride": 8,
+        "rayFormat": "f32: origin.xyz,tMin,direction.xyz,tMax",
+        "stackBound": 54,
+        "stackCapacity": 64,
+        "bvh": {
+          "nodes": 634040,
+          "tlasNodes": 527983,
+          "blasNodes": 106057,
+          "triangles": 175654,
+          "vertices": 139727,
+          "instances": 263992,
+          "tlasDepth": 30,
+          "maxBlasDepth": 24,
+          "stackBound": 54,
+          "tlasLargestLeaf": 1,
+          "bytes": {
+            "nodes": 20289280,
+            "triangles": 11241856,
+            "vertices": 6706896,
+            "instances": 33790976
+          },
+          "timing": {
+            "blasMs": 504,
+            "tlasMs": 1331,
+            "packMs": 181,
+            "totalMs": 2036,
+            "blasRebuilt": 213,
+            "blasReused": 0
+          }
+        },
+        "referenceRayCount": 0,
+        "referenceMs": 0,
+        "referenceMapping": null,
+        "seed": 3419781,
+        "camera": {
+          "position": [
+            21,
+            13,
+            27
+          ],
+          "target": [
+            0,
+            2.7,
+            2
+          ],
+          "fovY": 40,
+          "aspect": 1.5,
+          "focusDistance": 30,
+          "apertureRadius": 0.0125
+        },
+        "grid": [
+          20,
+          13
+        ],
+        "distribution": {
+          "pinhole": 256,
+          "finiteAperture": 256
+        },
+        "directionsNormalizedBeforeF32": true,
+        "limitation": "Geometric camera workload with circular-aperture jitter; not captured physical-lens output and not a full render."
+      },
+      "baselineBvh": {
+        "nodes": 634040,
+        "tlasNodes": 527983,
+        "blasNodes": 106057,
+        "triangles": 175654,
+        "vertices": 139727,
+        "instances": 263992,
+        "tlasDepth": 30,
+        "maxBlasDepth": 24,
+        "stackBound": 54,
+        "tlasLargestLeaf": 1,
+        "bytes": {
+          "nodes": 20289280,
+          "triangles": 11241856,
+          "vertices": 6706896,
+          "instances": 33790976
+        },
+        "timing": {
+          "blasMs": 504,
+          "tlasMs": 1331,
+          "packMs": 181,
+          "totalMs": 2036,
+          "blasRebuilt": 213,
+          "blasReused": 0
+        }
+      },
+      "baselineBufferHashesFNV1a": {
+        "nodes": "3f2180d2",
+        "triangles": "fa926c17",
+        "instances": "70046785"
+      },
+      "variants": [
+        {
+          "name": "baseline",
+          "shaderName": "baseline",
+          "leafTarget": 4,
+          "stackCapacity": 64,
+          "provedStackCapacity": 34,
+          "bvh": {
+            "nodes": 634040,
+            "tlasNodes": 527983,
+            "blasNodes": 106057,
+            "triangles": 175654,
+            "vertices": 139727,
+            "instances": 263992,
+            "tlasDepth": 30,
+            "maxBlasDepth": 24,
+            "stackBound": 54,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 20289280,
+              "triangles": 11241856,
+              "vertices": 6706896,
+              "instances": 33790976
+            },
+            "timing": {
+              "blasMs": 504,
+              "tlasMs": 1331,
+              "packMs": 181,
+              "totalMs": 2036,
+              "blasRebuilt": 213,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 278.90000000037253,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": null,
+          "observed": {
+            "visitsPerRay": 76.81640625,
+            "boxesPerRay": 140.04296875,
+            "trianglesPerRay": 15.92578125,
+            "instancesPerRay": 5.5390625,
+            "peakStack": 15,
+            "tlasBoxesPerRay": 84.15625,
+            "blasBoxesPerRay": 55.88671875,
+            "found": 478,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            42.194866,
+            30.384215,
+            30.639152
+          ],
+          "rawWallMs": [
+            50.40000000037253,
+            31.199999999254942,
+            31.200000000186265
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 30.639152,
+            "min": 30.384215,
+            "max": 42.194866,
+            "mean": 34.40607766666667,
+            "p25": 30.384215,
+            "p75": 30.639152
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 31.200000000186265,
+            "min": 31.199999999254942,
+            "max": 50.40000000037253,
+            "mean": 37.599999999937914,
+            "p25": 31.199999999254942,
+            "p75": 31.200000000186265
+          },
+          "medianSpeedup": 1,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1,
+            "min": 1,
+            "max": 1,
+            "mean": 1,
+            "p25": 1,
+            "p75": 1
+          },
+          "timeSavedPercent": 0,
+          "passed": true
+        },
+        {
+          "name": "branchless-slabs",
+          "shaderName": "branchless-slabs",
+          "leafTarget": 4,
+          "stackCapacity": 64,
+          "provedStackCapacity": 34,
+          "bvh": {
+            "nodes": 634040,
+            "tlasNodes": 527983,
+            "blasNodes": 106057,
+            "triangles": 175654,
+            "vertices": 139727,
+            "instances": 263992,
+            "tlasDepth": 30,
+            "maxBlasDepth": 24,
+            "stackBound": 54,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 20289280,
+              "triangles": 11241856,
+              "vertices": 6706896,
+              "instances": 33790976
+            },
+            "timing": {
+              "blasMs": 504,
+              "tlasMs": 1331,
+              "packMs": 181,
+              "totalMs": 2036,
+              "blasRebuilt": 213,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 244.6000000005588,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": null,
+          "observed": {
+            "visitsPerRay": 76.81640625,
+            "boxesPerRay": 140.04296875,
+            "trianglesPerRay": 15.92578125,
+            "instancesPerRay": 5.5390625,
+            "peakStack": 15,
+            "tlasBoxesPerRay": 84.15625,
+            "blasBoxesPerRay": 55.88671875,
+            "found": 478,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            28.489676,
+            28.475334,
+            27.767329
+          ],
+          "rawWallMs": [
+            29.5,
+            29.59999999962747,
+            29
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 28.475334,
+            "min": 27.767329,
+            "max": 28.489676,
+            "mean": 28.244113,
+            "p25": 27.767329,
+            "p75": 28.475334
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 29.5,
+            "min": 29,
+            "max": 29.59999999962747,
+            "mean": 29.36666666654249,
+            "p25": 29,
+            "p75": 29.5
+          },
+          "medianSpeedup": 1.0759892052539226,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1.103424531758168,
+            "min": 1.0670362988542996,
+            "max": 1.4810581208434943,
+            "mean": 1.217172983818654,
+            "p25": 1.0670362988542996,
+            "p75": 1.103424531758168
+          },
+          "timeSavedPercent": 7.062264647533334,
+          "passed": true
+        },
+        {
+          "name": "leaf8",
+          "shaderName": "baseline",
+          "leafTarget": 8,
+          "stackCapacity": 64,
+          "provedStackCapacity": 33,
+          "bvh": {
+            "nodes": 586738,
+            "tlasNodes": 527983,
+            "blasNodes": 58755,
+            "triangles": 175654,
+            "vertices": 139727,
+            "instances": 263992,
+            "tlasDepth": 30,
+            "maxBlasDepth": 22,
+            "stackBound": 52,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 18775616,
+              "triangles": 11241856,
+              "vertices": 6706896,
+              "instances": 33790976
+            },
+            "requestedMaxLeaf": 8,
+            "largestBLASLeaf": 16,
+            "rootLeafInstanceCount": 200442,
+            "rootLeafInstanceRatio": 0.759273008272978,
+            "buildMs": 1872,
+            "timing": {
+              "blasMs": 312.59999999962747,
+              "tlasMs": 1392,
+              "packMs": 147.8999999994412,
+              "tlasReused": false,
+              "blasRebuilt": 213,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 278.90000000037253,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": null,
+          "observed": {
+            "visitsPerRay": 72.92578125,
+            "boxesPerRay": 133.08203125,
+            "trianglesPerRay": 25.81640625,
+            "instancesPerRay": 5.5390625,
+            "peakStack": 15,
+            "tlasBoxesPerRay": 84.15625,
+            "blasBoxesPerRay": 48.92578125,
+            "found": 478,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            29.474881,
+            28.945558,
+            29.257199
+          ],
+          "rawWallMs": [
+            30.90000000037253,
+            30.100000000558794,
+            30.40000000037253
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 29.257199,
+            "min": 28.945558,
+            "max": 29.474881,
+            "mean": 29.225879333333335,
+            "p25": 28.945558,
+            "p75": 29.257199
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 30.40000000037253,
+            "min": 30.100000000558794,
+            "max": 30.90000000037253,
+            "mean": 30.466666667101283,
+            "p25": 30.100000000558794,
+            "p75": 30.40000000037253
+          },
+          "medianSpeedup": 1.0472346310390137,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1.0497021684639833,
+            "min": 1.0472346310390137,
+            "max": 1.4315533962630755,
+            "mean": 1.1761633985886908,
+            "p25": 1.0472346310390137,
+            "p75": 1.0497021684639833
+          },
+          "timeSavedPercent": 4.510415301311211,
+          "passed": true
+        },
+        {
+          "name": "stack-proved",
+          "shaderName": "stack-size",
+          "leafTarget": 4,
+          "stackCapacity": 34,
+          "provedStackCapacity": 34,
+          "bvh": {
+            "nodes": 634040,
+            "tlasNodes": 527983,
+            "blasNodes": 106057,
+            "triangles": 175654,
+            "vertices": 139727,
+            "instances": 263992,
+            "tlasDepth": 30,
+            "maxBlasDepth": 24,
+            "stackBound": 54,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 20289280,
+              "triangles": 11241856,
+              "vertices": 6706896,
+              "instances": 33790976
+            },
+            "timing": {
+              "blasMs": 504,
+              "tlasMs": 1331,
+              "packMs": 181,
+              "totalMs": 2036,
+              "blasRebuilt": 213,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 266.59999999962747,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": null,
+          "observed": {
+            "visitsPerRay": 76.81640625,
+            "boxesPerRay": 140.04296875,
+            "trianglesPerRay": 15.92578125,
+            "instancesPerRay": 5.5390625,
+            "peakStack": 15,
+            "tlasBoxesPerRay": 84.15625,
+            "blasBoxesPerRay": 55.88671875,
+            "found": 478,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            29.769146,
+            30.220613,
+            30.03522
+          ],
+          "rawWallMs": [
+            30.5,
+            31,
+            30.59999999962747
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 30.03522,
+            "min": 29.769146,
+            "max": 30.220613,
+            "mean": 30.008326333333333,
+            "p25": 29.769146,
+            "p75": 30.03522
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 30.59999999962747,
+            "min": 30.5,
+            "max": 31,
+            "mean": 30.699999999875825,
+            "p25": 30.5,
+            "p75": 30.59999999962747
+          },
+          "medianSpeedup": 1.0201074605080303,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1.0201074605080303,
+            "min": 1.0054135897243381,
+            "max": 1.4174026356013034,
+            "mean": 1.147641228611224,
+            "p25": 1.0054135897243381,
+            "p75": 1.0201074605080303
+          },
+          "timeSavedPercent": 1.9711119942222965,
+          "passed": true
+        }
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "order": [
+            "baseline",
+            "branchless-slabs",
+            "leaf8",
+            "stack-proved"
+          ],
+          "samples": {
+            "baseline": {
+              "gpuMs": 42.194866,
+              "wallMs": 50.40000000037253
+            },
+            "branchless-slabs": {
+              "gpuMs": 28.489676,
+              "wallMs": 29.5
+            },
+            "leaf8": {
+              "gpuMs": 29.474881,
+              "wallMs": 30.90000000037253
+            },
+            "stack-proved": {
+              "gpuMs": 29.769146,
+              "wallMs": 30.5
+            }
+          }
+        },
+        {
+          "round": 1,
+          "order": [
+            "baseline",
+            "stack-proved",
+            "leaf8",
+            "branchless-slabs"
+          ],
+          "samples": {
+            "baseline": {
+              "gpuMs": 30.384215,
+              "wallMs": 31.199999999254942
+            },
+            "stack-proved": {
+              "gpuMs": 30.220613,
+              "wallMs": 31
+            },
+            "leaf8": {
+              "gpuMs": 28.945558,
+              "wallMs": 30.100000000558794
+            },
+            "branchless-slabs": {
+              "gpuMs": 28.475334,
+              "wallMs": 29.59999999962747
+            }
+          }
+        },
+        {
+          "round": 2,
+          "order": [
+            "leaf8",
+            "stack-proved",
+            "baseline",
+            "branchless-slabs"
+          ],
+          "samples": {
+            "leaf8": {
+              "gpuMs": 29.257199,
+              "wallMs": 30.40000000037253
+            },
+            "stack-proved": {
+              "gpuMs": 30.03522,
+              "wallMs": 30.59999999962747
+            },
+            "baseline": {
+              "gpuMs": 30.639152,
+              "wallMs": 31.200000000186265
+            },
+            "branchless-slabs": {
+              "gpuMs": 27.767329,
+              "wallMs": 29
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "vegetation",
+      "rays": 512,
+      "rayHashFNV1a": "819a08bd",
+      "metadata": {
+        "name": "vegetation",
+        "rayCorpusVersion": "reconstructed-2026-10-17-v1",
+        "corpusNote": "Reconstructed after runtime reset; not asserted byte-identical to the initial corpus.",
+        "sceneSource": "buildSanteiScene()",
+        "sceneBuildMs": 1258.7000000001863,
+        "sceneCounts": {
+          "meshes": 315,
+          "instances": 263992,
+          "blas": 213,
+          "uniqueTriangles": 175654,
+          "expandedTriangles": 3471208
+        },
+        "rayCount": 512,
+        "rayStride": 8,
+        "rayFormat": "f32: origin.xyz,tMin,direction.xyz,tMax",
+        "stackBound": 54,
+        "stackCapacity": 64,
+        "bvh": {
+          "nodes": 634040,
+          "tlasNodes": 527983,
+          "blasNodes": 106057,
+          "triangles": 175654,
+          "vertices": 139727,
+          "instances": 263992,
+          "tlasDepth": 30,
+          "maxBlasDepth": 24,
+          "stackBound": 54,
+          "tlasLargestLeaf": 1,
+          "bytes": {
+            "nodes": 20289280,
+            "triangles": 11241856,
+            "vertices": 6706896,
+            "instances": 33790976
+          },
+          "timing": {
+            "blasMs": 504,
+            "tlasMs": 1331,
+            "packMs": 181,
+            "totalMs": 2036,
+            "blasRebuilt": 213,
+            "blasReused": 0
+          }
+        },
+        "referenceRayCount": 0,
+        "referenceMs": 0,
+        "referenceMapping": null,
+        "seed": 3419782,
+        "camera": {
+          "position": [
+            17,
+            3.5,
+            8
+          ],
+          "target": [
+            13,
+            2.7,
+            -1.5
+          ],
+          "fovY": 55,
+          "aspect": 1.5,
+          "focusDistance": 10,
+          "apertureRadius": 0.0125
+        },
+        "grid": [
+          20,
+          13
+        ],
+        "distribution": {
+          "pinhole": 256,
+          "finiteAperture": 256
+        },
+        "directionsNormalizedBeforeF32": true,
+        "limitation": "Geometric camera workload with circular-aperture jitter; not captured physical-lens output and not a full render."
+      },
+      "baselineBvh": {
+        "nodes": 634040,
+        "tlasNodes": 527983,
+        "blasNodes": 106057,
+        "triangles": 175654,
+        "vertices": 139727,
+        "instances": 263992,
+        "tlasDepth": 30,
+        "maxBlasDepth": 24,
+        "stackBound": 54,
+        "tlasLargestLeaf": 1,
+        "bytes": {
+          "nodes": 20289280,
+          "triangles": 11241856,
+          "vertices": 6706896,
+          "instances": 33790976
+        },
+        "timing": {
+          "blasMs": 504,
+          "tlasMs": 1331,
+          "packMs": 181,
+          "totalMs": 2036,
+          "blasRebuilt": 213,
+          "blasReused": 0
+        }
+      },
+      "baselineBufferHashesFNV1a": {
+        "nodes": "3f2180d2",
+        "triangles": "fa926c17",
+        "instances": "70046785"
+      },
+      "variants": [
+        {
+          "name": "baseline",
+          "shaderName": "baseline",
+          "leafTarget": 4,
+          "stackCapacity": 64,
+          "provedStackCapacity": 34,
+          "bvh": {
+            "nodes": 634040,
+            "tlasNodes": 527983,
+            "blasNodes": 106057,
+            "triangles": 175654,
+            "vertices": 139727,
+            "instances": 263992,
+            "tlasDepth": 30,
+            "maxBlasDepth": 24,
+            "stackBound": 54,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 20289280,
+              "triangles": 11241856,
+              "vertices": 6706896,
+              "instances": 33790976
+            },
+            "timing": {
+              "blasMs": 504,
+              "tlasMs": 1331,
+              "packMs": 181,
+              "totalMs": 2036,
+              "blasRebuilt": 213,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 337.79999999981374,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": null,
+          "observed": {
+            "visitsPerRay": 85.17578125,
+            "boxesPerRay": 155.20703125,
+            "trianglesPerRay": 20.982421875,
+            "instancesPerRay": 5.546875,
+            "peakStack": 14,
+            "tlasBoxesPerRay": 106.76171875,
+            "blasBoxesPerRay": 48.4453125,
+            "found": 432,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            33.839015,
+            33.275671,
+            33.221903
+          ],
+          "rawWallMs": [
+            34.59999999962747,
+            34.200000000186265,
+            34.09999999962747
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 33.275671,
+            "min": 33.221903,
+            "max": 33.839015,
+            "mean": 33.445529666666665,
+            "p25": 33.221903,
+            "p75": 33.275671
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 34.200000000186265,
+            "min": 34.09999999962747,
+            "max": 34.59999999962747,
+            "mean": 34.299999999813735,
+            "p25": 34.09999999962747,
+            "p75": 34.200000000186265
+          },
+          "medianSpeedup": 1,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1,
+            "min": 1,
+            "max": 1,
+            "mean": 1,
+            "p25": 1,
+            "p75": 1
+          },
+          "timeSavedPercent": 0,
+          "passed": true
+        },
+        {
+          "name": "branchless-slabs",
+          "shaderName": "branchless-slabs",
+          "leafTarget": 4,
+          "stackCapacity": 64,
+          "provedStackCapacity": 34,
+          "bvh": {
+            "nodes": 634040,
+            "tlasNodes": 527983,
+            "blasNodes": 106057,
+            "triangles": 175654,
+            "vertices": 139727,
+            "instances": 263992,
+            "tlasDepth": 30,
+            "maxBlasDepth": 24,
+            "stackBound": 54,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 20289280,
+              "triangles": 11241856,
+              "vertices": 6706896,
+              "instances": 33790976
+            },
+            "timing": {
+              "blasMs": 504,
+              "tlasMs": 1331,
+              "packMs": 181,
+              "totalMs": 2036,
+              "blasRebuilt": 213,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 302.79999999981374,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": null,
+          "observed": {
+            "visitsPerRay": 85.17578125,
+            "boxesPerRay": 155.20703125,
+            "trianglesPerRay": 20.982421875,
+            "instancesPerRay": 5.546875,
+            "peakStack": 14,
+            "tlasBoxesPerRay": 106.76171875,
+            "blasBoxesPerRay": 48.4453125,
+            "found": 432,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            30.923205,
+            29.987593,
+            30.982904
+          ],
+          "rawWallMs": [
+            32,
+            31,
+            31.90000000037253
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 30.923205,
+            "min": 29.987593,
+            "max": 30.982904,
+            "mean": 30.631234000000003,
+            "p25": 29.987593,
+            "p75": 30.923205
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 31.90000000037253,
+            "min": 31,
+            "max": 32,
+            "mean": 31.63333333345751,
+            "p25": 31,
+            "p75": 31.90000000037253
+          },
+          "medianSpeedup": 1.076074456059778,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1.0942919726464317,
+            "min": 1.0722656275215519,
+            "max": 1.1096479467358384,
+            "mean": 1.0920685156346075,
+            "p25": 1.0722656275215519,
+            "p75": 1.0942919726464317
+          },
+          "timeSavedPercent": 7.069627536586731,
+          "passed": true
+        },
+        {
+          "name": "leaf8",
+          "shaderName": "baseline",
+          "leafTarget": 8,
+          "stackCapacity": 64,
+          "provedStackCapacity": 33,
+          "bvh": {
+            "nodes": 586738,
+            "tlasNodes": 527983,
+            "blasNodes": 58755,
+            "triangles": 175654,
+            "vertices": 139727,
+            "instances": 263992,
+            "tlasDepth": 30,
+            "maxBlasDepth": 22,
+            "stackBound": 52,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 18775616,
+              "triangles": 11241856,
+              "vertices": 6706896,
+              "instances": 33790976
+            },
+            "requestedMaxLeaf": 8,
+            "largestBLASLeaf": 16,
+            "rootLeafInstanceCount": 200442,
+            "rootLeafInstanceRatio": 0.759273008272978,
+            "buildMs": 189.70000000018626,
+            "timing": {
+              "blasMs": 0,
+              "tlasMs": 0,
+              "packMs": 184.59999999962747,
+              "tlasReused": true,
+              "blasRebuilt": 0,
+              "blasReused": 213
+            }
+          },
+          "compileMs": 337.79999999981374,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": null,
+          "observed": {
+            "visitsPerRay": 80.876953125,
+            "boxesPerRay": 148.4765625,
+            "trianglesPerRay": 29.689453125,
+            "instancesPerRay": 5.546875,
+            "peakStack": 13,
+            "tlasBoxesPerRay": 106.76171875,
+            "blasBoxesPerRay": 41.71484375,
+            "found": 432,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            32.019646,
+            32.415331,
+            32.079364
+          ],
+          "rawWallMs": [
+            32.59999999962747,
+            32.89999999944121,
+            33.40000000037253
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 32.079364,
+            "min": 32.019646,
+            "max": 32.415331,
+            "mean": 32.171447,
+            "p25": 32.019646,
+            "p75": 32.079364
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 32.89999999944121,
+            "min": 32.59999999962747,
+            "max": 33.40000000037253,
+            "mean": 32.9666666664804,
+            "p25": 32.59999999962747,
+            "p75": 32.89999999944121
+          },
+          "medianSpeedup": 1.037292104668908,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1.0356160115892572,
+            "min": 1.0265411449909303,
+            "max": 1.0568203970774692,
+            "mean": 1.0396591845525522,
+            "p25": 1.0265411449909303,
+            "p75": 1.0356160115892572
+          },
+          "timeSavedPercent": 3.595140125048124,
+          "passed": true
+        },
+        {
+          "name": "stack-proved",
+          "shaderName": "stack-size",
+          "leafTarget": 4,
+          "stackCapacity": 34,
+          "provedStackCapacity": 34,
+          "bvh": {
+            "nodes": 634040,
+            "tlasNodes": 527983,
+            "blasNodes": 106057,
+            "triangles": 175654,
+            "vertices": 139727,
+            "instances": 263992,
+            "tlasDepth": 30,
+            "maxBlasDepth": 24,
+            "stackBound": 54,
+            "tlasLargestLeaf": 1,
+            "bytes": {
+              "nodes": 20289280,
+              "triangles": 11241856,
+              "vertices": 6706896,
+              "instances": 33790976
+            },
+            "timing": {
+              "blasMs": 504,
+              "tlasMs": 1331,
+              "packMs": 181,
+              "totalMs": 2036,
+              "blasRebuilt": 213,
+              "blasReused": 0
+            }
+          },
+          "compileMs": 299.6000000005588,
+          "correctness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "reference": null,
+          "observed": {
+            "visitsPerRay": 85.17578125,
+            "boxesPerRay": 155.20703125,
+            "trianglesPerRay": 20.982421875,
+            "instancesPerRay": 5.546875,
+            "peakStack": 14,
+            "tlasBoxesPerRay": 106.76171875,
+            "blasBoxesPerRay": 48.4453125,
+            "found": 432,
+            "traversalErrors": 0
+          },
+          "rawGpuMs": [
+            32.15737,
+            32.86761,
+            32.772308
+          ],
+          "rawWallMs": [
+            33.5,
+            34.09999999962747,
+            34.10000000055879
+          ],
+          "uninstrumentedCorrectness": {
+            "tested": 512,
+            "errors": 0,
+            "statusMismatch": 0,
+            "identityMismatch": 0,
+            "facingMismatch": 0,
+            "distanceMismatch": 0,
+            "barycentricMismatch": 0,
+            "nonFinite": 0,
+            "sharedEdgeTies": 0,
+            "maxRelativeTError": 0,
+            "maxBarycentricError": 0,
+            "examples": [],
+            "passed": true
+          },
+          "gpuMs": {
+            "n": 3,
+            "median": 32.772308,
+            "min": 32.15737,
+            "max": 32.86761,
+            "mean": 32.599095999999996,
+            "p25": 32.15737,
+            "p75": 32.772308
+          },
+          "wallMs": {
+            "n": 3,
+            "median": 34.09999999962747,
+            "min": 33.5,
+            "max": 34.10000000055879,
+            "mean": 33.900000000062086,
+            "p25": 33.5,
+            "p75": 34.09999999962747
+          },
+          "medianSpeedup": 1.015359400381566,
+          "pairedSpeedup": {
+            "n": 3,
+            "median": 1.0137187469372007,
+            "min": 1.0124152927456547,
+            "max": 1.0522942330171903,
+            "mean": 1.0261427575666817,
+            "p25": 1.0124152927456547,
+            "p75": 1.0137187469372007
+          },
+          "timeSavedPercent": 1.5127057843551839,
+          "passed": true
+        }
+      ],
+      "rounds": [
+        {
+          "round": 0,
+          "order": [
+            "baseline",
+            "branchless-slabs",
+            "leaf8",
+            "stack-proved"
+          ],
+          "samples": {
+            "baseline": {
+              "gpuMs": 33.839015,
+              "wallMs": 34.59999999962747
+            },
+            "branchless-slabs": {
+              "gpuMs": 30.923205,
+              "wallMs": 32
+            },
+            "leaf8": {
+              "gpuMs": 32.019646,
+              "wallMs": 32.59999999962747
+            },
+            "stack-proved": {
+              "gpuMs": 32.15737,
+              "wallMs": 33.5
+            }
+          }
+        },
+        {
+          "round": 1,
+          "order": [
+            "baseline",
+            "stack-proved",
+            "leaf8",
+            "branchless-slabs"
+          ],
+          "samples": {
+            "baseline": {
+              "gpuMs": 33.275671,
+              "wallMs": 34.200000000186265
+            },
+            "stack-proved": {
+              "gpuMs": 32.86761,
+              "wallMs": 34.09999999962747
+            },
+            "leaf8": {
+              "gpuMs": 32.415331,
+              "wallMs": 32.89999999944121
+            },
+            "branchless-slabs": {
+              "gpuMs": 29.987593,
+              "wallMs": 31
+            }
+          }
+        },
+        {
+          "round": 2,
+          "order": [
+            "leaf8",
+            "stack-proved",
+            "baseline",
+            "branchless-slabs"
+          ],
+          "samples": {
+            "leaf8": {
+              "gpuMs": 32.079364,
+              "wallMs": 33.40000000037253
+            },
+            "stack-proved": {
+              "gpuMs": 32.772308,
+              "wallMs": 34.10000000055879
+            },
+            "baseline": {
+              "gpuMs": 33.221903,
+              "wallMs": 34.09999999962747
+            },
+            "branchless-slabs": {
+              "gpuMs": 30.982904,
+              "wallMs": 31.90000000037253
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "passed": true,
+  "environment": {
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/134.0.0.0 Safari/537.36",
+    "adapter": {
+      "vendor": "google",
+      "architecture": "swiftshader",
+      "device": "",
+      "description": "",
+      "isFallbackAdapter": true
+    },
+    "timestampQuery": true,
+    "limits": {
+      "storageBufferBytes": 1073741824,
+      "storageBuffers": 8
+    },
+    "label": "main-c593cfd-compatibility",
+    "software": true,
+    "performanceAppliesTo": "This software adapter only; no physical-GPU performance conclusion."
+  },
+  "driver": {
+    "args": [
+      "--software",
+      "--variants",
+      "baseline,branchless-slabs,leaf8,stack-proved",
+      "--rays",
+      "512",
+      "--rounds",
+      "3",
+      "--out",
+      "/workspace/scratch/2520fa79b9f7/lens-sim/artifacts/bvh-integration-smoke.json",
+      "--label",
+      "main-c593cfd-compatibility"
+    ],
+    "query": {
+      "rays": "512",
+      "rounds": "3",
+      "warmups": "2",
+      "variants": "baseline,branchless-slabs,leaf8,stack-proved",
+      "label": "main-c593cfd-compatibility"
+    },
+    "host": {
+      "platform": "linux",
+      "arch": "x64",
+      "node": "v24.19.0",
+      "availableParallelism": 1,
+      "cpuAffinity": "0",
+      "cpuQuota": "800000 100000",
+      "cpuSet": "0-8"
+    },
+    "softwareRequested": true,
+    "softwareConfiguration": "[Processor]\nThreadCount=1\nAffinityMask=0x1\nAffinityPolicy=one\n",
+    "softwareConfigPath": "/tmp/lens-bvh-singleworker/SwiftShader.ini",
+    "launchCwd": "/tmp/lens-bvh-singleworker",
+    "executablePath": "/tmp/lens-sim-playwright/chromium-1161/chrome-linux/chrome",
+    "PLAYWRIGHT_MODULE": "/tmp/lens-sim-pw/node_modules/playwright/index.mjs",
+    "playwrightModule": "file:///tmp/lens-sim-pw/node_modules/playwright/index.mjs",
+    "browserVersion": "134.0.6998.35",
+    "browserArgs": [
+      "--enable-unsafe-webgpu",
+      "--enable-features=Vulkan,WebGPUService",
+      "--use-vulkan=swiftshader",
+      "--use-webgpu-adapter=swiftshader",
+      "--disable-vulkan-surface",
+      "--use-angle=swiftshader",
+      "--ignore-gpu-blocklist",
+      "--disable-gpu-watchdog"
+    ],
+    "headed": false,
+    "wallSeconds": 20.487,
+    "checkpointPolicy": "One snapshot at each transition to the next workload and after Completed; no snapshot per dispatch or measured round."
+  }
+}

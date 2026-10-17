@@ -3,7 +3,7 @@ import {prescriptionSummary,experimentVariants} from './pupil-diverse-cases.js';
 // pre-change implementation; all acceptance and integrals use full f64 tracing.
 import {packLens} from '../src/optics/lens-state.js';
 import {buildPupilTable,samplePupil,pupilBox} from '../src/optics/pupil-sampling.js';
-import {buildPupilTable as legacyBuild,samplePupil as legacySample} from './fixtures/pupil-sampling-legacy.js';
+import {buildPupilTable as legacyBuild} from './fixtures/pupil-sampling-legacy.js';
 import {traceLens} from '../src/optics/optical-reference.js';
 import {sampleDimension} from '../src/spectral/sampler.js';
 export const sweepIds=['7artisans-af-135mm-f1-8-max','zeiss-otus-55mm-f1-4','canon-fl-50mm-f1-8','canon-ef-40mm-f2-8-stm','sony-fe-24mm-f1-4-gm'];

@@ -9,7 +9,6 @@
  * The record is then adapted by src/optics/prescription.js like bundled data.
  */
 /* eslint-disable */
-var PAL = ['#DE4A4A', '#C08E1A', '#2F9945', '#2596D6', '#8654E0', '#7A8892'];
 /* 牌号查得到吗：由调用方注入（网页里是 OPT 的玻璃库，tools/zmx2lens.js 也加载同一份）。
    zmx 的 GLAS 行除了牌号还记了 nd / νd / ΔPg,F；牌号在内置库里查不到时（老牌号，比如已停产的
    SCHOTT SFS3），就用文件自己记的这组数当模型玻璃——否则内核会把整片当空气，一阶量整个错掉
@@ -122,7 +121,6 @@ function parseSeq(text) {
   for (var i = 0; i < lines.length; i++) {
     var ln = lines[i].trim();
     if (!ln || ln[0] === '!') continue;
-    var up = ln.toUpperCase();
     var tk = ln.split(/[\s;]+/).filter(function (x) { return x.length; });
     var key = tk[0].toUpperCase();
 
@@ -756,75 +754,5 @@ function fileToLens(input, file, meta) {
   L.kind = s.kind;
   return L;
 }
-
-/* ---------- 变焦凸轮数据（ZoomCam_Test 导出的 <tag>_凸轮数据.json，format zoomcam-cams v2）----------
-   只取 lens-bench 要用的部分，压成镜头 JSON 里的 zoomcam 字段（网页上现场拖入和 tools/camattach.js 走同一个函数）：
-     nodes  = ∞ 变焦凸轮的全部节点（lensbench.zoom_nodes：f = 对到无限远时的 EFL，x = −1/f，a = 变焦环转角），
-              t 按 keys 的顺序存各间隔（键 = 面号 − 1，和 cfgs[].thi 一样）；
-     focus  = 对焦表（lensbench.focus_model）：每个焦段一行，zu = ln(f/fW)/ln(fT/fW)，v = 1/D（D = 物面到像面），
-              dt = 对焦间隔相对该焦段 ∞ 位置的增量，wf = 工作 F/#（光阑物理大小固定），mfd = 该焦段的最近对焦距离（D）；
-     groups = 各组怎么动（变焦 fixed/cam/track/link × 对焦 none/motor），只用来写说明。
-   约定照凸轮数据自己写的：∞ 位置直接用节点，不再按轴上 RMS 重新对焦（refocus_inf = false）；
-   节点之间按 x 做样条，对焦表行与行之间按 zu 线性、行内按 v 线性。 */
-function camCompact(J) {
-  if (!J || J.format !== 'zoomcam-cams' || !J.lensbench || !J.lensbench.zoom_nodes) throw new Error('不是 zoomcam 导出的凸轮数据（format 应为 zoomcam-cams，且带 lensbench 段）');
-  var lb = J.lensbench, zn = lb.zoom_nodes;
-  var r6 = function (v) { return v == null ? null : +(+v).toFixed(6); };
-  var p10 = function (v) { return v == null ? null : +(+v).toPrecision(10); };   // x = −1/f、v = 1/D 是很小的数，按有效数字存
-  var keys = Object.keys(zn[0].thi).map(Number).sort(function (a, b) { return a - b; });
-  var nodes = zn.map(function (n) {
-    return { f: r6(n.f), x: p10(n.x), a: n.angle_deg == null ? null : r6(n.angle_deg), t: keys.map(function (k) { return r6(n.thi[k]); }) };
-  }).sort(function (a, b) { return a.x - b.x; });
-  for (var i = 1; i < nodes.length; i++) if (!(nodes[i].x > nodes[i - 1].x)) throw new Error('变焦节点的焦距不是单调的（第 ' + i + ' 个）');
-  var focus = null, fm = lb.focus_model, fr = (J.focus && J.focus.rows) || [], check = [];
-  var fW = J.zoom && J.zoom.fW, fT = J.zoom && J.zoom.fT;
-  /* 行与行之间按 zu 插值。zu 不直接用文件里的 zoom_u：2026-09-22 两份导出里这一栏和行自己的焦距对不上
-     （佳能 118.23 那行标 0.503286，按 ln(f/fW)/ln(fT/fW) 应为 0.499980，对应的是 118.62 mm；索尼 171.38 行差 0.0004），
-     而行里的间隔、x = −1/f、∞ EFL 都对应标称焦距。照用会在表点上混进相邻行，1 m 处差到 10 µm 以上。按焦距重算，原值留在 zuFile。 */
-  var zuOf = function (f) { return (fW > 0 && fT > fW) ? Math.log(f / fW) / Math.log(fT / fW) : null; };
-  if (fm && fm.rows && fm.rows.length) {
-    focus = { surf: fm.surf.slice(), rows: fm.rows.map(function (r, ri) {
-      var src = fr[ri] && Math.abs(fr[ri].f - r.f) < 1e-6 ? fr[ri] : null;
-      var ok = src ? src.nodes.filter(function (q) { return q.valid !== false; }) : [];
-      var wf = r.v.map(function (v) {
-        for (var q = 0; q < ok.length; q++) if (Math.abs((ok[q].v || 0) - v) < 1e-12) return r6(ok[q].work_fno);
-        return null;
-      });
-      var zu = zuOf(r.f);
-      if (zu != null && r.zoom_u != null && Math.abs(zu - r.zoom_u) > 1e-4)
-        check.push(r.f + ' mm 行 zoom_u ' + (+r.zoom_u).toFixed(6) + ' ≠ 按焦距算的 ' + zu.toFixed(6));
-      return { f: r6(r.f), zu: p10(zu != null ? zu : r.zoom_u), zuFile: p10(r.zoom_u), v: r.v.map(p10), dt: r.dt.map(function (a) { return a.map(r6); }),
-               D: (r.D_mm || []).map(r6), wf: wf, mfd: src ? r6(src.mfd_mm) : null };
-    }).sort(function (a, b) { return a.zu - b.zu; }) };
-  }
-  var mech = (J.zoom && J.zoom.mechanism) || {};
-  return {
-    v: 1,
-    src: { name: J.lens && J.lens.name, tag: J.lens && J.lens.tag, engine: J.lens && J.lens.engine,
-           generated: J.generated, file: J.lens && J.lens.file, sha1: J.lens && J.lens.file_sha1, iq: J.lens && J.lens.iq_metric },
-    fW: r6(J.zoom && J.zoom.fW), fT: r6(J.zoom && J.zoom.fT), rot: mech.rotation_deg == null ? null : mech.rotation_deg,
-    refocusInf: !!lb.refocus_inf, keys: keys, nodes: nodes, focus: focus,
-    anchors: ((J.zoom && J.zoom.anchors) || []).map(function (a) { return { name: a.name, f: r6(a.f) }; }),
-    groups: (J.groups || []).map(function (g) { return { name: g.name, first: g.first, last: g.last, zoom: g.zoom, focus: g.focus, label: g.label }; }),
-    warnings: (J.warnings || []).slice(),
-    check: check.length ? ['对焦表的 zoom_u 和行自己的焦距对不上，已按焦距重算（' + check.join('；') + '）'] : []
-  };
-}
-
-/* 波长预设：[波长 nm, 权重]，一律按长→短排列，WLPRI 指主波长的行号。
-   网页的「载入预设」和命令行 tools/wlapply.js（meta.json 按品牌 / 按镜头指定光谱）共用这一份。 */
-var WLSETS = {
-  p5:    [['656.3', '10'], ['587.6', '27'], ['546.1', '29'], ['486.1', '23'], ['435.8', '11']],
-  p3:    [['656.3', '1'], ['587.6', '1'], ['486.1', '1']],
-  p1:    [['587.6', '1']],
-  // Zemax「VIS Weighted (C–g, 5500 K Blackbody)」
-  vis:   [['656.3', '0.8982'], ['587.6', '0.9728'], ['546.1', '1'], ['486.1', '0.984'], ['435.8', '0.911']],
-  // Leica Weighted：短波截到 455，长波用 C' 线 643.8
-  leica: [['643.8', '7'], ['587.6', '8'], ['546.1', '9'], ['486.1', '7'], ['455.0', '4']],
-  // 日本厂商常用的光谱权重，重心明显压在 e 线
-  jp:    [['656.3', '3'], ['587.6', '22'], ['546.1', '30'], ['486.1', '12'], ['435.8', '3']]
-};
-// 主波长一律取 546.1（e 线绿光）；F d C 等权和 d 单色里没有这条线，只能退回 d 线
-var WLPRI = { p5: 2, p3: 1, p1: 0, vis: 2, leica: 2, jp: 2 };
 
 export { parseSeq, parseZmx, parseAny, toLens, fileToLens, decode, rowsToText, slug, wlColor, lensSub, setGlassCheck, setRevFix };

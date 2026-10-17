@@ -10,6 +10,8 @@
 
 独立正确性修复：[`05eee8d77200e6da7ab96f3b1ba0479d603d13e9`](https://github.com/simon300000/lens-sim/commit/05eee8d77200e6da7ab96f3b1ba0479d603d13e9)
 
+集成说明：测量完成后，`main` 推进到 [`c593cfd`](https://github.com/simon300000/lens-sim/commit/c593cfd246d31e53163eedb7c6c90a27e1020209)。实验分支保留这次更新，并补回基准复用生产构建器所需的四个命名导出；原始 JSON 和表格仍对应上述 `b4a1854` 测量快照，不把后续兼容性检查当作新的性能测量。
+
 ## 1. 结论与适用范围
 
 本轮建立了可复现的 WebGPU 最近命中求交基准，最终同一轮比较 **16 个条目：15 个修复后的配置（含基线），以及一个保留缺陷的 `original` 负对照**。**可用适配器是 SwiftShader 软件实现，没有物理 GPU 性能结果。** 毫秒数来自该软件适配器的 WebGPU compute pass 时间戳，不能外推为用户显卡速度、完整渲染帧率或物理镜头追迹速度。
@@ -304,12 +306,15 @@ npm run build
 
 上述检查属于 CPU 回归与应用构建，本轮物理 GPU 镜头验证配置数为 0。
 
+集成 `c593cfd` 后再次通过 Node BVH 回归与应用构建，并补做软件兼容性检查：`baseline`、`branchless-slabs`、`leaf8`、`stack-proved` 在 4 个工作负载、每组 512 条射线下共 16 / 16 项通过插桩与未插桩检查；两个小场景的 f64 参考也通过，未出现遍历错误。该次只验证构建器导出及扩展后的工作计数声明兼容，不用于更新第 6 节的性能表。[兼容性检查 JSON](benchmarks/bvh-2026-10-17-integration-smoke.json)
+
 生产路径中的变化集中于平行轴正确性修复；CPU 参考同步修复，新增回归测试。基准页面、工作负载、变体生成、结构证明与 CLI 位于实验 / 测试文件中，没有把任何未验证的微优化设为生产默认。
 
 
 ### 原始数据与版本
 
 - [最终完整 JSON：16 条目、4 工作负载、每项 9 轮](benchmarks/bvh-2026-10-17-final.json)
+- [并行 main 更新后的软件兼容性检查](benchmarks/bvh-2026-10-17-integration-smoke.json)
 - [独立正确性修复](https://github.com/simon300000/lens-sim/commit/05eee8d77200e6da7ab96f3b1ba0479d603d13e9)
 - [测试源码快照](https://github.com/simon300000/lens-sim/commit/b4a1854cf40b81b1ca6cf46e77e4f4701fb1fa6e)
 

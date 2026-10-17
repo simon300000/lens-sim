@@ -6,7 +6,7 @@
 import {
   ACTUAL_OUTPUT_LABELS, AF_LABELS, DIAGNOSTIC_LABELS, DIAGNOSTIC_LEGENDS, GEOMETRY_DIAGNOSTICS, OUTPUT_LABELS, RESOLUTION_PRESETS,
   SPP_PRESETS, STATUS_LABELS, snapResolution, describeFocus, describeScene, sceneWarnings, ALL_BRANDS, brandOf, brandGroups, computeGates, describeView, errorMessage, filterLenses, formatBytes, formatCount,
-  formatEV, formatFNumber, formatFocus, formatMm, formatMs, formatRate, isAutofocusShortcut, isCommandEnabled,
+  formatEV, formatFNumber, formatFocus, formatMs, formatRate, isAutofocusShortcut, isCommandEnabled,
   lensOptionLabel, nearestStep, resolutionLabel, samplingText, stepsForFNumber, stepsForFocus, validateFNumber,
   validateFocus, validateImageDistance,
   isKeyShortcut,
@@ -224,7 +224,7 @@ export function createLensUI({ store, container } = {}) {
       spark,
       h('details', { class: 'lu-hud-section', open: true }, h('summary', { text: '算力估计' }),
         h('div', { class: 'lu-work', ref: 'hudWork' }),
-        h('p', { class: 'lu-hint lu-work-note', text: 'FLOP 不是硬件计数：着色器统计每种运算的执行次数 × 按 WGSL 手工计数的每次 FLOP（FMA 计 2），再除以实测 GPU 时间；误差约 ±30%。只在此窗口打开时计数。' })),
+        h('p', { class: 'lu-hint lu-work-note', text: '算法工作率估算，不代表硬件利用率：操作次数乘以手工 FLOP 权重（FMA 计 2），再用当前计数窗口的 GPU 计时估算；不包含整数、分支和纹理访问，未经误差标定。计数保持当前渲染路径，仍有统计开销。' })),
       h('details', { class: 'lu-hud-section', open: true }, h('summary', { text: '光线去向' }), h('div', { class: 'lu-rates', ref: 'rates' })),
       h('details', { class: 'lu-hud-section' }, h('summary', { text: '场景与资源' }),
         h('dl', { class: 'lu-dl', ref: 'diagList' }),
@@ -721,14 +721,14 @@ export function createLensUI({ store, container } = {}) {
     if (refs.hudWork.getAttribute('data-key') === key) return;
     refs.hudWork.setAttribute('data-key', key);
     if (state.mode !== 'lens') { refs.hudWork.replaceChildren(h('p', { class: 'lu-hint', text: '切换到镜头追迹后开始统计。' })); return; }
-    if (work?.status === 'unsupported') { refs.hudWork.replaceChildren(h('p', { class: 'lu-hint', text: '此 GPU 每个着色阶段最多 8 个存储缓冲，无法加入计数缓冲；不提供估计。' })); return; }
+    if (work?.status === 'unsupported') { refs.hudWork.replaceChildren(h('p', { class: 'lu-hint', text: '此 GPU 的存储缓冲数量不足以加入计数缓冲；不提供估计。' })); return; }
     if (work?.status === 'compiling') { refs.hudWork.replaceChildren(h('p', { class: 'lu-hint', text: '正在编译计数版积分器（仅首次）…' })); return; }
     if (!work || work.status !== 'ok') { refs.hudWork.replaceChildren(h('p', { class: 'lu-hint', text: '正在统计（约 1 秒）…' })); return; }
     const g = work.gflops;
     const value = g === null ? '—' : g >= 1000 ? `${(g / 1000).toFixed(2)}` : g >= 100 ? g.toFixed(0) : g.toFixed(1);
     const unit = g === null ? '' : g >= 1000 ? 'TFLOP/s' : 'GFLOP/s';
-    const workPath=work.integrationMode==='fused'?'融合计数 · ':'';
-    const timing = workPath + (work.timing === 'gpu' ? `GPU 时间戳 · ${work.timedChunks} 块` : work.timing === 'wall' ? '无时间戳：墙钟近似，偏低' : '尚无计时');
+    const workPath=work.integrationMode==='split'?'分阶段计数 · ':work.integrationMode==='fused'?'融合计数 · ':'';
+    const timing = workPath + (work.timing === 'gpu' ? `GPU 时间戳 · ${work.timedChunks} 块${Number.isFinite(work.timingCoverage)?` · ${(work.timingCoverage*100).toFixed(0)}% 覆盖，估算`:``}` : work.timing === 'wall' ? '无时间戳：墙钟近似，偏低' : '尚无计时');
     const groups = Object.entries(WORK_GROUPS);
     refs.hudWork.replaceChildren(
       h('div', { class: 'lu-work-head' },

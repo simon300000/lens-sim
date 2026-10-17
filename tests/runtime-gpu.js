@@ -3,6 +3,7 @@ import {uniform,vec4} from 'three/tsl';
 import {createHybridRuntime} from '../src/rendering/hybrid-runtime.js';
 import {probeHDRCanvas,outputRendererOptions} from '../src/hdr-output.js';
 import {emitter} from './gpu-fixtures.js';
+import {focusedPrescription} from '../src/optics/focus-motion.js';
 /** Test E: scheduling and lifecycle of the geometry-first-hit runtime.
  * What each change may (and may not) rebuild or refresh is asserted with the
  * runtime's own counters. */
@@ -21,9 +22,16 @@ try{
   const camera=new THREE.PerspectiveCamera(40,1.5,.02,450);camera.updateMatrixWorld();
   const raster=new THREE.RenderPipeline(renderer);raster.outputNode=vec4(.1,.1,.1,1);
   let wakes=0;
-  const runtime=await createHybridRuntime({renderer,scene,camera,rasterPipeline:raster,cameraExposure:uniform(1),hdr,requestFrame:()=>wakes++});
+  const runtime=await createHybridRuntime({renderer,scene,camera,adapterInfo:adapter.info,rasterPipeline:raster,cameraExposure:uniform(1),hdr,requestFrame:()=>wakes++});
   runtime.interop.device.addEventListener('uncapturederror',e=>errors.push(e.error.message));
   await runtime.initialize();const store=runtime.store,res=runtime.sceneResources,light=runtime.lighting;
+  async function sampleTo(target){
+    const deadline=performance.now()+10000;
+    while(runtime.engine.spp<target){
+      check(performance.now()<deadline,'sampling timed out at '+runtime.engine.spp+' / '+target);
+      runtime.frame();await runtime.interop.device.queue.onSubmittedWorkDone();await new Promise(resolve=>setTimeout(resolve,0));
+    }
+  }
   check(store.getState().renderModel.id==='geometry-first-hit-realtime-lighting','render model not exposed');
   check(store.getState().scene.status==='ready'&&store.getState().scene.summary.instances===3,'scene summary missing');
   // Raster navigation must not resize optical buffers or publish a full UI
@@ -38,12 +46,12 @@ try{
   const rasterNavigation={poses:13,notifications:rasterNotifications,width:rasterWidth};
   check(runtime.engine.dimensions.width===rasterWidth&&rasterNotifications<13,'Raster poses rebuilt optical buffers or UI snapshots');
   await store.dispatch('setResolution',240);await store.dispatch('setTargetSpp',4);await store.dispatch('setMode','lens');
-  for(let i=0;i<4;i++){runtime.frame();await runtime.interop.device.queue.onSubmittedWorkDone();await new Promise(r=>setTimeout(r,0));}
+  await sampleTo(4);
   const builds=()=>{const {fullBuilds,tlasRebuilds,blasBuilt,blasReused}=res.counters;return JSON.stringify({fullBuilds,tlasRebuilds,blasBuilt,blasReused});};
   const after=store.getState(),revision=after.revisions.accumulation,refreshes=light.refreshes,built=builds();
   check(runtime.engine.spp===4,'real samples not accumulated');
   // Static accumulation: no BVH work, no raster resource refresh per batch.
-  await store.dispatch('setTargetSpp',8);for(let i=0;i<4;i++){runtime.frame();await runtime.interop.device.queue.onSubmittedWorkDone();await new Promise(r=>setTimeout(r,0));}check(runtime.engine.spp===8,'raising spp did not continue prefix');
+  await store.dispatch('setTargetSpp',8);await sampleTo(8);check(runtime.engine.spp===8,'raising spp did not continue prefix');
   check(light.refreshes===refreshes&&builds()===built,'static accumulation re-rendered raster resources or rebuilt BVH');
   // Display-only changes.
   await store.dispatch('setExposureEV',1);await store.dispatch('setBloom',false);await store.dispatch('setOutput','sdr');runtime.frame();
@@ -69,12 +77,12 @@ try{
   check(near>far,'manual distance did not use real shared focus model');
   await store.dispatch('setFNumber',22);await store.dispatch('setFocusDistance',null);
   const infinity=store.getState().af.lastResult;
-  check(infinity.beams>=16&&infinity.beamBudget===65536,'small-aperture infinity focus did not use its fixed budget');
+  check(infinity.method==='plane-search'&&infinity.focusDistanceM===null&&Number.isFinite(infinity.afterRmsMm)&&infinity.evaluations>0,'small-aperture infinity focus did not use the current plane search');
   await store.dispatch('setFNumber',4);
   check(light.refreshes===refreshes&&builds()===built,'aperture/focus changes refreshed raster resources or rebuilt BVH');
   await store.dispatch('setPaused',false);
-  // Drive frames like requestAnimationFrame would: a batch in flight blocks the next submission.
-  for(let i=0;i<64&&runtime.needsFrame();i++){runtime.frame();await runtime.interop.device.queue.onSubmittedWorkDone();await new Promise(r=>setTimeout(r,0));}
+  // A full submission queue is temporary, not a completed sampling target.
+  await sampleTo(8);
   check(!runtime.needsFrame()&&runtime.engine.spp===8,'target did not stop scheduler at 8 spp: '+runtime.engine.spp);
   const stats=await runtime.engine.statistics();check(stats.numericalErrorRate===0&&stats.bvhErrorRate===0,'runtime numerical/BVH errors');
   // Camera pose: lighting resources refresh once (reflector/pose), BVH untouched.
@@ -108,17 +116,18 @@ try{
   const nativeSensor=runtime.engine.packed.sensorZMm,nativeSurfaces=Array.from(runtime.engine.packed.surfaces),nativeStop=runtime.engine.packed.stopRadiusMm;
   const motionPipelines=runtime.interop.compilations,motionBuilds=builds();
   await store.dispatch('setFocusDistance',20);
-  check(store.getState().af.status==='success'&&store.getState().optics.focusModel.includes('cfgs.thi'),'configuration motion was not used');
-  check(runtime.engine.packed.sensorZMm===nativeSensor,'configuration focus moved sensor');
+  check(store.getState().af.status==='success'&&store.getState().af.lastResult.method==='cam-search'&&store.getState().af.lastResult.source==='cfgs.thi / cfgs.obj','configuration motion was not used');
+  check(Math.abs(runtime.engine.packed.sensorZMm-nativeSensor)<1e-5,'configuration focus moved sensor');
   check(JSON.stringify(Array.from(runtime.engine.packed.surfaces))!==JSON.stringify(nativeSurfaces),'configuration focus did not upload moved surfaces');
   check(Math.abs(runtime.engine.packed.stopRadiusMm-nativeStop)<1e-5,'focus changed physical stop opening');
   await store.dispatch('autofocus');check(store.getState().af.lastResult.source==='cfgs.thi / cfgs.obj','AF did not use group motion');
   const configurationMotion=store.getState().af.lastResult;
   await store.dispatch('selectLens','sony-fe-16-35mm-f2-8-gm-ii');
-  const camSensor=runtime.engine.packed.sensorZMm;
+  const tableBase=(await(await fetch('/lenses/sony-fe-16-35mm-f2-8-gm-ii.json')).json()).configurations[0];
+  const expectedTable=focusedPrescription(tableBase,1).lens;
   await store.dispatch('setFocusDistance',null);const camInfinity=Array.from(runtime.engine.packed.surfaces);
   await store.dispatch('setFocusDistance',1);
-  check(store.getState().af.lastResult.source==='zoomcam.focus'&&runtime.engine.packed.sensorZMm===camSensor,'explicit table focus moved sensor / used fallback');
+  check(store.getState().af.lastResult.source==='zoomcam.focus'&&Math.abs(runtime.engine.packed.sensorZMm-expectedTable.sensorZMm)<1e-8,'explicit table focus moved sensor / used fallback: '+JSON.stringify({source:store.getState().af.lastResult.source,method:store.getState().af.lastResult.method,expected:expectedTable.sensorZMm,after:runtime.engine.packed.sensorZMm}));
   check(JSON.stringify(Array.from(runtime.engine.packed.surfaces))!==JSON.stringify(camInfinity),'explicit table did not upload moved surfaces');
   const tableMotion=store.getState().af.lastResult;
   check(runtime.interop.compilations===motionPipelines&&builds()===motionBuilds,'focus motion rebuilt pipelines or BVH');
@@ -141,14 +150,15 @@ try{
   runtime.cameraChanged();runtime.lightingChanged();release();await changingLens;
   runtime.engine.prepareLens=originalPrepare;
   check(store.getState().status==='ready','Camera/light change stranded worker lens loading');
-  await store.dispatch('setTargetSpp',64);await store.dispatch('setPaused',false);await store.dispatch('reset');
-  await runtime.interop.device.queue.onSubmittedWorkDone();
-  runtime.frame();runtime.frame();const submitted=runtime.engine.spp;runtime.frame();
-  check(submitted===8&&runtime.engine.spp===submitted,'Render submission escaped two-batch bound');
+  await store.dispatch('setPaused',true);await store.dispatch('setTargetSpp',64);await store.dispatch('reset');
+  await runtime.interop.device.queue.onSubmittedWorkDone();await new Promise(resolve=>setTimeout(resolve,0));
+  await store.dispatch('setPaused',false);const serialBefore=runtime.engine.sampleSerial;
+  runtime.frame();runtime.frame();const submitted=runtime.engine.sampleSerial-serialBefore;runtime.frame();
+  check(submitted===2&&runtime.engine.sampleSerial-serialBefore===submitted,'Render submission escaped two-chunk bound');
   await store.dispatch('reset');check(runtime.engine.spp===0,'In-flight reset did not clear sample count');
   await runtime.interop.device.queue.onSubmittedWorkDone();runtime.frame();
   await runtime.interop.device.queue.onSubmittedWorkDone();
-  const boundedSubmission={submittedBeforeReset:submitted,afterReset:runtime.engine.spp,loadingRecovered:store.getState().status==='ready'};
+  const boundedSubmission={chunksBeforeReset:submitted,afterReset:runtime.engine.spp,loadingRecovered:store.getState().status==='ready'};
 
   // Repeated lens switching / resize / pause: no GPU errors, no leaked tiles.
   const cycle=async()=>{await store.dispatch('selectLens','canon-fl-50mm-f1-8');await store.dispatch('setResolution',480);await store.dispatch('setResolution',240);await store.dispatch('setPaused',true);await store.dispatch('setPaused',false);runtime.frame();};
@@ -164,5 +174,5 @@ try{
     contactNativeConfiguration:contactNative,stats,liveBuffers:runtime.interop.liveBuffers,pipelines:runtime.interop.compilations,wakes,errors};
   out.textContent=JSON.stringify(result,null,2);document.body.dataset.passed='true';window.__runtimeTest={runtime,result};
   await fetch('http://127.0.0.1:5175/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'runtime-gpu',...result})}).catch(()=>{});
-}catch(error){out.textContent=error.stack||String(error);document.body.dataset.passed='false';console.error(error);
+}catch(error){out.textContent=error.message+'\n'+(error.stack||String(error));document.body.dataset.passed='false';console.error(error);
  await fetch('http://127.0.0.1:5175/report',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:'runtime-gpu',passed:false,error:error.message+'\n'+error.stack,errors})}).catch(()=>{});}

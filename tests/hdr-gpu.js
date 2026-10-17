@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { pass, uv, step, float, vec3, vec4 } from 'three/tsl';
+import { pass, uv, step, float, vec3 } from 'three/tsl';
 import { probeHDRCanvas,outputRendererOptions,displayOutputNode } from '../src/hdr-output.js';
 
 async function readTexture(device,texture) {
