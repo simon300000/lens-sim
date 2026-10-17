@@ -66,9 +66,16 @@ export function traversePacked(packed, origin, direction, tMin = 0, tMax = Infin
   const box = (i, o, d) => {
     let t0 = tMin, t1 = best ? best.t : tMax;
     for (let a = 0; a < 3; a++) {
+      // Parallel rays on either closed slab face remain inside. Handle the
+      // actual zero direction before division: 0 * Infinity would make the
+      // accumulated interval NaN even when the origin is on a valid face.
+      if (d[a] === 0) {
+        if (o[a] < nf[i * 8 + a] || o[a] > nf[i * 8 + 4 + a]) return false;
+        continue;
+      }
       const inv = 1 / d[a], ta = (nf[i * 8 + a] - o[a]) * inv, tb = (nf[i * 8 + 4 + a] - o[a]) * inv;
       t0 = Math.max(t0, Math.min(ta, tb)); t1 = Math.min(t1, Math.max(ta, tb));
-      if (Number.isNaN(ta) || Number.isNaN(tb)) { if (!(o[a] >= nf[i * 8 + a] && o[a] <= nf[i * 8 + 4 + a])) return false; }
+      if (Number.isNaN(ta) || Number.isNaN(tb)) return false;
     }
     return t0 <= t1;
   };
