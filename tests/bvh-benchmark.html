@@ -1,0 +1,10 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>BVH traversal experiments</title>
+<style>body{font:15px system-ui;margin:32px;max-width:1200px;background:#f8fafc;color:#18202b}h1{font-size:24px}button{padding:10px 16px;cursor:pointer}pre{font:12px/1.5 monospace;white-space:pre-wrap;overflow-wrap:anywhere;background:white;padding:20px;border:1px solid #ddd}#status{font-weight:600}</style>
+<h1>BVH traversal experiments</h1>
+<p>Runs automatically on this browser's WebGPU adapter. Fixed rays, nearest accepted hit, separate untimed work counters, repeated interleaved GPU timestamps. Software-adapter results apply only to that adapter.</p>
+<p>URL options: rays=8192, rounds=9, workloads=diagnostic,edges,villa,vegetation. Omit variants to run the 14 default experiments. Additional opt-in variants: branchless-slabs, original (known failing negative control). Add hardware=1 to reject software adapters. Use %2B for a plus sign in a URL parameter.</p>
+<p id="status">Starting…</p><button id="download">Download current JSON results</button>
+<pre id="result"></pre>
+<script type="module" src="./bvh-benchmark.js"></script>
