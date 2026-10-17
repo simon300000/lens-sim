@@ -103,6 +103,8 @@ export function createSceneResources({ interop, scene, camera = null, starAngula
   async function build(reason = 'initial') {
     const started = performance.now();
     const ex = extractScene(scene, { camera, knownBlas: worker ? knownBlas : null, deferInstances: !!worker });
+    // Signatures describe what was extracted; edits during the async build must still read as changes.
+    const extractedSignatures = ex.objects.map(objectSignature);
     const keys = ex.blas.map(b => b.key);
     let packed;
     if (worker) {
@@ -139,7 +141,7 @@ export function createSceneResources({ interop, scene, camera = null, starAngula
     if(allocationError||oom){for(const b of Object.values(next))interop.release(b);if(nextTables)interop.release(nextTables);throw allocationError||new Error('场景 BVH 显存分配失败：'+oom.message);}
     if (buffers) for (const b of Object.values(buffers)) interop.release(b);
     if(tables)interop.release(tables);tables=nextTables;counters.materialUploads++;materialRevision++;
-    buffers = next; extracted = ex; signatures = ex.objects.map(objectSignature);
+    buffers = next; extracted = ex; signatures = extractedSignatures;
     const t = packed.stats.timing;
     counters.blasBuilt += t.blasRebuilt; counters.blasReused += t.blasReused;
     if (reason === 'tlas') counters.tlasRebuilds++; else counters.fullBuilds++;
@@ -169,8 +171,11 @@ export function createSceneResources({ interop, scene, camera = null, starAngula
       if (s.material !== old.material) material = true;
     });
     let added = false;
-    scene.traverse(o => { if (o.isMesh && !lensRole(o) && o.visible && !current.has(o)) added = true; });
-    if (topology || added) return build('topology');
+    const attached = new Set();
+    scene.traverse(o => { attached.add(o); if (o.isMesh && !lensRole(o) && o.visible && !current.has(o)) added = true; });
+    // A mesh detached from the scene keeps its own signature; catch it here.
+    const removed = [...current].some(o => !attached.has(o));
+    if (topology || added || removed) return build('topology');
     if (transform) return build('tlas');
     if (material) { writeTables(); return { reason: 'material' }; }
     return null;

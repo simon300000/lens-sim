@@ -18,6 +18,7 @@ import { installURLState } from './url-state.js';
 import { createCameraRig, createScenePicker } from './camera-controls.js';
 import { installSceneCard } from './ui/scene-card.js';
 import {requiredGPULimits} from './rendering/gpu-policy.js';
+import { installUserModels } from './user-model.js';
 
 const faults=[];
 window.addEventListener('error',event=>faults.push(event.message));
@@ -76,14 +77,16 @@ async function createScene(){
 
   await startup.stage(2,'铺设庭园，栽种花木');
   const {scene,garden,landscape,villa,vegetation,details,testTargets}=buildSanteiScene();
+  const userModels=new THREE.Group();userModels.name='User models';scene.add(userModels);
   const portrait=innerWidth/innerHeight<.85;
   const camera=new THREE.PerspectiveCamera(portrait?48:40,innerWidth/innerHeight,.15,450);
   camera.position.set(21,13,27);
   if(portrait)camera.position.multiplyScalar(1.48);
   camera.lookAt(0,2.7,2.0);
   // One rig for look / orbit / pan / dolly / walk. Picking skips dense vegetation instances.
+  const groundPicker=createScenePicker([villa.group,garden.garden,details.group,testTargets.group,landscape.meadow]);
   const controls=createCameraRig(camera,renderer.domElement,{
-    pick:createScenePicker([villa.group,garden.garden,details.group,testTargets.group,landscape.meadow]),
+    pick:createScenePicker([villa.group,garden.garden,details.group,testTargets.group,landscape.meadow,userModels]),
     requestFrame:()=>wake()});
   controls.target.set(0,2.7,2.0);camera.lookAt(controls.target);controls.update(0);
 
@@ -239,6 +242,14 @@ async function createScene(){
   sceneElement.dataset.initializationWallMs=String(diagnostics.initializationWallMs);
   ready=true;
   for(const button of document.querySelectorAll('[data-test-target]'))button.disabled=false;
+  // Models stand on the scene surface (never on each other); new ones go below the view centre.
+  const downRay=new THREE.Raycaster(),down=new THREE.Vector3(0,-1,0);
+  const groundAt=(x,z,fromY)=>{downRay.set(new THREE.Vector3(x,fromY,z),down);return groundPicker(downRay)?.point.y??null;};
+  const userModel=installUserModels({root:userModels,scene,camera,element:renderer.domElement,exposure:cameraExposure,requestFrame:wake,groundAt,
+    lookTarget:()=>{const t=controls.target;return new THREE.Vector3(t.x,groundAt(t.x,t.z,t.y+40)??t.y,t.z);},
+    // Shadow maps refresh only on a time update; re-apply the current time.
+    lightingChanged:()=>{pendingTime=timeControls.getValue();},sceneChanged:()=>hybrid.sceneChanged()});
+  window.__SANTEI__.userModels=userModels;window.__SANTEI__.userModelManager=userModel;window.__SANTEI__.loadUserModel=files=>userModel.load(files);
   diagnostics.drawCalls=renderer.info.render.drawCalls;
   sceneElement.dataset.backend=diagnostics.backend;
   sceneElement.dataset.ready='true';
@@ -248,7 +259,7 @@ async function createScene(){
   sceneElement.dataset.koi=garden.koi.length;
   console.info('SANTEI scene ready',diagnostics);
   startup.complete();
-  addEventListener('pagehide',()=>{urlState.dispose();ready=false;lensUI.dispose();hybrid.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
+  addEventListener('pagehide',()=>{userModel.dispose();urlState.dispose();ready=false;lensUI.dispose();hybrid.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
   // Initialization captured the current scene and prepared its first lens
   // sample. Schedule display without throwing away that prepared state.
   wake();
