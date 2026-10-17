@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {stripWorkCounting} from './shader-source.js';
-import opticalSource from '../optics/optical-core.wgsl?raw';
+import rawOpticalSource from '../optics/optical-core.wgsl?raw';
+import {opticalSourceForLutPolicy} from './optical-source.js';
 import { SCENE_INTERSECTOR_WGSL, SCENE_SHADING_WGSL, WORK_COUNTERS_WGSL } from './scene-wgsl.js';
 import rawIntegratorSource from './optical-integrator.wgsl?raw';
 import resolveSource from './resolve.wgsl?raw';
@@ -26,8 +27,9 @@ export const ACCUMULATING_DIAGNOSTICS=Object.freeze(['geometry-depth','geometry-
 const diagnosticIndex=mode=>DIAGNOSTIC_MODES[mode]??0;
 const uniformBinding=(binding,buffer)=>({binding,resource:{buffer}});
 
-export async function createOpticalEngine({interop,sceneResources,lighting,width=480,accumulationBindingBytes=Infinity,integrationMode='fused',splitStageTiming=false,splitRayBufferBytes=128*1024**2}) {
+export async function createOpticalEngine({interop,sceneResources,lighting,width=480,accumulationBindingBytes=Infinity,integrationMode='fused',splitStageTiming=false,opticalLutReuse=false,splitRayBufferBytes=128*1024**2}) {
   const started=performance.now(),{device}=interop;
+  const opticalSource=opticalSourceForLutPolicy(rawOpticalSource,opticalLutReuse);
   if(!['fused','split'].includes(integrationMode))throw new RangeError('Unknown integration mode');
   const statisticsConfig=statisticsConfiguration(device.limits);
   const integratorSource=integrationMode==='split'?linearMirrorGroups(rawIntegratorSource):rawIntegratorSource;
@@ -223,6 +225,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     },
     reset,resize,resizeChecked,setLens,updateOptics,setPose,bindScene,
     get integrationMode(){return integrationMode;},
+    get opticalLutReuse(){return opticalLutReuse;},
     async prepareSampling({mirrorReference=false}={}){
       if(!mirrorReference)return;
       validationCompile??=interop.computePipeline(sampleSource+validationSource,'Mirror sampling validation');
