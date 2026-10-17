@@ -731,7 +731,7 @@ export function createLensUI({ store, container, liveStats = null } = {}) {
     const value = g === null ? '—' : g >= 1000 ? `${(g / 1000).toFixed(2)}` : g >= 100 ? g.toFixed(0) : g.toFixed(1);
     const unit = g === null ? '' : g >= 1000 ? 'TFLOP/s' : 'GFLOP/s';
     const workPath=work.integrationMode==='split'?'分阶段计数 · ':work.integrationMode==='fused'?'融合计数 · ':'';
-    const timing = workPath + (work.timing === 'gpu' ? `GPU 时间戳 · ${work.timedChunks} 块${Number.isFinite(work.timingCoverage)?` · ${(work.timingCoverage*100).toFixed(0)}% 覆盖，估算`:``}` : work.timing === 'wall' ? '无时间戳：墙钟近似，偏低' : '尚无计时');
+    const timing = workPath + (work.timing === 'gpu' ? `GPU 时间戳 · ${work.timedChunks} 块${Number.isFinite(work.timingCoverage)?` · ${(work.timingCoverage*100).toFixed(0)}% 覆盖，估算`:``}` : work.timing === 'queue' ? `队列完成间隔估算 · ${work.timedChunks} 块` : work.timing === 'wall' ? '无时间戳：墙钟近似，偏低' : '尚无计时');
     const groups = Object.entries(WORK_GROUPS);
     refs.hudWork.replaceChildren(
       h('div', { class: 'lu-work-head' },

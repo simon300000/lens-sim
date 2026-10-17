@@ -1,6 +1,6 @@
 /** One-sided feedback: transient slow measurements never shrink a chunk.
  * Work is workgroups × samples per pixel (64 attempted paths per unit).
- * GPU timestamps are authoritative; queue wall time is only a fallback.
+ * Chunk times come from GPU timestamps (benchmarks) or queue-completion intervals (app).
  */
 export function createChunkBudget(){
   const modes={interactive:{work:32,targetMs:3,costs:[]},idle:{work:1024,targetMs:30,costs:[]}};
@@ -22,6 +22,14 @@ export function createChunkBudget(){
       mode.work=Math.max(mode.work,Math.min(submission.capacity,Math.ceil(next)));
     },
   };
+}
+
+/** Chunk execution time from queue completions alone. Completions arrive in submission order,
+ * so a chunk queued behind another starts roughly when that one finishes; an idle queue starts
+ * it at submission. Includes other work on the same queue, which is fine for a readout. */
+export function createCompletionClock(){
+  let lastDoneAt=-Infinity;
+  return {complete(submittedAt,doneAt){const ms=doneAt-Math.max(submittedAt,lastDoneAt);lastDoneAt=Math.max(lastDoneAt,doneAt);return ms;}};
 }
 
 /** Linear workgroups laid out across two dispatch dimensions. The shader

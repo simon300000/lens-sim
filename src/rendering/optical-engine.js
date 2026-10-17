@@ -27,7 +27,7 @@ export const ACCUMULATING_DIAGNOSTICS=Object.freeze(['geometry-depth','geometry-
 const diagnosticIndex=mode=>DIAGNOSTIC_MODES[mode]??0;
 const uniformBinding=(binding,buffer)=>({binding,resource:{buffer}});
 
-export async function createOpticalEngine({interop,sceneResources,lighting,width=480,accumulationBindingBytes=Infinity,integrationMode='fused',splitStageTiming=false,opticalLutReuse=false,splitRayBufferBytes=128*1024**2}) {
+export async function createOpticalEngine({interop,sceneResources,lighting,width=480,accumulationBindingBytes=Infinity,integrationMode='fused',splitStageTiming=false,chunkTiming='timestamp',opticalLutReuse=false,splitRayBufferBytes=128*1024**2}) {
   const started=performance.now(),{device}=interop;
   const opticalSource=opticalSourceForLutPolicy(rawOpticalSource,opticalLutReuse);
   if(!['fused','split'].includes(integrationMode))throw new RangeError('Unknown integration mode');
@@ -72,7 +72,11 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   const pipelines=Object.fromEntries(jobs.map(([name],i)=>[name,compiled[i].value]));
   const timer=createComputeTimer(interop),pupilPrecomputer=createPupilPrecomputer();
   const splitPipelines=splitSources?{raygen:pipelines.split_raygen,scene:pipelines.split_scene}:null;let splitRays=null;
-  const stageTimer=splitStageTiming?createSplitStageTimer(interop):null;
+  // 'timestamp': GPU timestamp queries time each chunk (benchmarks). 'queue': the caller reports
+  // chunk times from queue completions via completeChunk; no timestamp queries are issued.
+  if(!['timestamp','queue'].includes(chunkTiming))throw new RangeError('Unknown chunk timing');
+  const useTimestamps=chunkTiming==='timestamp';
+  const stageTimer=splitStageTiming&&useTimestamps?createSplitStageTimer(interop):null;
   let pupilTable;
   let surfaces,lut,tiles=[],tileCursor=0,groupCursor=0,chunkBudget=createChunkBudget(),lastSubmission=null,sampleSerial=0,roundBudget=0,roundTarget=0,roundMirror=0,tileGroups=0,image,packed,lens,groups={},spp=0,disposed=false,computeMs=null,statsPending=null,lastTiming=null;
   let dimensions={width:0,height:0},currentRevision=0,resizeRevision=0;
@@ -181,16 +185,16 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   }
   function submit(pipeline,bindGroup,x=1,y=1,{timed=false,submission=null}={}){
     if(disposed)throw new Error('Optical engine disposed');
-    const encoder=device.createCommandEncoder();const timestamps=timed?timer.begin():undefined;
+    const encoder=device.createCommandEncoder();const timestamps=timed&&useTimestamps?timer.begin():undefined;
     const pass=encoder.beginComputePass(timestamps?{timestampWrites:timestamps}:{});
     pass.setPipeline(pipeline);pass.setBindGroup(0,bindGroup);pass.dispatchWorkgroups(x,y);pass.end();
     const timingRevision=currentRevision,timingDimensions={...dimensions};
-    const collect=timed?timer.end(encoder,timestamps,ms=>{if(submission?.counted&&submission.countEpoch===countEpoch)recordWorkTiming(ms,submission.countedWorkUnits,'gpu',submission.workWindow);if(timingRevision===currentRevision){computeMs=ms;lastTiming={...timingDimensions,ms,chunkPixels:submission?.pixels??null,chunkSpp:submission?.spp??null};if(submission){submission.gpuMs=ms;chunkBudget.observe(submission,ms);}}}):null;
+    const collect=timed&&useTimestamps?timer.end(encoder,timestamps,ms=>{if(submission?.counted&&submission.countEpoch===countEpoch)recordWorkTiming(ms,submission.countedWorkUnits,'gpu',submission.workWindow);if(timingRevision===currentRevision){computeMs=ms;lastTiming={...timingDimensions,ms,chunkPixels:submission?.pixels??null,chunkSpp:submission?.spp??null};if(submission){submission.gpuMs=ms;chunkBudget.observe(submission,ms);}}}):null;
     device.queue.submit([encoder.finish()]);collect?.();
   }
   function submitSplit(tile,dispatch,sceneDispatch,submission){
     const encoder=device.createCommandEncoder({label:'Split mirror optical/scene batch'});
-    const stages=stageTimer?.begin(),timestamps=stages?null:timer.begin();
+    const stages=stageTimer?.begin(),timestamps=stages||!useTimestamps?null:timer.begin();
     const lensStamp=stages?.lens??(timestamps?{querySet:timestamps.querySet,beginningOfPassWriteIndex:timestamps.beginningOfPassWriteIndex}:undefined);
     const sceneStamp=stages?.scene??(timestamps?{querySet:timestamps.querySet,endOfPassWriteIndex:timestamps.endOfPassWriteIndex}:undefined);
     const selected=submission.counted?splitCountingPipelines:splitPipelines;
@@ -199,7 +203,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     }
     const revision=currentRevision,timingDimensions={...dimensions};
     const accept=t=>{if(submission.counted&&submission.countEpoch===countEpoch)recordWorkTiming(t.ms,submission.countedWorkUnits,'gpu',submission.workWindow);if(revision===currentRevision){computeMs=t.ms;lastTiming={...timingDimensions,...t,chunkPixels:submission.pixels??null,chunkSpp:submission.spp??null};submission.gpuMs=t.ms;chunkBudget.observe(submission,t.ms);}};
-    const collect=stages?stageTimer.end(encoder,stages,accept):timer.end(encoder,timestamps,ms=>accept({ms}));
+    const collect=stages?stageTimer.end(encoder,stages,accept):timestamps?timer.end(encoder,timestamps,ms=>accept({ms})):null;
     device.queue.submit([encoder.finish()]);collect?.();
   }
   const initializationMs=performance.now()-started;
@@ -208,17 +212,24 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     get spp(){return spp;},get dimensions(){return {...dimensions};},get packed(){return packed;},get tileCount(){return tiles.length;},get roundComplete(){return tileCursor===0&&groupCursor===0;},
     get pupilTable(){return pupilTable;},
     get initializationMs(){return initializationMs;},
-    get computeMs(){return computeMs;},get timestampSupported(){return timer.supported;},
+    get computeMs(){return computeMs;},get timestampSupported(){return useTimestamps&&timer.supported;},
+    /** 'gpu' (timestamp queries), 'queue' (caller-reported completion intervals) or 'wall' (no timestamps). */
+    get timingSource(){return !useTimestamps?'queue':timer.supported?'gpu':'wall';},
     get lastTiming(){return lastTiming;},
     get lastSubmission(){return lastSubmission;},
     get sampleSerial(){return sampleSerial;},
     // Samples per pixel including the submitted part of the current sweep; CPU-only, for live rate readouts.
     get progress(){return tiles.length&&tileGroups?spp+roundBudget*(tileCursor+groupCursor/tileGroups)/tiles.length:spp;},
-    // If timestamps are supported, feedback is delivered by timer.end itself,
-    // even when the asynchronous map completes after the queue fence callback.
-    completeChunk(submission,wallMs){
-      if(submission?.counted&&submission.countEpoch===countEpoch&&!timer.supported)recordWorkTiming(wallMs,submission.countedWorkUnits,'wall',submission.workWindow);
-      if(!timer.supported&&submission?.revision===currentRevision)chunkBudget.observe(submission,wallMs);
+    // With timestamp queries, feedback is delivered by timer.end itself, even when
+    // the asynchronous map completes after the queue fence callback. Otherwise the
+    // caller's completion-based estimate is the chunk time.
+    completeChunk(submission,ms){
+      if(useTimestamps&&timer.supported)return;
+      const source=useTimestamps?'wall':'queue';
+      if(submission?.counted&&submission.countEpoch===countEpoch)recordWorkTiming(ms,submission.countedWorkUnits,source,submission.workWindow);
+      if(submission?.revision!==currentRevision||!(ms>0))return;
+      if(!useTimestamps){computeMs=ms;lastTiming={...dimensions,ms,chunkPixels:submission.pixels??null,chunkSpp:submission.spp??null};submission.gpuMs=ms;}
+      chunkBudget.observe(submission,ms);
     },
     get memoryBytes(){return dimensions.width*dimensions.height*(PIXEL_BYTES+8)+[optics,render,resolve,camera,target,surfaces,lut,pupil,work,splitRays].reduce((sum,buffer)=>sum+(buffer?.size??0),0);},
     async prepareLens(nextLens,state){

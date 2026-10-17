@@ -13,6 +13,7 @@ import { createFocusSolver } from '../optics/focus-solver.js';
 import { displayOutputNode } from '../hdr-output.js';
 import { exportLensTexture, captureCanvas } from './image-export.js';
 import { summarizeWork } from './work-model.js';
+import { createCompletionClock } from './adaptive-chunks.js';
 import { loadGlassCatalog, inspectRecord, customLensId, CUSTOM_BRAND } from '../optics/lens-workbench.js';
 
 /** Small, clone-friendly description of the active prescription for the layout view and table. */
@@ -58,6 +59,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
     if(!lens||!engine?.packed)return;
     update({prescription:slimPrescription(lens,{stopRadiusMm:engine.packed.stopRadiusMm,sensorZMm:engine.packed.sensorZMm,focusDistanceM:state().optics.focusDistanceM})});
   }
+  const completionClock=createCompletionClock();
   let inputUntil=0,lastDisplayAt=-Infinity,lastPublishAt=-Infinity,lastStatisticsAt=-Infinity,lastDisplayRevision='';
   // All page input counts, including hovering/scrolling the controls. This is
   // scheduling only: it must not resize the image or invalidate accumulated rays.
@@ -92,7 +94,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
     const ls=lighting.status;
     update({sampling:{...s.sampling,spp:engine.spp},diagnostics:{...s.diagnostics,pipelineCompilations:interop.compilations,
       integrationMode:engine.lastSubmission?.integrationMode??engine.integrationMode,computeMs:engine.computeMs,lightingRefreshMs:lighting.refreshMs,lightingRefreshes:lighting.refreshes,
-      timingSource:engine.timestampSupported?'GPU timestamp（单个采样分块：镜头+BVH+着色）/ CPU 提交耗时（光栅资源刷新）':'无 timestamp：仅 CPU 提交耗时',
+      timingSource:{gpu:'GPU timestamp（单个采样分块：镜头+BVH+着色）',queue:'队列完成间隔估算（单个采样分块，含同队列显示工作）',wall:'无 timestamp：墙钟近似'}[engine.timingSource]+' / CPU 提交耗时（光栅资源刷新）',
       ...engine.dimensions,memoryBytes:memoryBytes()},
       scene:{...s.scene,...(sceneSummary()?{summary:sceneSummary()}:{}),lighting:{ok:ls.ok,errors:ls.errors??[],warnings:ls.warnings??[],lights:ls.lights,environment:ls.environment,reflection:ls.reflection}}});
   }
@@ -389,8 +391,10 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
           // Fill the idle queue through another browser task, giving pending
           // input an opportunity to switch back before more work is submitted.
           if(samplesInFlight<flightLimit())chunkTasks.port2.postMessage(null);
+          const submittedAt=performance.now();
           interop.device.queue.onSubmittedWorkDone().then(()=>{
-            if(!disposed)engine.completeChunk(submission,performance.now()-now);
+            const ms=completionClock.complete(submittedAt,performance.now());
+            if(!disposed)engine.completeChunk(submission,ms);
             samplesInFlight--;if(!disposed)chunkTasks.port2.postMessage(null);
           },error=>{samplesInFlight--;if(!disposed)update({status:'error',error:error.message});});
         }
@@ -423,7 +427,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
       update({lenses:manifest.lenses.map(l=>({id:l.id,name:l.name,brand:l.brand??null,available:l.supported,reason:l.reason,
         validation:l.validation,surfaceCount:l.surfaceCount,focalLengthMm:catalogueFocalLengthMm(l)})),source:manifest.source});
       await onProgress(8,'编译真实镜组、光谱采样与自动对焦');
-      engine=await createOpticalEngine({interop,sceneResources,lighting,integrationMode:preferredIntegrationMode(adapterInfo),opticalLutReuse:preferredOpticalLutReuse(adapterInfo),width:state().sampling.resolution});
+      engine=await createOpticalEngine({interop,sceneResources,lighting,integrationMode:preferredIntegrationMode(adapterInfo),chunkTiming:'queue',opticalLutReuse:preferredOpticalLutReuse(adapterInfo),width:state().sampling.resolution});
       if(workCounting)setWorkCounting(true).catch(error=>console.warn('Work counting unavailable',error));
       await loadLens(manifest.defaultId);displayGraph();displayChanged();
       await build;
