@@ -209,7 +209,7 @@ async function createScene(){
   applyTime(initialTime,true);
   await warm();
   await renderer.backend.device.queue.onSubmittedWorkDone();
-  hybrid=await createHybridRuntime({renderer,scene,camera,rasterPipeline:pipeline,rasterBeauty:beauty,rasterGlare:glare,refreshContext:()=>passReuse.beautyContext,cameraExposure,hdr,environment:daylight,requestFrame:wake,
+  hybrid=await createHybridRuntime({renderer,scene,camera,adapterInfo:adapter.info,rasterPipeline:pipeline,rasterBeauty:beauty,rasterGlare:glare,refreshContext:()=>passReuse.beautyContext,cameraExposure,hdr,environment:daylight,requestFrame:wake,
     onOutputState:mode=>{outputStatus.textContent=mode==='hdr'?'HDR':'SDR';sceneElement.dataset.outputMode=mode;}});
   const lensPanel=document.createElement('aside');lensPanel.id='lens-controls';document.body.appendChild(lensPanel);
   const lensUI=createLensUI({store:hybrid.store,container:lensPanel});

@@ -1,12 +1,13 @@
 // Fused lens integrator: pixel/pupil/wavelength sample -> reverse real-lens
 // trace -> BVH nearest real surface -> material + raster-resource lighting ->
 // RGB->spectral XYZ -> f32 progressive accumulation. One invocation per pixel.
+// Mirror mode: each invocation traces one optical path, then four scene paths.
 struct RenderParameters {
   cameraToWorld: mat4x4<f32>,
   size: vec4<u32>,      // width, height, batch spp, target attempted spp
   settings: vec4<u32>,  // seed, diagnostic mode, test constant environment, tile y offset
-  environment: vec4<f32>, // RGB constant radiance for numerical GPU acceptance only
-  debug: vec4<u32>,     // x: pinhole; y: first group; z: dispatch row width; w: chunk group count (0 = legacy)
+  environment: vec4<f32>, // xyz: test constant radiance; w: bitcast paired band half-height
+  debug: vec4<u32>,     // x: 0 independent, 1 pinhole, 2 mirror, 3 hybrid, 4 retraced reference; yzw: chunk layout
   pinholeClipToCamera: mat4x4<f32>,
 };
 // 64 bytes. failures: optical blocked, TIR, optical numerical, BVH traversal error.
@@ -89,7 +90,7 @@ fn recordScene(a: ptr<function, PixelAccum>, scene: SceneSample) {
 
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3<u32>,@builtin(local_invocation_index) lane:u32){
-  integratePixel(id);
+  if(render.debug.x>=2u){integrateMirrors(id);}else{integratePixel(id);}
   // WORK-COUNTING-BEGIN
   // Every invocation reaches the barrier: integratePixel returns, never exits main.
   // Constant indices only: a dynamic index would move workCounters out of registers
@@ -126,7 +127,9 @@ fn integratePixel(id:vec3<u32>){
   let linearGroup=render.debug.y+chunkGroup;
   let imageX=select(id.x,(linearGroup%groupsX)*8u+id.x%8u,render.debug.w!=0u);
   let localY=select(id.y,(linearGroup/groupsX)*8u+id.y%8u,render.debug.w!=0u);
-  let imageY=localY+render.settings.w;
+  let halfHeight=bitcast<u32>(render.environment.w);
+  if(halfHeight>0u&&localY>=halfHeight*2u){return;}
+  let imageY=select(localY+render.settings.w,render.size.y-1u-render.settings.w-(localY-halfHeight),halfHeight>0u&&localY>=halfHeight);
   if(imageX>=render.size.x||imageY>=render.size.y){return;}
   let pixel=localY*render.size.x+imageX;
   var a=accumulation[pixel];
@@ -208,4 +211,115 @@ fn integratePixel(id:vec3<u32>){
   }
   accumulation[pixel]=a;
   textureStore(lensImage,vec2<i32>(i32(imageX),i32(imageY)),resolvePixel(a));
+}
+
+// Lens-space ray, before the camera pose. Reflections are applied to BOTH p/v.
+struct OpticalSample {
+  p:vec3<f32>, status:u32,
+  v:vec3<f32>, lambda:f32,
+  weight:f32,
+};
+fn sampleOptical(image:vec2<u32>,index:u32,seed:u32,reflection:vec2<f32>)->OpticalSample {
+  let imageX=image.x;let imageY=image.y;
+  let globalPixel=imageY*render.size.x+imageX;
+  var lambda=0.0;var weight=1.0;
+  let jitter=vec2<f32>(sampleDimension(globalPixel,index,0u,seed),sampleDimension(globalPixel,index,1u,seed));
+  let uv=(vec2<f32>(f32(imageX),f32(imageY))+jitter)/vec2<f32>(render.size.xy);
+  // A real sensor image is inverted. Stored output y=0 is the displayed top.
+  let sensor=vec3<f32>(-(uv.x-.5)*optics.sensor.x,(uv.y-.5)*optics.sensor.y,optics.geometry.x);
+  let pupilUV=vec2<f32>(sampleDimension(globalPixel,index,2u,seed),sampleDimension(globalPixel,index,3u,seed));
+  var direction:vec3<f32>;
+  var inSamplingDomain=true;
+  if(optics.sensor.w>0.5){
+    // Contact-plane sampling: pdf_omega=cos(theta)/pi gives weight 4.
+    let disk=sampleDisk(pupilUV);
+    direction=vec3<f32>(disk,-sqrt(max(0.0,1.0-dot(disk,disk))));
+    weight=4.0;
+}else{
+  let pupil=sampleExitPupil(sensor.xy,pupilUV);
+  inSamplingDomain=pupil.inGlobal;
+  let reference=vec3<f32>(pupil.point,optics.geometry.y);
+  direction=normalize(reference-sensor);
+  let dz=optics.geometry.x-optics.geometry.y;
+  let cosTheta=abs(direction.z);
+  // Full mixture area PDF in mm^-2. No successful-ray normalization.
+  weight=(4./3.141592653589793)*pow(cosTheta,4.)/(dz*dz*pupil.pdf);
+}
+lambda=optics.wavelength.x+(optics.wavelength.y-optics.wavelength.x)*sampleDimension(globalPixel,index,4u,seed);
+let ray=traceOptics(sensor*vec3<f32>(reflection,1),direction*vec3<f32>(reflection,1),lambda,true);
+// Reflected proposal densities use the SAME original mixture measure.
+// Do not retry a miss or renormalize by successful paths.
+let status=select(ray.status,1u,ray.status==0u&&!inSamplingDomain);
+return OpticalSample(ray.p,status,ray.v,lambda,weight);
+}
+fn accumulateOptical(a:ptr<function,PixelAccum>,optical:OpticalSample,sign:vec2<f32>,key:u32){
+  if(optical.status==1u){(*a).failures.x++;return;}
+  if(optical.status==2u){(*a).failures.y++;return;}
+  if(optical.status!=0u){(*a).failures.z++;return;}
+  let worldOrigin=(render.cameraToWorld*vec4<f32>(optical.p*vec3<f32>(sign,1)*.001,1)).xyz;
+  let worldDirection=normalize((render.cameraToWorld*vec4<f32>(optical.v*vec3<f32>(sign,1),0)).xyz);
+  let lambda=optical.lambda;let weight=optical.weight;
+  let geometryMode=render.settings.y>=MODE_GEOMETRY_DEPTH;
+    (*a).queries.z++;
+    var rgb=render.environment.xyz;
+    if(render.settings.z==0u){
+      // BVH first hit and shading use the same SceneRadianceProvider.
+      let scene=sceneRadiance(worldOrigin,worldDirection,key);
+      recordScene(a,scene);
+      if(scene.status!=SCENE_HIT&&scene.status!=SCENE_BACKGROUND){return;}
+      rgb=scene.rgb;
+      if(geometryMode){rgb=geometryDebug(scene);}
+    }
+    // The chosen nonnegative emission basis cannot represent materially
+    // negative scene RGB. Diagnose it instead of silently changing its colour.
+    if(any(rgb<vec3<f32>(-1e-5))||any(abs(rgb)>vec3<f32>(1e30))||any(rgb!=rgb)){(*a).extra.y++;return;}
+    if(geometryMode){(*a).xyz+=LINEAR_SRGB_TO_XYZ_M*rgb;return;}
+    workCounters[WORK_SPECTRAL]++;
+    let contribution=spectralXYZContribution(max(rgb,vec3<f32>(0)),lambda,1./(optics.wavelength.y-optics.wavelength.x),weight);
+    if(any(abs(contribution)>vec3<f32>(1e30))||any(contribution!=contribution)){(*a).extra.y++;return;}
+    (*a).xyz+=contribution;
+}
+
+// Reflection has unit absolute Jacobian: reflect the pixel jitter, pupil point,
+// outgoing ray and its existing importance weight together. Each destination
+// still counts ONE attempt, including misses; never divide weight by four.
+// Optical noise is shared across the orbit. Scene RNG keys remain per-pixel,
+// and sharing is never selected based on visibility, throughput or ray status.
+fn integrateMirrors(id:vec3<u32>){
+  let halfHeight=bitcast<u32>(render.environment.w);
+  let halfWidth=(render.size.x+1u)/2u;
+  let groupsX=(halfWidth+7u)/8u;
+  let chunkGroup=(id.y/8u)*render.debug.z+id.x/8u;
+  let group=render.debug.y+chunkGroup;
+  let canonicalLocal=vec2<u32>((group%groupsX)*8u+id.x%8u,(group/groupsX)*8u+id.y%8u);
+  if(chunkGroup>=render.debug.w||canonicalLocal.x>=halfWidth||canonicalLocal.y>=halfHeight){return;}
+  let canonical=canonicalLocal+vec2<u32>(0,render.settings.w);
+  let first=accumulation[canonicalLocal.y*render.size.x+canonical.x].attempts;
+  for(var j=0u;j<min(render.size.z,4u);j++){
+    let index=first+j;
+    if(render.size.w!=0u&&index>=render.size.w){break;}
+    let independent=render.debug.x==3u&&((index+spectralHash32((canonical.y*render.size.x+canonical.x)^render.settings.x))&3u)==0u;
+    var sharedOptical:OpticalSample;
+    if(!independent&&render.debug.x!=4u){sharedOptical=sampleOptical(canonical,index,render.settings.x,vec2<f32>(1));}
+    // Only one accumulator is live during the large BVH/shading call. Keeping
+    // four full records live, or adding workgroup barriers around that call,
+    // can spill registers and erase the optical savings on desktop GPUs.
+    for(var quadrant=0u;quadrant<4u;quadrant++){
+      let mirrorX=(quadrant&1u)!=0u;let mirrorY=(quadrant&2u)!=0u;
+      let image=vec2<u32>(select(canonical.x,render.size.x-1u-canonical.x,mirrorX),select(canonical.y,render.size.y-1u-canonical.y,mirrorY));
+      if(mirrorX&&image.x==canonical.x){continue;}
+      let pixel=(canonicalLocal.y+select(0u,halfHeight,mirrorY))*render.size.x+image.x;
+      var a=accumulation[pixel];
+      var optical=sharedOptical;
+      var sign=vec2<f32>(select(1.0,-1.0,mirrorX),select(1.0,-1.0,mirrorY));
+      if(independent){optical=sampleOptical(image,index,render.settings.x^0xa511e9b3u,vec2<f32>(1));sign=vec2<f32>(1);}
+      // Matched-sample validation explicitly traces each reflected input ray.
+      if(render.debug.x==4u){optical=sampleOptical(canonical,index,render.settings.x,sign);sign=vec2<f32>(1);}
+      let globalPixel=image.y*render.size.x+image.x;
+      let key=spectralHash32(globalPixel^spectralHash32(a.attempts+render.settings.x*0x632be5abu));
+      a.attempts++;workCounters[WORK_PATH]++;
+      accumulateOptical(&a,optical,sign,key);
+      accumulation[pixel]=a;textureStore(lensImage,vec2<i32>(image),resolvePixel(a));
+    }
+  }
 }
