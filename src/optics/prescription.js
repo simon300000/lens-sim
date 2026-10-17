@@ -107,14 +107,23 @@ export function adaptLensRecord(record, catalog, { configurationIndex = 0 } = {}
     surface.apertureRadiusMm ??= positiveRadius(record.sdAp?.[surface.index]);
     surface.apertureSource = surface.apertureRadiusMm ? (txAperture ? 'tx-explicit' : 'sdAp-explicit') : 'unknown';
     surface.drawRadiusMm = positiveRadius(record.sdDraw?.[surface.index]);
+    // Missing physical aperture: use the drawing radius as a geometric
+    // approximation, retaining its provenance for UI/data warnings.
+    if (surface.apertureRadiusMm === null && surface.drawRadiusMm !== null) {
+      surface.apertureRadiusMm = surface.drawRadiusMm;
+      surface.apertureSource = 'sdDraw-approximation';
+    }
     surface.type = surface.doe ? 'diffractive' : surface.xodd ? 'extended-odd-asphere' : surface.aspheric.length ? 'even-asphere' : surface.conic !== 0 ? 'conic' : surface.radiusMm === 0 ? 'plane' : 'sphere';
     if (surface.thicknessMm < 0) throw new Error(`Negative axial thickness at surface ${surface.index + 1}; folded/reflected or overlapping layout unsupported`);
     zMm += surface.thicknessMm;
     before = after;
   }
   if (surfaces.at(-1).mediumAfter !== 'air') throw new Error('Final interface must exit to air before the sensor');
-  const missing = surfaces.filter(s => s.apertureRadiusMm === null).map(s => s.index + 1);
-  if (missing.length) warnings.push(`通光数据不完整：S${missing.join(', S')} 无已知物理半口径；sdDraw 仅用于保守求交边界，不作为挡光。`);
+  const approximated = surfaces.filter(s => s.apertureSource === 'sdDraw-approximation').map(s => s.index + 1);
+  const unknown = surfaces.filter(s => s.apertureRadiusMm === null).map(s => s.index + 1);
+  const missing = surfaces.filter(s => s.apertureSource === 'unknown' || s.apertureSource === 'sdDraw-approximation').map(s => s.index + 1);
+  if (approximated.length) warnings.push(`通光半径近似：S${approximated.join(', S')} 缺少真实通光半径，已使用绘图半径 sdDraw 作为挡光边界；该值不是已知物理通光数据。`);
+  if (unknown.length) warnings.push(`通光数据不完整：S${unknown.join(', S')} 无真实通光半径及有效绘图半径，仍采用数值求交域。`);
   if (Object.values(glasses).some(g => g.model)) warnings.push('含 nd/vd 模型玻璃；色散为上游 Conrady 近似。');
   if(surfaces.some(s=>s.xodd))warnings.push('含 XODD 扩展奇次非球面：按原始 Rn 与 A1…AN 计算全部整数次幂；A1 非零的轴心无唯一法线。');
   warnings.push('380–780 nm 为本实现工作区间；上游目录表未提供各牌号有效波段，未据此声称厂商认证范围。');
@@ -131,7 +140,7 @@ export function adaptLensRecord(record, catalog, { configurationIndex = 0 } = {}
     objectDistanceMm,
     focusWavelengths:(record.wl??[]).map(w=>({nm:Number(w[0]),weight:Number(w[1])})),focusPrimaryIndex:record.pri??0,
     sensorMm: [36, 24], wavelengthRangeNm: [380, 780],
-    apertureDataComplete: missing.length === 0, missingApertureSurfaces: missing, warnings,
+    apertureDataComplete: missing.length === 0, missingApertureSurfaces: missing, approximatedApertureSurfaces: approximated, warnings,
     metadata: { src: record.src, kind: record.kind, note: record.note ?? '', fieldMode: record.fmode, fieldExtent: record.fov, empiricalVignetting: configuration?.vig ?? null, vigCoord: record.vigCoord ?? null, vigH: record.vigH ?? null, empiricalVignettingApplied: false },
   };
 }
