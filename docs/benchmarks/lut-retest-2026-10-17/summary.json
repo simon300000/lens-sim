@@ -1,0 +1,195 @@
+{
+  "status": "complete",
+  "supersedes": "main-integration-2026-10-17 LUT performance conclusion; user reported concurrent computer use during that original run",
+  "method": {
+    "browser": "Safari Technology Preview",
+    "environment": {
+      "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15",
+      "adapter": {
+        "vendor": "apple",
+        "architecture": "apple",
+        "description": "apple"
+      }
+    },
+    "image": [
+      480,
+      320
+    ],
+    "spp": 128,
+    "roundsPerRun": 9,
+    "validRuns": 2,
+    "renderPairsPerCase": 18,
+    "timing": "Queue-complete wall time, fixed full-image batch 4 spp, no GPU timestamp query; excludes statistics, readback, hashing and preparation",
+    "order": "Run 2 reverses lens order, integration order and first A/B variant",
+    "sourceVerification": "Both shader and engine files match previous archived A/B SHA-256; harness changed only rounds/order and order-independent parity checking",
+    "foreground": "Both completed runs have valid=true and no focus/visibility/GPU errors",
+    "setupCaveat": "Compile and lens preparation recorded separately; shared caches and setup order mean these are not independent cold-start comparisons"
+  },
+  "cases": [
+    {
+      "lens": "canon-fl-50mm-f1-8",
+      "integration": "fused",
+      "runs": [
+        {
+          "baselineMedianMs": 1901,
+          "optimizedMedianMs": 1834,
+          "timeReductionPercent": 3.5244608100999497,
+          "rawBitwiseEqual": true,
+          "setup": {
+            "baseline": {
+              "compileMs": 59,
+              "lensPreparationMs": 6113
+            },
+            "candidate": {
+              "compileMs": 36,
+              "lensPreparationMs": 1
+            }
+          }
+        },
+        {
+          "baselineMedianMs": 1898,
+          "optimizedMedianMs": 1853,
+          "timeReductionPercent": 2.3709167544784027,
+          "rawBitwiseEqual": true,
+          "setup": {
+            "baseline": {
+              "compileMs": 27,
+              "lensPreparationMs": 2
+            },
+            "candidate": {
+              "compileMs": 26,
+              "lensPreparationMs": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "lens": "canon-fl-50mm-f1-8",
+      "integration": "split",
+      "runs": [
+        {
+          "baselineMedianMs": 1809,
+          "optimizedMedianMs": 1794,
+          "timeReductionPercent": 0.8291873963515717,
+          "rawBitwiseEqual": true,
+          "setup": {
+            "baseline": {
+              "compileMs": 29,
+              "lensPreparationMs": 1
+            },
+            "candidate": {
+              "compileMs": 28,
+              "lensPreparationMs": 1
+            }
+          }
+        },
+        {
+          "baselineMedianMs": 1774,
+          "optimizedMedianMs": 1804,
+          "timeReductionPercent": -1.6910935738444266,
+          "rawBitwiseEqual": true,
+          "setup": {
+            "baseline": {
+              "compileMs": 30,
+              "lensPreparationMs": 1323
+            },
+            "candidate": {
+              "compileMs": 33,
+              "lensPreparationMs": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "lens": "sony-fe-600mm-f4-gm-oss",
+      "integration": "fused",
+      "runs": [
+        {
+          "baselineMedianMs": 819,
+          "optimizedMedianMs": 854,
+          "timeReductionPercent": -4.2735042735042805,
+          "rawBitwiseEqual": true,
+          "setup": {
+            "baseline": {
+              "compileMs": 31,
+              "lensPreparationMs": 10547
+            },
+            "candidate": {
+              "compileMs": 33,
+              "lensPreparationMs": 2
+            }
+          }
+        },
+        {
+          "baselineMedianMs": 849,
+          "optimizedMedianMs": 827,
+          "timeReductionPercent": 2.5912838633686652,
+          "rawBitwiseEqual": true,
+          "setup": {
+            "baseline": {
+              "compileMs": 46,
+              "lensPreparationMs": 2
+            },
+            "candidate": {
+              "compileMs": 32,
+              "lensPreparationMs": 3
+            }
+          }
+        }
+      ]
+    },
+    {
+      "lens": "sony-fe-600mm-f4-gm-oss",
+      "integration": "split",
+      "runs": [
+        {
+          "baselineMedianMs": 683,
+          "optimizedMedianMs": 685,
+          "timeReductionPercent": -0.2928257686676483,
+          "rawBitwiseEqual": true,
+          "setup": {
+            "baseline": {
+              "compileMs": 27,
+              "lensPreparationMs": 2
+            },
+            "candidate": {
+              "compileMs": 27,
+              "lensPreparationMs": 2
+            }
+          }
+        },
+        {
+          "baselineMedianMs": 691,
+          "optimizedMedianMs": 683,
+          "timeReductionPercent": 1.157742402315487,
+          "rawBitwiseEqual": true,
+          "setup": {
+            "baseline": {
+              "compileMs": 29,
+              "lensPreparationMs": 8792
+            },
+            "candidate": {
+              "compileMs": 38,
+              "lensPreparationMs": 2
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "quality": "All 8 completed case pairs have bitwise-identical raw FP32 accumulation and counters; both variants pass optical/f64 probes in each run",
+  "conclusions": [
+    "Previous Canon fused 6.5% regression is not reproduced and is withdrawn as a reliable conclusion",
+    "Canon fused improves 2.37% to 3.52% in the two valid retests",
+    "Sony fused reverses direction across runs; no stable conclusion",
+    "Apple default split path has small changes with reversed direction across runs; no demonstrated stable benefit",
+    "Keep NVIDIA-only default for now; Apple/unknown stay off because default-path benefit is not established, not because a reliable 6.5% regression was proven"
+  ],
+  "invalidRun": {
+    "file": "run-2-invalid-harness.json",
+    "reason": "Harness compared candidate hash with an unset baseline hash when order was reversed; fixed to compare after both hashes exist. Excluded entirely."
+  },
+  "delivery": "Report update only; no runtime policy changes"
+}

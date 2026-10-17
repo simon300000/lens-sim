@@ -93,7 +93,8 @@
           "timeIncreasePercent": 1.458885941644561,
           "rawBitwiseEqual": true
         }
-      ]
+      ],
+      "status": "Superseded for performance: user reported concurrent computer use. See ../lut-retest-2026-10-17/summary.json. Original raw/correctness evidence retained."
     }
   },
   "validation": {
