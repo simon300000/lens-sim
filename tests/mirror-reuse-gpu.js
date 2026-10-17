@@ -65,8 +65,17 @@ try{
   }
   // Same low-level kernel, no cross-group phase assumptions or CPU ray transport.
   const workStatus=await original.setWorkCounting(true);original.reset();original.setPose(camera);
-  original.sample({batchSpp:4,targetSpp:4,mirrorReuse:true,constantEnvironment:[1,1,1]});await device.queue.onSubmittedWorkDone();
+  while(original.spp<4){original.sample({batchSpp:4,targetSpp:4,mirrorReuse:true,constantEnvironment:[1,1,1]});await device.queue.onSubmittedWorkDone();}
   const work=await original.readWork();if(workStatus==='counting')check(work.counts[0]===original.dimensions.width*original.dimensions.height*4,'work path count changed');
+  if(workStatus==='counting'){
+    check(original.lastSubmission.integrationMode===engineOptions.integrationMode,'diagnostics changed integration mode');
+    check(work.integrationMode===engineOptions.integrationMode,'wrong reported work mode');
+    check(work.counts[14]===Math.ceil(original.dimensions.width/2)*original.dimensions.height/2*4,'shared optical launch counted more than once');
+    const raw=new Uint32Array(await original.readAccumulation());let passed=0;for(let i=10;i<raw.length;i+=16)passed+=raw[i];
+    check(work.counts[15]===passed,'camera transforms should only count passed rays');
+    const empty=await original.readWork();check(empty.counts.every(v=>v===0)&&empty.workUnits===0&&empty.timedChunks===0&&empty.msPerWorkUnit===null,'previous timing window leaked into empty read');
+    await original.setWorkCounting(false);
+  }
   check(!errors.length,errors.join('\n'));tiled.dispose();
   window.__mirrorRuns=runs;
   const report={passed:true,integrationMode:original.integrationMode,lens:params.get('lens')??'canon-fl-50mm-f1-8',summary:runs.map(r=>({mirror:r.mirrorReuse,tiles:r.tiles,attempts:r.attempts,reference:r.referenceComparison})),compilationMs,userAgent:navigator.userAgent,foreground:!document.hidden,runs:runs.map(({raw,rgb,...r})=>r),workStatus,work,errors};

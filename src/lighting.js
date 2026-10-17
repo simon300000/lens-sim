@@ -53,7 +53,7 @@ function skyMaterial(parameters) {
 }
 
 function stars(scene, parameters) {
-  const random=rng(267409),positions=[],colors=[],sizes=[];
+  const random=rng(267409),positions=[],colors=[];
   for(let i=0;i<1100;i++) {
     const y=.025+random()*.975,a=random()*Math.PI*2,r=Math.sqrt(1-y*y),strength=.25+random()*.75;
     positions.push(Math.cos(a)*r*218,y*218,Math.sin(a)*r*218);

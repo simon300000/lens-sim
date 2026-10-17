@@ -5,7 +5,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { loadUpstreamCatalog, extractStaticObject } from '../scripts/build-lens-data.mjs';
-import { AIR, FRAUNHOFER_NM, refractiveIndex, resolveGlass, modelGlass, parseGlassCatalog, createGlassLUT, lookupGlassLUT } from '../src/optics/glass.js';
+import { AIR, FRAUNHOFER_NM, refractiveIndex, resolveGlass, modelGlass, createGlassLUT, lookupGlassLUT } from '../src/optics/glass.js';
 import { parsePrescriptionText, adaptLensRecord, inspectLensRecord } from '../src/optics/prescription.js';
 import { intersectSurface } from '../src/optics/optical-reference.js';
 

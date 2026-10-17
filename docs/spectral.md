@@ -40,7 +40,7 @@ The approximation has no spectral material BRDFs, measured light spectra, fluore
 
 A lens requiring a smaller supported visible band must visibly report it. Sampling PDF, CMF integration and RGB reconstruction must all use the same interval. `createSpectralReconstruction({minNm,maxNm})` refits the positive primary spectra on that band; unsupported bands fail explicitly. `sampleWavelength(u,minNm,maxNm)` supplies its PDF. The fixed global K remains unchanged.
 
-`packSpectralBasis()` returns nine `vec4f` parameter entries, primary-major `[centerNm,sigmaNm,weight,0]`. `spectralRadianceWithBasis` accepts that array, allowing a changed glass band to be uploaded as parameters without recompiling the pipeline. The caller checks the same min/max interval. The binding-free `SPECTRAL_WGSL` default uses 380–780 nm. `spectralWGSL(reconstruction)` is a source-generation/reference utility; runtime parameter updates should use the packed-basis path rather than recompiling this utility for every edit.
+`SPECTRAL_WGSL` embeds the fixed 380–780 nm emission basis shared by the renderer. Lens/glass wavelength bounds and sampling PDFs are runtime optics parameters; changing them does not rebuild this basis or compile a new shader. Restricted-band CPU reconstructions remain available through `createSpectralReconstruction()` for numerical reference tests.
 
 ## Reproducible sequence
 

@@ -2,7 +2,7 @@
  * One GPU-only lens-space packet per canonical pixel/sample; scene workgroups
  * interleave q0/q1/q2/q3 for each canonical block. No CPU ray readback. */
 export const SPLIT_RAY_BYTES=48;
-export function splitMirrorSources({integrator,optical,work,intersector,shading,spectral,sampling,pupil}){
+export function splitMirrorSources({integrator,optical,work,intersector,shading,spectral,sampling,pupil,counting=false}){
   const fused=integrator.replace(/\/\/ WORK-COUNTING-BEGIN[\s\S]*?\/\/ WORK-COUNTING-END\n/g,'');
   const between=(s,a,b)=>{const i=s.indexOf(a),j=s.indexOf(b,i+a.length);if(i<0||j<0)throw new Error(`Split mirror delimiter missing: ${a}/${b}`);return s.slice(i,j);};
   const types=between(fused,'struct RenderParameters','@group(0) @binding(0)');
@@ -81,7 +81,23 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   accumulation[pixel]=a;textureStore(lensImage,vec2i(image),resolvePixel(a));
 }
 `;
-  return {raygen,scene};
+  if(!counting)return {raygen,scene};
+  const blocks=[...integrator.matchAll(/\/\/ WORK-COUNTING-BEGIN[^\n]*\n([\s\S]*?)\/\/ WORK-COUNTING-END/g)].map(m=>m[1]);
+  if(blocks.length!==2)throw new Error('Work counter reduction changed');
+  const entry='@compute @workgroup_size(8,8)\nfn main(@builtin(global_invocation_id) id:vec3u)';
+  const counted=source=>{
+    if(!source.includes(entry))throw new Error('Split stage entry changed');
+    // Early returns leave only integrateStage. All lanes, including padding,
+    // always reach the reduction barrier in main.
+    return source.replace(entry,'fn integrateStage(id:vec3u)')+blocks[0].replace('@binding(21)','@binding(22)')+`
+@compute @workgroup_size(8,8)
+fn main(@builtin(global_invocation_id) id:vec3u,@builtin(local_invocation_index) lane:u32){
+  integrateStage(id);
+${blocks[1]}
+}
+`;
+  };
+  return {raygen:counted(raygen),scene:counted(scene)};
 }
 
 /** Preserve the fused GPU source/layout on devices that retain that path. */

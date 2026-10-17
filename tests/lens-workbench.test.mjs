@@ -118,7 +118,7 @@ test('export mapping matches the SDR display transform', () => {
 
 test('work model: weighted FLOPs, group shares and rate from measured time', async () => {
   const { WORK_COUNTERS, summarizeWork } = await import('../src/rendering/work-model.js');
-  const counts = WORK_COUNTERS.map(([key]) => ({ path: 100, lensSurface: 1000, box: 2000, shade: 50 }[key] ?? 0));
+  const counts = WORK_COUNTERS.map(([key]) => ({ path: 100, opticalLaunch: 100, cameraTransform: 100, lensSurface: 1000, box: 2000, shade: 50 }[key] ?? 0));
   const flops = 100 * 110 + 1000 * 115 + 2000 * 26 + 50 * 320;
   const w = summarizeWork(counts, { workUnits: 10, msPerWorkUnit: 0.5, timing: 'gpu' });
   assert.equal(w.flopsPerPath, flops / 100);
@@ -138,4 +138,12 @@ test('every WGSL work counter has a cost-model entry in the same order', async (
   assert.match(wgsl, new RegExp(`array<u32, ${WORK_COUNTERS.length}>`));
   const integrator = await readFile(new URL('../src/rendering/optical-integrator.wgsl', import.meta.url), 'utf8');
   assert.match(integrator, new RegExp(`array<array<u32, 64>, ${WORK_COUNTERS.length}>`));
+});
+
+test('mirrored work estimates count shared optical launches once and skip blocked camera transforms',async()=>{
+  const {WORK_COUNTERS,summarizeWork}=await import('../src/rendering/work-model.js');
+  const estimate=events=>summarizeWork(WORK_COUNTERS.map(([key])=>events[key]??0),{workUnits:1,msPerWorkUnit:1,timing:'gpu'});
+  assert.equal(estimate({path:4,opticalLaunch:1,cameraTransform:4}).flopsPerPath,230/4);
+  assert.equal(estimate({path:4,opticalLaunch:4,cameraTransform:4}).flopsPerPath,440/4);
+  assert.equal(estimate({path:4,opticalLaunch:1,cameraTransform:0}).flopsPerPath,70/4);
 });

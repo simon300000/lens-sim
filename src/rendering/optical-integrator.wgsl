@@ -44,7 +44,7 @@ struct PixelAccum {
 // 64-bit work totals as (low, high) u32 pairs.
 @group(0) @binding(21) var<storage,read_write> workTotals: array<atomic<u32>>;
 // Per-lane staging (14 x 64 u32): plain stores, no shared-memory atomics.
-var<workgroup> workgroupWork: array<array<u32, 64>, 14>;
+var<workgroup> workgroupWork: array<array<u32, 64>, 16>;
 // WORK-COUNTING-END
 
 const LINEAR_SRGB_TO_XYZ_M = mat3x3<f32>(
@@ -109,12 +109,15 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>,@builtin(local_invocation_in
   workgroupWork[11][lane]=workCounters[11];
   workgroupWork[12][lane]=workCounters[12];
   workgroupWork[13][lane]=workCounters[13];
+  workgroupWork[14][lane]=workCounters[14];
+  workgroupWork[15][lane]=workCounters[15];
   workgroupBarrier();
   // One lane per counter sums the 64 lanes, then a single global 64-bit add.
   if(lane<WORK_COUNTERS){
-    var v=0u;
-    for(var i=0u;i<64u;i++){v+=workgroupWork[lane][i];}
-    if(v!=0u){let old=atomicAdd(&workTotals[lane*2u],v);if(old>0xffffffffu-v){atomicAdd(&workTotals[lane*2u+1u],1u);}}
+    var lo=0u;var hi=0u;
+    for(var i=0u;i<64u;i++){let v=workgroupWork[lane][i];let old=lo;lo+=v;if(old>0xffffffffu-v){hi++;}}
+    if(lo!=0u){let old=atomicAdd(&workTotals[lane*2u],lo);if(old>0xffffffffu-lo){hi++;}}
+    if(hi!=0u){atomicAdd(&workTotals[lane*2u+1u],hi);}
   }
   // WORK-COUNTING-END
 }
@@ -151,9 +154,11 @@ fn integratePixel(id:vec3<u32>){
       // only by the raster/compute shading comparison test.
       let ndc=vec2<f32>((f32(imageX)+0.5)/f32(render.size.x)*2.0-1.0,1.0-(f32(imageY)+0.5)/f32(render.size.y)*2.0);
       let viewH=render.pinholeClipToCamera*vec4<f32>(ndc,0.5,1.0);
+      workCounters[WORK_CAMERA_TRANSFORM]++;
       worldOrigin=(render.cameraToWorld*vec4<f32>(0,0,0,1)).xyz;
       worldDirection=normalize((render.cameraToWorld*vec4<f32>(viewH.xyz/viewH.w,0)).xyz);
     }else{
+      workCounters[WORK_OPTICAL_LAUNCH]++;
       let jitter=vec2<f32>(sampleDimension(globalPixel,index,0u,render.settings.x),sampleDimension(globalPixel,index,1u,render.settings.x));
       let uv=(vec2<f32>(f32(imageX),f32(imageY))+jitter)/vec2<f32>(render.size.xy);
       // A real sensor image is inverted. Stored output y=0 is the displayed top.
@@ -186,6 +191,7 @@ fn integratePixel(id:vec3<u32>){
       // The proposal rectangle can extend outside the original numerical
       // domain. Keep that domain unchanged; never retry this zero attempt.
       if(!inSamplingDomain){a.failures.x++;continue;}
+      workCounters[WORK_CAMERA_TRANSFORM]++;
       worldOrigin=(render.cameraToWorld*vec4<f32>(ray.p*.001,1)).xyz;
       worldDirection=normalize((render.cameraToWorld*vec4<f32>(ray.v,0)).xyz);
 
@@ -220,6 +226,7 @@ struct OpticalSample {
   weight:f32,
 };
 fn sampleOptical(image:vec2<u32>,index:u32,seed:u32,reflection:vec2<f32>)->OpticalSample {
+  workCounters[WORK_OPTICAL_LAUNCH]++;
   let imageX=image.x;let imageY=image.y;
   let globalPixel=imageY*render.size.x+imageX;
   var lambda=0.0;var weight=1.0;
@@ -256,6 +263,7 @@ fn accumulateOptical(a:ptr<function,PixelAccum>,optical:OpticalSample,sign:vec2<
   if(optical.status==1u){(*a).failures.x++;return;}
   if(optical.status==2u){(*a).failures.y++;return;}
   if(optical.status!=0u){(*a).failures.z++;return;}
+  workCounters[WORK_CAMERA_TRANSFORM]++;
   let worldOrigin=(render.cameraToWorld*vec4<f32>(optical.p*vec3<f32>(sign,1)*.001,1)).xyz;
   let worldDirection=normalize((render.cameraToWorld*vec4<f32>(optical.v*vec3<f32>(sign,1),0)).xyz);
   let lambda=optical.lambda;let weight=optical.weight;
@@ -298,9 +306,8 @@ fn integrateMirrors(id:vec3<u32>){
   for(var j=0u;j<min(render.size.z,4u);j++){
     let index=first+j;
     if(render.size.w!=0u&&index>=render.size.w){break;}
-    let independent=render.debug.x==3u&&((index+spectralHash32((canonical.y*render.size.x+canonical.x)^render.settings.x))&3u)==0u;
     var sharedOptical:OpticalSample;
-    if(!independent&&render.debug.x!=4u){sharedOptical=sampleOptical(canonical,index,render.settings.x,vec2<f32>(1));}
+    if(render.debug.x!=4u){sharedOptical=sampleOptical(canonical,index,render.settings.x,vec2<f32>(1));}
     // Only one accumulator is live during the large BVH/shading call. Keeping
     // four full records live, or adding workgroup barriers around that call,
     // can spill registers and erase the optical savings on desktop GPUs.
@@ -312,7 +319,6 @@ fn integrateMirrors(id:vec3<u32>){
       var a=accumulation[pixel];
       var optical=sharedOptical;
       var sign=vec2<f32>(select(1.0,-1.0,mirrorX),select(1.0,-1.0,mirrorY));
-      if(independent){optical=sampleOptical(image,index,render.settings.x^0xa511e9b3u,vec2<f32>(1));sign=vec2<f32>(1);}
       // Matched-sample validation explicitly traces each reflected input ray.
       if(render.debug.x==4u){optical=sampleOptical(canonical,index,render.settings.x,sign);sign=vec2<f32>(1);}
       let globalPixel=image.y*render.size.x+image.x;
