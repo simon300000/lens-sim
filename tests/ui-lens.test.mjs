@@ -822,3 +822,63 @@ test('GPU work counting follows the HUD: on while open and ready, off when close
   await flush();
   assert.deepEqual(calls.filter((c) => c.type === 'setWorkCounting').map((c) => c.value), [true, false]);
 });
+
+test('the HUD refreshes from liveStats on its own timer, without store updates, only while open', () => {
+  const doc = createFakeDocument();
+  const win = doc.defaultView;
+  let clock = 0, timers = new Map(), nextTimer = 1;
+  win.performance = { now: () => clock };
+  win.setTimeout = (fn, ms) => { const id = nextTimer++; timers.set(id, { fn, at: clock + ms }); return id; };
+  win.clearTimeout = (id) => timers.delete(id);
+  const step = (ms) => { clock += ms; for (const [id, t] of [...timers]) if (t.at <= clock) { timers.delete(id); t.fn(); } };
+  const container = doc.createElement('div');
+  doc.body.appendChild(container);
+  const store = createControlStore({ ...READY, mode: 'lens' });
+  let live = { mode: 'lens', paused: false, spp: 0, computeMs: 12.5, lightingRefreshMs: 1, width: 100, height: 50, memoryBytes: 1024 };
+  let reads = 0;
+  const ui = createLensUI({ store, container, liveStats: () => { reads++; return live; } });
+  const $ = (ref) => container.querySelector(`[data-ref="${ref}"]`);
+  assert.equal(timers.size, 0, 'no loop while the HUD is closed');
+  key(doc, 'p');
+  assert.equal(timers.size, 1, 'loop starts when the HUD opens');
+  step(0);
+  for (let i = 0; i < 12; i++) { live = { ...live, spp: live.spp + 3.3, computeMs: 10 + i }; step(66); }
+  const text = $('hudMetrics').textContent;
+  assert.match(text, /50spp\/s/, 'fractional progress gives a steady rate between store publishes');
+  assert.match(text, /250\.0k条\/s/, 'ray throughput is spp/s × pixels');
+  assert.match(text, /21\.0ms/, 'latest GPU chunk time');
+  assert.equal(reads, 13, 'one read per HUD interval');
+  for (let i = 0; i < 5; i++) store.update({ diagnostics: { ...store.getState().diagnostics } });
+  assert.equal(reads, 13, 'store publishes do not add reads while the loop runs');
+  $('hudClose').click();
+  assert.equal(timers.size, 0, 'loop stops when the HUD closes');
+  ui.dispose();
+});
+
+test('HUD shows slow rates, chunk pixels and the render state', () => {
+  const doc = createFakeDocument();
+  const win = doc.defaultView;
+  let clock = 0, timers = new Map(), nextTimer = 1;
+  win.performance = { now: () => clock };
+  win.setTimeout = (fn, ms) => { const id = nextTimer++; timers.set(id, { fn, at: clock + ms }); return id; };
+  win.clearTimeout = (id) => timers.delete(id);
+  const step = (ms) => { clock += ms; for (const [id, t] of [...timers]) if (t.at <= clock) { timers.delete(id); t.fn(); } };
+  const container = doc.createElement('div');
+  doc.body.appendChild(container);
+  let live = { mode: 'lens', paused: false, interactive: false, finished: false, spp: 3, computeMs: 30, chunkPixels: 61440, chunkSpp: 4, width: 480, height: 320, memoryBytes: 1 };
+  createLensUI({ store: createControlStore({ ...READY, mode: 'lens' }), container, liveStats: () => live });
+  const $ = (ref) => container.querySelector(`[data-ref="${ref}"]`);
+  key(doc, 'p');
+  step(0);
+  for (let i = 0; i < 20; i++) { live = { ...live, spp: live.spp + 0.2 * 0.066 }; step(66); }
+  assert.match($('hudMetrics').textContent, /0\.20spp\/s/, 'a 0.2 spp/s render is not shown as zero');
+  assert.match(container.querySelector('[data-metric="compute"]').textContent, /30\.0ms61\.4k 像素 × 4 spp/);
+  assert.equal($('hudLive').textContent, '快速模式');
+  live = { ...live, interactive: true }; step(66);
+  assert.equal($('hudLive').textContent, '响应模式');
+  assert.equal($('hudLive').getAttribute('data-state'), 'responsive');
+  live = { ...live, paused: true }; step(66);
+  assert.equal($('hudLive').textContent, '已暂停');
+  live = { ...live, paused: false, finished: true }; step(66);
+  assert.equal($('hudLive').textContent, '已完成');
+});

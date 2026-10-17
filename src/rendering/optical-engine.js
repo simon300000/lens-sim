@@ -74,7 +74,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   const splitPipelines=splitSources?{raygen:pipelines.split_raygen,scene:pipelines.split_scene}:null;let splitRays=null;
   const stageTimer=splitStageTiming?createSplitStageTimer(interop):null;
   let pupilTable;
-  let surfaces,lut,tiles=[],tileCursor=0,groupCursor=0,chunkBudget=createChunkBudget(),lastSubmission=null,sampleSerial=0,roundBudget=0,roundTarget=0,roundMirror=0,image,packed,lens,groups={},spp=0,disposed=false,computeMs=null,statsPending=null,lastTiming=null;
+  let surfaces,lut,tiles=[],tileCursor=0,groupCursor=0,chunkBudget=createChunkBudget(),lastSubmission=null,sampleSerial=0,roundBudget=0,roundTarget=0,roundMirror=0,tileGroups=0,image,packed,lens,groups={},spp=0,disposed=false,computeMs=null,statsPending=null,lastTiming=null;
   let dimensions={width:0,height:0},currentRevision=0,resizeRevision=0;
   const pose=new THREE.Matrix4();
   let sceneBound=-1,lightingBound=null;
@@ -112,7 +112,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   let tablesBound=null;
   function reset({resetTiming=false}={}){
     if(resetTiming)chunkBudget=createChunkBudget();
-    currentRevision++;spp=0;tileCursor=0;groupCursor=0;lastSubmission=null;roundBudget=0;computeMs=null;lastTiming=null;
+    currentRevision++;spp=0;tileCursor=0;groupCursor=0;lastSubmission=null;roundBudget=0;tileGroups=0;computeMs=null;lastTiming=null;
     if(tiles.length){const encoder=device.createCommandEncoder();for(const tile of tiles)encoder.clearBuffer(tile.buffer);device.queue.submit([encoder.finish()]);}
   }
   function splitRayBytes(plan){
@@ -185,7 +185,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     const pass=encoder.beginComputePass(timestamps?{timestampWrites:timestamps}:{});
     pass.setPipeline(pipeline);pass.setBindGroup(0,bindGroup);pass.dispatchWorkgroups(x,y);pass.end();
     const timingRevision=currentRevision,timingDimensions={...dimensions};
-    const collect=timed?timer.end(encoder,timestamps,ms=>{if(submission?.counted&&submission.countEpoch===countEpoch)recordWorkTiming(ms,submission.countedWorkUnits,'gpu',submission.workWindow);if(timingRevision===currentRevision){computeMs=ms;lastTiming={...timingDimensions,ms};if(submission){submission.gpuMs=ms;chunkBudget.observe(submission,ms);}}}):null;
+    const collect=timed?timer.end(encoder,timestamps,ms=>{if(submission?.counted&&submission.countEpoch===countEpoch)recordWorkTiming(ms,submission.countedWorkUnits,'gpu',submission.workWindow);if(timingRevision===currentRevision){computeMs=ms;lastTiming={...timingDimensions,ms,chunkPixels:submission?.pixels??null,chunkSpp:submission?.spp??null};if(submission){submission.gpuMs=ms;chunkBudget.observe(submission,ms);}}}):null;
     device.queue.submit([encoder.finish()]);collect?.();
   }
   function submitSplit(tile,dispatch,sceneDispatch,submission){
@@ -198,7 +198,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       const pass=encoder.beginComputePass({label,...(stamp?{timestampWrites:stamp}:{})});pass.setPipeline(pipeline);pass.setBindGroup(0,bind);pass.dispatchWorkgroups(grid.x,grid.y);pass.end();
     }
     const revision=currentRevision,timingDimensions={...dimensions};
-    const accept=t=>{if(submission.counted&&submission.countEpoch===countEpoch)recordWorkTiming(t.ms,submission.countedWorkUnits,'gpu',submission.workWindow);if(revision===currentRevision){computeMs=t.ms;lastTiming={...timingDimensions,...t};submission.gpuMs=t.ms;chunkBudget.observe(submission,t.ms);}};
+    const accept=t=>{if(submission.counted&&submission.countEpoch===countEpoch)recordWorkTiming(t.ms,submission.countedWorkUnits,'gpu',submission.workWindow);if(revision===currentRevision){computeMs=t.ms;lastTiming={...timingDimensions,...t,chunkPixels:submission.pixels??null,chunkSpp:submission.spp??null};submission.gpuMs=t.ms;chunkBudget.observe(submission,t.ms);}};
     const collect=stages?stageTimer.end(encoder,stages,accept):timer.end(encoder,timestamps,ms=>accept({ms}));
     device.queue.submit([encoder.finish()]);collect?.();
   }
@@ -212,6 +212,8 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     get lastTiming(){return lastTiming;},
     get lastSubmission(){return lastSubmission;},
     get sampleSerial(){return sampleSerial;},
+    // Samples per pixel including the submitted part of the current sweep; CPU-only, for live rate readouts.
+    get progress(){return tiles.length&&tileGroups?spp+roundBudget*(tileCursor+groupCursor/tileGroups)/tiles.length:spp;},
     // If timestamps are supported, feedback is delivered by timer.end itself,
     // even when the asynchronous map completes after the queue fence callback.
     completeChunk(submission,wallMs){
@@ -295,10 +297,12 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       const counted=counting&&Boolean(useSplit?tile.raygenCounting:tile.sampleCounting)&&!pinhole;
       const submission={revision:currentRevision,chunked,interactive,groups,work:groups*budget*(roundMirror?4:1),capacity:Math.min(totalGroups,scratchGroups)*budget*(roundMirror?4:1),tail:plan.tail,targetMs:plan.targetMs,gpuMs:null,counted,mirrorMode:roundMirror,integrationMode:useSplit?'split':'fused'};
       submission.countEpoch=countEpoch;submission.workWindow=workWindow;submission.countedWorkUnits=submission.work;
+      // Pixels this chunk writes (mirror reuse covers four per thread), for the HUD.
+      submission.spp=budget;submission.pixels=Math.min(dimensions.width*tile.height,groups*64*(roundMirror?4:1));
       if(useSplit){
         const halfWidth=Math.ceil(dimensions.width/2),begin=groupCursor*64,end=Math.min(begin+groups*64,halfWidth*tile.halfHeight);
         const central=dimensions.width%2?Math.floor(end/halfWidth)-Math.floor(begin/halfWidth):0;
-        submission.countedWorkUnits=budget*(4*(end-begin)-2*central)/64;
+        submission.countedWorkUnits=budget*(4*(end-begin)-2*central)/64;submission.pixels=4*(end-begin)-2*central;
       }
       if(counted)workUnits+=submission.countedWorkUnits;
       lastSubmission=submission;
@@ -312,7 +316,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       const bindGroup=roundMirror===4?tile.sampleValidation:roundMirror?tile.sampleMirror:tile.sample;
       if(useSplit)submitSplit(tile,dispatch,sceneDispatch,submission);
       else submit(counted?countingPipeline:pipeline,counted?tile.sampleCounting:bindGroup,dispatch.x,dispatch.y,{timed:true,submission});
-      sampleSerial++;groupCursor+=groups;
+      sampleSerial++;groupCursor+=groups;tileGroups=totalGroups;
       if(groupCursor>=totalGroups){groupCursor=0;tileCursor++;if(tileCursor===tiles.length){tileCursor=0;spp+=budget;}}
       return true;
     },

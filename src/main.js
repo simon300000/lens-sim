@@ -210,7 +210,7 @@ async function createScene(){
   hybrid=await createHybridRuntime({renderer,scene,camera,adapterInfo:adapter.info,rasterPipeline:pipeline,rasterBeauty:beauty,rasterGlare:glare,refreshContext:()=>passReuse.beautyContext,cameraExposure,hdr,environment:daylight,requestFrame:wake,
     onOutputState:mode=>{outputStatus.textContent=mode==='hdr'?'HDR':'SDR';sceneElement.dataset.outputMode=mode;}});
   const lensPanel=document.createElement('aside');lensPanel.id='lens-controls';document.body.appendChild(lensPanel);
-  const lensUI=createLensUI({store:hybrid.store,container:lensPanel});
+  const lensUI=createLensUI({store:hybrid.store,container:lensPanel,liveStats:()=>hybrid.liveStats()});
   window.__SANTEI__.hybrid=hybrid;window.__SANTEI__.lensUI=lensUI;
   window.__SANTEI__.captureOutputRange=()=>{hybrid.frame();return captureCanvasRange(renderer);};
   hybrid.store.subscribe(state=>{

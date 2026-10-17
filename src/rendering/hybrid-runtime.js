@@ -86,13 +86,14 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
       gpuBytes:s.gpuBytes,buildWallMs:s.buildWallMs,extractMs:s.extractMs,uploadSubmitMs:s.uploadSubmitMs,timing:s.timing,worker:s.worker,
       environmentObjects:s.report.environment.length,unsupported:s.report.unsupported,counters:sceneResources.counters,reason:s.reason};
   }
+  const memoryBytes=()=>engine.memoryBytes+(sceneResources.stats?.gpuBytes??0)+1008;
   function publishEngine(){
     if(!engine)return;const s=state();
     const ls=lighting.status;
     update({sampling:{...s.sampling,spp:engine.spp},diagnostics:{...s.diagnostics,pipelineCompilations:interop.compilations,
       integrationMode:engine.lastSubmission?.integrationMode??engine.integrationMode,computeMs:engine.computeMs,lightingRefreshMs:lighting.refreshMs,lightingRefreshes:lighting.refreshes,
       timingSource:engine.timestampSupported?'GPU timestamp（单个采样分块：镜头+BVH+着色）/ CPU 提交耗时（光栅资源刷新）':'无 timestamp：仅 CPU 提交耗时',
-      ...engine.dimensions,memoryBytes:engine.memoryBytes+(sceneResources.stats?.gpuBytes??0)+1008},
+      ...engine.dimensions,memoryBytes:memoryBytes()},
       scene:{...s.scene,...(sceneSummary()?{summary:sceneSummary()}:{}),lighting:{ok:ls.ok,errors:ls.errors??[],warnings:ls.warnings??[],lights:ls.lights,environment:ls.environment,reflection:ls.reflection}}});
   }
   function resetAccumulation(kind='accumulation'){cancelFocus();engine?.reset();clearMetrics();statisticsRevision++;lastStatisticsSerial=-1;revision(kind);publishEngine();requestFrame();}
@@ -354,6 +355,13 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
       pointerActive=value;
       if(value){interacting=true;if(state().mode==='lens'&&engine?.resize(240)){bindImage();resetAccumulation();}}
       else scheduleRelease();
+    },
+    /** Cheap numbers for the performance HUD, read directly (no store update or snapshot cloning). */
+    liveStats(){
+      if(!engine)return null;const s=state();
+      const timing=engine.lastTiming;
+      return {mode:s.mode,paused:s.sampling.paused,interactive:isInteractive(),finished:s.sampling.targetSpp>0&&engine.spp>=s.sampling.targetSpp,
+        spp:engine.progress,computeMs:engine.computeMs,chunkPixels:timing?.chunkPixels??null,chunkSpp:timing?.chunkSpp??null,lightingRefreshMs:lighting.refreshMs,...engine.dimensions,memoryBytes:memoryBytes()};
     },
     needsFrame(){const s=state();return !disposed&&samplesInFlight<flightLimit()&&!document.hidden&&s.mode==='lens'&&s.status==='ready'&&sceneResources.ready&&!s.sampling.paused&&s.af.status!=='busy'&&hasSamplesRemaining(engine.spp,s.sampling.targetSpp);},
     frame(){

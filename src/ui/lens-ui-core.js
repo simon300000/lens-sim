@@ -38,7 +38,7 @@ const LIMITATIONS = [
 
 let instances = 0;
 
-export function createLensUI({ store, container } = {}) {
+export function createLensUI({ store, container, liveStats = null } = {}) {
   if (!store || typeof store.subscribe !== 'function' || typeof store.dispatch !== 'function') {
     throw new TypeError('createLensUI 需要 store（getState/subscribe/dispatch）');
   }
@@ -704,8 +704,10 @@ export function createLensUI({ store, container } = {}) {
     else thumb.replaceChildren();
     refs.thumbCaption.textContent = result.layout ? `${result.layout.elements.length} 片 · ${p.surfaces.length} 面` : '镜组截面';
   }
-  // Rolling samples for rates shown in the HUD (client-side, from published snapshots only).
+  // Rolling samples for rates shown in the HUD. With `liveStats` (cheap engine reads, no store
+  // update) the HUD refreshes on its own frame loop; otherwise only on published snapshots.
   const sppHistory = [], computeHistory = [];
+  const HUD_INTERVAL_MS = 66, RATE_WINDOW_MS = 2000;
   const now = () => (win?.performance ?? globalThis.performance)?.now?.() ?? Date.now();
   // Counting costs a little GPU time, so it runs only while the HUD is open and the backend is ready.
   let workCountingSent = false;
@@ -715,6 +717,7 @@ export function createLensUI({ store, container } = {}) {
     workCountingSent = want;
     Promise.resolve().then(() => store.dispatch('setWorkCounting', want)).catch(() => { workCountingSent = !want; });
   }
+  const formatPixels = (v) => (v >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : String(Math.round(v)));
   const groupCount = (v) => (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2));
   function renderWork(work) {
     const key = JSON.stringify(work ?? null);
@@ -742,37 +745,96 @@ export function createLensUI({ store, container } = {}) {
           ['BVH 包围盒 / 路径', groupCount(work.perPath.boxes)], ['三角形 / 路径', groupCount(work.perPath.triangles)], ['光源 / 着色点', groupCount(work.perPath.lights)]]
           .flatMap(([t, v]) => [h('dt', { text: t }), h('dd', { text: v })])));
   }
-  function renderHud(d, sampling) {
-    syncWorkCounting();
-    if (refs.hud.hidden) return;
-    renderWork(d.work);
-    const t = now(), attempted = Number(d.attemptedSamples) || 0, spp = Number(sampling.spp) || 0;
+  function hudSource(d, sampling) {
+    const live = typeof liveStats === 'function' ? liveStats() : null;
+    if (live) return live;
+    return { mode: state.mode, paused: sampling.paused, finished: sampling.targetSpp > 0 && sampling.spp >= sampling.targetSpp, spp: Number(sampling.spp) || 0, computeMs: d.computeMs,
+      lightingRefreshMs: d.lightingRefreshMs, width: d.width, height: d.height, memoryBytes: d.memoryBytes };
+  }
+  const METRICS = [['spp', '采样速度'], ['rays', '光线吞吐'], ['compute', 'GPU 单块'], ['lighting', '光照刷新'], ['image', '累积图像'], ['memory', '显存']];
+  const metricNodes = {};
+  refs.hudMetrics.replaceChildren(...METRICS.map(([key, labelText]) => {
+    const value = doc.createTextNode(''), unit = h('small', { text: '' }), detail = h('span', { class: 'lu-metric-detail', hidden: true });
+    metricNodes[key] = { value, unit, detail };
+    return h('div', { class: 'lu-metric', 'data-metric': key }, h('span', { class: 'lu-metric-label', text: labelText }), h('span', { class: 'lu-metric-value' }, value, unit), detail);
+  }));
+  const setText = (node, text) => { if (node.textContent !== text) node.textContent = text; };
+  function setMetric(key, value, unit = '', detail = '') {
+    const node = metricNodes[key];
+    setText(node.value, value);
+    setText(node.unit, unit);
+    node.unit.hidden = !unit;
+    setText(node.detail, detail);
+    node.detail.hidden = !detail;
+  }
+  // Render state: input shrinks chunks for responsiveness; idle uses large chunks for throughput.
+  function renderState(live, lens) {
+    if (!lens) return { key: 'raster', text: '光栅模式' };
+    if (live.paused) return { key: 'paused', text: '已暂停' };
+    if (live.finished) return { key: 'finished', text: '已完成' };
+    if (live.interactive === true) return { key: 'responsive', text: '响应模式' };
+    if (live.interactive === false) return { key: 'fast', text: '快速模式' };
+    return { key: 'sampling', text: '采样中' };
+  }
+  let sparkKey = '';
+  function renderHudMetrics(live) {
+    const t = now(), spp = Number(live.spp) || 0;
     // Accumulation restarted: start the rolling window again.
-    if (sppHistory.length && (attempted < sppHistory.at(-1).attempted || spp < sppHistory.at(-1).spp)) sppHistory.length = 0;
-    if (!sppHistory.length || t - sppHistory.at(-1).t > 200) sppHistory.push({ t, attempted, spp });
-    while (sppHistory.length > 2 && t - sppHistory[0].t > 4000) sppHistory.shift();
+    if (sppHistory.length && spp < sppHistory.at(-1).spp) sppHistory.length = 0;
+    if (!sppHistory.length || t - sppHistory.at(-1).t >= HUD_INTERVAL_MS * 0.75) sppHistory.push({ t, spp });
+    while (sppHistory.length > 2 && t - sppHistory[0].t > RATE_WINDOW_MS) sppHistory.shift();
     const first = sppHistory[0], span = (sppHistory.at(-1).t - first.t) / 1000;
     const sppRate = span > 0.4 ? (sppHistory.at(-1).spp - first.spp) / span : null;
-    const rayRate = span > 0.4 ? (sppHistory.at(-1).attempted - first.attempted) / span : null;
-    if (Number.isFinite(d.computeMs) && computeHistory.at(-1) !== d.computeMs) { computeHistory.push(d.computeMs); if (computeHistory.length > 60) computeHistory.shift(); }
-    const lens = state.mode === 'lens';
-    const metric = (labelText, value, unit = '') => h('div', { class: 'lu-metric' }, h('span', { class: 'lu-metric-label', text: labelText }), h('span', { class: 'lu-metric-value' }, value, unit ? h('small', { text: unit }) : null));
-    const rate = (v) => (v === null || !lens ? '—' : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : v.toFixed(v < 10 ? 1 : 0));
-    refs.hudMetrics.replaceChildren(
-      metric('采样速度', rate(sppRate), lens && sppRate !== null ? 'spp/s' : ''),
-      metric('光线吞吐', rate(rayRate), lens && rayRate !== null ? '条/s' : ''),
-      metric('GPU 单块', Number.isFinite(d.computeMs) ? d.computeMs.toFixed(1) : '—', Number.isFinite(d.computeMs) ? 'ms' : ''),
-      metric('光照刷新', Number.isFinite(d.lightingRefreshMs) ? d.lightingRefreshMs.toFixed(1) : '—', Number.isFinite(d.lightingRefreshMs) ? 'ms' : ''),
-      metric('累积图像', d.width && d.height ? `${d.width}×${d.height}` : '—'),
-      metric('显存', formatBytes(d.memoryBytes)));
-    refs.hudLive.textContent = lens ? (sampling.paused ? '已暂停' : sppRate !== null ? `${rate(sppRate)} spp/s` : '测量中') : '光栅模式';
+    // Every pixel attempts one path per sample, matching the GPU attempted-path counters.
+    const pixels = (Number(live.width) || 0) * (Number(live.height) || 0);
+    const rayRate = sppRate !== null && pixels > 0 ? sppRate * pixels : null;
+    if (Number.isFinite(live.computeMs) && computeHistory.at(-1) !== live.computeMs) { computeHistory.push(live.computeMs); if (computeHistory.length > 60) computeHistory.shift(); }
+    const lens = live.mode === 'lens';
+    // Two decimals below 1 spp/s so slow renders (e.g. 0.2 spp/s) do not read as zero.
+    const rate = (v) => (v === null || !lens ? '—' : v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : v.toFixed(v < 1 ? 2 : v < 10 ? 1 : 0));
+    setMetric('spp', rate(sppRate), lens && sppRate !== null ? 'spp/s' : '');
+    setMetric('rays', rate(rayRate), lens && rayRate !== null ? '条/s' : '');
+    const chunkPixels = Number(live.chunkPixels), chunkSpp = Number(live.chunkSpp);
+    const chunkDetail = lens && chunkPixels > 0 ? `${formatPixels(chunkPixels)} 像素${chunkSpp > 0 ? ` × ${chunkSpp} spp` : ''}` : '';
+    setMetric('compute', Number.isFinite(live.computeMs) ? live.computeMs.toFixed(1) : '—', Number.isFinite(live.computeMs) ? 'ms' : '', chunkDetail);
+    setMetric('lighting', Number.isFinite(live.lightingRefreshMs) ? live.lightingRefreshMs.toFixed(1) : '—', Number.isFinite(live.lightingRefreshMs) ? 'ms' : '');
+    setMetric('image', live.width && live.height ? `${live.width}×${live.height}` : '—');
+    setMetric('memory', formatBytes(live.memoryBytes));
+    const renderMode = renderState(live, lens);
+    setText(refs.hudLive, renderMode.text);
+    refs.hudLive.setAttribute('data-state', renderMode.key);
     refs.hud.setAttribute('data-mode', lens ? 'lens' : 'raster');
+    const key = computeHistory.join(',');
+    if (key === sparkKey) return;
+    sparkKey = key;
     const max = Math.max(1e-6, ...computeHistory);
     const points = computeHistory.map((v, i) => `${(i / Math.max(1, computeHistory.length - 1)) * 120},${(28 - (v / max) * 24 - 2).toFixed(2)}`).join(' ');
     const svgEl = (tag, attrs) => { const el = doc.createElementNS ? doc.createElementNS('http://www.w3.org/2000/svg', tag) : doc.createElement(tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v)); return el; };
     spark.replaceChildren(...(computeHistory.length > 1 ? [svgEl('polyline', { points, fill: 'none', 'vector-effect': 'non-scaling-stroke' })] : []));
     spark.setAttribute('data-empty', String(computeHistory.length < 2));
     spark.setAttribute('aria-label', `GPU 单块耗时，最近 ${computeHistory.length} 次`);
+  }
+  // Live loop: runs only while the HUD is open, reads `liveStats` and touches only changed text.
+  // A timer, not requestAnimationFrame: rAF is starved while path tracing saturates the GPU.
+  let hudTimer = 0;
+  const timers = win?.setTimeout ? win : globalThis;
+  function hudTick() {
+    hudTimer = 0;
+    if (disposed || refs.hud.hidden) return;
+    try { renderHudMetrics(hudSource(state.diagnostics || {}, state.sampling || {})); } catch (error) { (win?.console ?? console).error('lens HUD update failed', error); }
+    hudTimer = timers.setTimeout(hudTick, HUD_INTERVAL_MS);
+  }
+  function syncHudLoop() {
+    const want = !disposed && !refs.hud.hidden && typeof liveStats === 'function';
+    if (want && !hudTimer) hudTimer = timers.setTimeout(hudTick, 0);
+    else if (!want && hudTimer) { timers.clearTimeout(hudTimer); hudTimer = 0; }
+  }
+  function renderHud(d, sampling) {
+    syncWorkCounting();
+    syncHudLoop();
+    if (refs.hud.hidden) return;
+    renderWork(d.work);
+    if (!hudTimer) renderHudMetrics(hudSource(d, sampling));
   }
 
   function render() {
@@ -980,6 +1042,7 @@ export function createLensUI({ store, container } = {}) {
     dispose() {
       if (disposed) return;
       disposed = true;
+      syncHudLoop();
       unsubscribe?.();
       for (const cleanup of cleanups.splice(0)) cleanup();
       if (workCountingSent) Promise.resolve().then(() => store.dispatch('setWorkCounting', false)).catch(() => {});
