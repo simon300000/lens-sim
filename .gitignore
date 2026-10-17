@@ -8,3 +8,8 @@ artifacts/
 .env.*
 !.env.example
 *.log
+
+# Machine-local research captures and agent state
+.claude/
+.codex/
+docs/benchmarks/

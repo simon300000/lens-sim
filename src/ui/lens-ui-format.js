@@ -18,7 +18,7 @@ export const DIAGNOSTIC_LABELS = { beauty: '成像', 'scene-error': '场景错�
   'geometry-depth': '几何深度', 'geometry-normal': '世界法线', 'geometry-material': '材质 ID' };
 /** These accumulate per-path debug values, so switching to/from them restarts accumulation (backend rule). */
 export const GEOMETRY_DIAGNOSTICS = ['geometry-depth', 'geometry-normal', 'geometry-material'];
-/** One-line colour keys, matching the backend's resolve/accumulate encodings (docs/ui-handoff.md V2). */
+/** One-line colour keys, matching the backend's resolve/accumulate encodings (src/rendering/resolve.wgsl). */
 export const DIAGNOSTIC_LEGENDS = {
   'scene-error': 'R=BVH错误/透明层超限 · G=未支持材质 · B=水面反射出参考视野 · 黑=无',
   status: 'R=数值失败 · G=镜头遮挡/全反射 · B=场景命中',

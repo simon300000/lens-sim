@@ -51,8 +51,8 @@ try {
   const opticsOnly = await batches({ constantEnvironment: [1, 1, 1] }); step('optics-only batches');
   daylight.update({ hour: 0, date: '2026-09-26' }, true); step('night update'); sceneResources.writeTables(); refresh.night = await refreshTimed(); step('night refreshed');
   const night = await batches({}); step('night batches');
-  // Known, pre-existing Three r183 shadow/reflector issue (reproduced on V1, see
-  // docs/validation-v2.md); reported separately, every other GPU error fails.
+  // Known, pre-existing Three r183 shadow/reflector issue (reproduced on V1);
+  // reported separately, every other GPU error fails.
   const known = errors.filter(e => /Destroyed texture \[Texture "(Point)?ShadowDepthTexture"\] used in a submit/.test(e)), other = errors.filter(e => !known.includes(e));
   const result = { passed: other.length === 0 && day.rates.bvhError === 0 && night.rates.bvhError === 0, knownThreeShadowErrors: known.length, environment: { userAgent: navigator.userAgent, adapter: adapter.info, timestampQuery: interop.device.features.has('timestamp-query') },
     image: [W, W / 1.5], batchSpp: 4, sceneBuildMs, firstRasterWallMs, rigWallMs, bvh: sceneResources.stats, refresh, day, night, opticsOnly,

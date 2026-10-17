@@ -1,1 +1,0 @@
-{"passed":true,"memory":{"enabled":true,"budgetBytes":134217728,"reserveBytes":8388608,"managedBytes":0,"estimatedBytes":8388608,"availableBytes":125829120,"peakEstimatedBytes":134217696,"scope":"Managed buffers/images plus configurable reserve, not physical VRAM residency"},"errors":[]}

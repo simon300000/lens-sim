@@ -14,7 +14,8 @@ const port = Number(option('--port', 5182)), spp = Number(option('--spp', 16)), 
 const executablePath = option('--chromium', process.env.CHROMIUM_PATH), headed = args.includes('--headed');
 const viewport = (option('--viewport', '1280x800')).split('x').map(Number);
 let playwright;
-try { playwright = await import('playwright'); } catch { playwright = await import(process.env.PLAYWRIGHT_MODULE || '/opt/node22/lib/node_modules/playwright/index.mjs'); }
+try { playwright = await import(process.env.PLAYWRIGHT_MODULE || 'playwright'); }
+catch { console.error('Playwright is required: npm install --no-save playwright && npx playwright install chromium (or set PLAYWRIGHT_MODULE).'); process.exit(2); }
 const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { stdio: ['ignore', 'pipe', 'inherit'] });
 const cleanup = () => { try { server.kill(); } catch {} };
 process.on('exit', cleanup);
