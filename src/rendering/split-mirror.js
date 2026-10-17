@@ -1,9 +1,10 @@
 /** Derived from the separate lens/scene experiment, adapted to mirrored batches.
  * One GPU-only lens-space packet per canonical pixel/sample; scene workgroups
  * interleave q0/q1/q2/q3 for each canonical block. No CPU ray readback. */
+import {stripWorkCounting} from './shader-variants.js';
 export const SPLIT_RAY_BYTES=48;
 export function splitMirrorSources({integrator,optical,work,intersector,shading,spectral,sampling,pupil}){
-  const fused=integrator.replace(/\/\/ WORK-COUNTING-BEGIN[\s\S]*?\/\/ WORK-COUNTING-END\n/g,'');
+  const fused=stripWorkCounting(integrator);
   const between=(s,a,b)=>{const i=s.indexOf(a),j=s.indexOf(b,i+a.length);if(i<0||j<0)throw new Error(`Split mirror delimiter missing: ${a}/${b}`);return s.slice(i,j);};
   const types=between(fused,'struct RenderParameters','@group(0) @binding(0)');
   const opticsType=between(optical,'struct OpticsParameters','struct RayResult');
@@ -86,7 +87,8 @@ fn main(@builtin(global_invocation_id) id:vec3u){
 
 /** Preserve the fused GPU source/layout on devices that retain that path. */
 export function linearMirrorGroups(source){
-  const old='  let groupsX=(halfWidth+7u)/8u;\n  let chunkGroup=(id.y/8u)*render.debug.z+id.x/8u;\n  let group=render.debug.y+chunkGroup;\n  let canonicalLocal=vec2<u32>((group%groupsX)*8u+id.x%8u,(group/groupsX)*8u+id.y%8u);\n  if(chunkGroup>=render.debug.w||canonicalLocal.x>=halfWidth||canonicalLocal.y>=halfHeight){return;}\n';
+  source=source.replaceAll('\r\n','\n');
+  const old='  let groupsX=(halfWidth+SAMPLE_GROUP_X-1u)/SAMPLE_GROUP_X;\n  let chunkGroup=(id.y/SAMPLE_GROUP_Y)*render.debug.z+id.x/SAMPLE_GROUP_X;\n  let group=render.debug.y+chunkGroup;\n  let canonicalLocal=vec2<u32>((group%groupsX)*SAMPLE_GROUP_X+id.x%SAMPLE_GROUP_X,(group/groupsX)*SAMPLE_GROUP_Y+id.y%SAMPLE_GROUP_Y);\n  if(chunkGroup>=render.debug.w||canonicalLocal.x>=halfWidth||canonicalLocal.y>=halfHeight){return;}\n';
   const next='  let chunkGroup=(id.y/8u)*render.debug.z+id.x/8u;\n  let group=render.debug.y+chunkGroup;\n  let linear=group*64u+(id.y%8u)*8u+id.x%8u;\n  if(chunkGroup>=render.debug.w||linear>=halfWidth*halfHeight){return;}\n  let canonicalLocal=vec2<u32>(linear%halfWidth,linear/halfWidth);\n';
   if(!source.includes(old))throw new Error('Mirror group mapping changed');
   return source.replace(old,next);

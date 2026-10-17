@@ -137,5 +137,6 @@ test('every WGSL work counter has a cost-model entry in the same order', async (
   consts.forEach(([, , index], i) => assert.equal(Number(index), i));
   assert.match(wgsl, new RegExp(`array<u32, ${WORK_COUNTERS.length}>`));
   const integrator = await readFile(new URL('../src/rendering/optical-integrator.wgsl', import.meta.url), 'utf8');
-  assert.match(integrator, new RegExp(`array<array<u32, 64>, ${WORK_COUNTERS.length}>`));
+  assert.match(integrator,/const SAMPLE_GROUP_THREADS:u32=64u;/);
+  assert.match(integrator, new RegExp(`array<array<u32, SAMPLE_GROUP_THREADS>, ${WORK_COUNTERS.length}>`));
 });

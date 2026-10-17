@@ -7,6 +7,9 @@ import focusSource from '../optics/focus.wgsl?raw';
 import targetSource from '../optics/focus-target.wgsl?raw';
 import reduceSource from '../optics/focus-reduce.wgsl?raw';
 import statisticsSource from './statistics.wgsl?raw';
+import statisticsReduceSource from './statistics-reduce.wgsl?raw';
+import {stripWorkCounting,specializeIntegrator,specializeStatistics} from './shader-variants.js';
+import {computeConfiguration} from './gpu-policy.js';
 import { SPECTRAL_WGSL } from '../spectral/reconstruction.js';
 import { SAMPLING_WGSL } from '../spectral/sampler.js';
 import {createPupilPrecomputer} from '../optics/pupil-precompute.js';
@@ -25,14 +28,19 @@ export const ACCUMULATING_DIAGNOSTICS=Object.freeze(['geometry-depth','geometry-
 const diagnosticIndex=mode=>DIAGNOSTIC_MODES[mode]??0;
 const uniformBinding=(binding,buffer)=>({binding,resource:{buffer}});
 
-export async function createOpticalEngine({interop,sceneResources,lighting,width=480,accumulationBindingBytes=Infinity,integrationMode='fused',splitStageTiming=false,splitRayBufferBytes=128*1024**2}) {
+export async function createOpticalEngine({interop,sceneResources,lighting,width=480,accumulationBindingBytes=Infinity,integrationMode='fused',splitStageTiming=false,splitRayBufferBytes=128*1024**2,computeConfig}) {
   const started=performance.now(),{device}=interop;
   if(!['fused','split'].includes(integrationMode))throw new RangeError('Unknown integration mode');
-  const integratorSource=integrationMode==='split'?linearMirrorGroups(rawIntegratorSource):rawIntegratorSource;
+  const configuration=computeConfiguration(device.limits,computeConfig),sampleThreads=configuration.sampleX*configuration.sampleY;
+  if(integrationMode==='split'&&sampleThreads!==64)throw new RangeError('Split integration currently requires 8x8 sample workgroups');
+  const specializedIntegrator=specializeIntegrator(rawIntegratorSource,configuration);
+  const integratorSource=integrationMode==='split'?linearMirrorGroups(specializedIntegrator):specializedIntegrator;
   // A smaller binding cap is useful for validating paired bands on small
   // images. It can only reduce, never exceed the actual device limits.
   const imageLimits={maxTextureDimension2D:device.limits.maxTextureDimension2D,maxBufferSize:device.limits.maxBufferSize,
     maxStorageBufferBindingSize:Math.min(device.limits.maxStorageBufferBindingSize,accumulationBindingBytes)};
+  const initialPlan=imagePlan(width,imageLimits,{paired:true});
+  interop.memoryBudget?.assertAdditional(initialPlan.memoryBytes+(integrationMode==='split'?splitRayBytes(initialPlan):0)+65536*32+PUPIL_TABLE_BYTES+1024,'镜头初始资源');
   const optics=interop.uniform(new Uint8Array(64),'Optics runtime parameters');
   const render=interop.uniform(new Uint8Array(192),'Pixel budgets, pose and diagnostic ray mode');
   const resolve=interop.uniform(new Uint8Array(16),'Display resolve parameters');
@@ -47,7 +55,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   // reduction (its private tallies are dead code), the diagnostics one keeps it.
   const sampleSource=WORK_COUNTERS_WGSL+opticalSource+SCENE_INTERSECTOR_WGSL+SCENE_SHADING_WGSL+SPECTRAL_WGSL+SAMPLING_WGSL+pupilSource;
   const countingSource=sampleSource+integratorSource;
-  const stripped=integratorSource.replace(/\/\/ WORK-COUNTING-BEGIN[\s\S]*?\/\/ WORK-COUNTING-END\n/g,'');
+  const stripped=stripWorkCounting(integratorSource);
   const entry='if(render.debug.x>=2u){integrateMirrors(id);}else{integratePixel(id);}';
   const independentSource=stripped.replace(entry,'integratePixel(id);');
   const validationSource=stripped.replace(entry,'integrateMirrors(id);');
@@ -62,14 +70,17 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     ['focus',WORK_COUNTERS_WGSL+opticalSource+SAMPLING_WGSL+focusSource,'AF physical forward beam trace'],
     ['target',WORK_COUNTERS_WGSL+opticalSource+SCENE_INTERSECTOR_WGSL+targetSource,'AF reference ray -> BVH first opaque surface'],
     ['reduce',reduceSource,'AF cross-workgroup quadratic reduction'],
-    ['statistics',statisticsSource,'Attempt statistics reduction'],
+    ['statistics',specializeStatistics(statisticsSource,configuration),'Attempt statistics reduction'],
+    ['statisticsReduce',specializeStatistics(statisticsReduceSource,configuration),'Attempt statistics final reduction'],
   ];
   const compiled=await Promise.allSettled(jobs.map(([,code,label])=>interop.computePipeline(code,label)));
-  const failure=compiled.find(result=>result.status==='rejected');if(failure)throw failure.reason;
+  const startupBuffers=[optics,render,resolve,focus,camera,beams,summary,target,pupil,work];
+  const failure=compiled.find(result=>result.status==='rejected');if(failure){for(const b of startupBuffers)interop.release(b);throw failure.reason;}
   const pipelines=Object.fromEntries(jobs.map(([name],i)=>[name,compiled[i].value]));
-  const timer=createComputeTimer(interop),pupilPrecomputer=createPupilPrecomputer();
+  let timer,pupilPrecomputer,stageTimer;
+  try{timer=createComputeTimer(interop);pupilPrecomputer=createPupilPrecomputer();stageTimer=splitStageTiming?createSplitStageTimer(interop):null;}
+  catch(error){timer?.dispose();pupilPrecomputer?.dispose();for(const b of startupBuffers)interop.release(b);throw error;}
   const splitPipelines=splitSources?{raygen:pipelines.split_raygen,scene:pipelines.split_scene}:null;let splitRays=null;
-  const stageTimer=splitStageTiming?createSplitStageTimer(device):null;
   let pupilTable;
   let surfaces,lut,tiles=[],tileCursor=0,groupCursor=0,chunkBudget=createChunkBudget(),lastSubmission=null,sampleSerial=0,roundBudget=0,roundTarget=0,roundMirror=0,image,packed,lens,groups={},spp=0,disposed=false,computeMs=null,statsPending=null,lastTiming=null;
   let dimensions={width:0,height:0},currentRevision=0,resizeRevision=0,focusBudget=2048;
@@ -78,7 +89,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   // Work counting (diagnostics HUD only): workgroup-samples submitted since the
   // last readback, and GPU (or wall) time of recent counted chunks.
   let counting=false,workUnits=0,workPending=null,countingPipeline=null,countingCompile=null,validationCompile=null;const workTimings=[];
-  const workSupported=device.limits.maxStorageBuffersPerShaderStage>=9;
+  const workSupported=device.limits.maxStorageBuffersPerShaderStage>=9&&device.limits.maxComputeWorkgroupStorageSize>=14*sampleThreads*4;
   function recordWorkTiming(ms,units,source){if(!(ms>0&&units>0))return;workTimings.push({ms,units,source});if(workTimings.length>24)workTimings.shift();}
 
   function group(pipeline,entries){return device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries});}
@@ -123,6 +134,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   }
   function allocate(nextWidth){
     const plan=imagePlan(nextWidth,imageLimits,{paired:true}),buffers=[];let output,rayBuffer;
+    interop.memoryBudget?.assertAdditional(plan.memoryBytes+(integrationMode==='split'?splitRayBytes(plan):0),'新图像与当前图像并存的分配峰值');
     try{
       for(const t of plan.tiles)buffers.push({...t,buffer:interop.storage(t.bytes,'Tiled XYZ and attempted-path counters')});
       output=interop.storageImage(plan.width,plan.height);
@@ -154,7 +166,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     if(token!==resizeRevision){releaseCandidate(candidate);return false;}
     return install(candidate);
   }
-  resize(width);
+  try{resize(width);}catch(error){pupilPrecomputer.dispose();timer.dispose();stageTimer?.dispose();for(const b of startupBuffers)interop.release(b);throw error;}
   function updatePupil(nextLens,next,state){
     const table=buildPupilTable(nextLens,next,{enabled:state?.pupilSampling!==false,bins:state?.pupilBins,movingCenter:state?.pupilMovingCenter});
     if(table!==pupilTable){device.queue.writeBuffer(pupil,0,table.data);pupilTable=table;}
@@ -202,6 +214,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   }
   const initializationMs=performance.now()-started;
   return {
+    get computeConfiguration(){return {...configuration};},
     get texture(){return image.texture;},get outputGPU(){return image.gpu;},
     get spp(){return spp;},get dimensions(){return {...dimensions};},get packed(){return packed;},get tileCount(){return tiles.length;},get roundComplete(){return tileCursor===0&&groupCursor===0;},
     get pupilTable(){return pupilTable;},
@@ -241,16 +254,17 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     /** Copy-and-clear in one submission, so every chunk is counted exactly once. */
     async readWork(){
       if(workPending||!counting)return workPending;
+      const staging=interop.buffer(WORK_BYTES,GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ,'Work counter readback');
+      try{const encoder=device.createCommandEncoder();encoder.copyBufferToBuffer(work,0,staging,0,WORK_BYTES);encoder.clearBuffer(work);device.queue.submit([encoder.finish()]);}
+      catch(error){interop.release(staging);throw error;}
       const units=workUnits;workUnits=0;
-      const staging=device.createBuffer({size:WORK_BYTES,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
-      const encoder=device.createCommandEncoder();encoder.copyBufferToBuffer(work,0,staging,0,WORK_BYTES);encoder.clearBuffer(work);device.queue.submit([encoder.finish()]);
       workPending=(async()=>{
         try{
           await staging.mapAsync(GPUMapMode.READ);const u=new Uint32Array(staging.getMappedRange());
           const counts=WORK_COUNTERS.map((_,i)=>u[2*i]+u[2*i+1]*4294967296);
           const ms=workTimings.reduce((a,t)=>a+t.ms,0),measured=workTimings.reduce((a,t)=>a+t.units,0);
           return {integrationMode:'fused',counts,workUnits:units,msPerWorkUnit:measured>0?ms/measured:null,timing:workTimings.at(-1)?.source??null,timedChunks:workTimings.length};
-        }finally{if(staging.mapState==='mapped')staging.unmap();staging.destroy();workPending=null;}
+        }finally{if(staging.mapState==='mapped')staging.unmap();interop.release(staging);workPending=null;}
       })();
       return workPending;
     },
@@ -266,23 +280,27 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
         roundMirror=mirrorReuse&&!pinhole?(mirrorReference?4:mirrorIndependent?3:2):0;
       }
       roundBudget=budget;const tile=tiles[tileCursor];
-      const groupsX=roundMirror?Math.ceil(Math.ceil(dimensions.width/2)/8):Math.ceil(dimensions.width/8);
-      const groupsY=roundMirror?Math.ceil(tile.halfHeight/8):Math.ceil(tile.height/8);
+      const groupsX=roundMirror?Math.ceil(Math.ceil(dimensions.width/2)/configuration.sampleX):Math.ceil(dimensions.width/configuration.sampleX);
+      const groupsY=roundMirror?Math.ceil(tile.halfHeight/configuration.sampleY):Math.ceil(tile.height/configuration.sampleY);
       const totalGroups=roundMirror&&integrationMode==='split'?Math.ceil(Math.ceil(dimensions.width/2)*tile.halfHeight/64):groupsX*groupsY;
       const useSplit=integrationMode==='split'&&roundMirror===2&&!(counting&&tile.sampleCounting);
-      const plan=chunkBudget.plan(interactive,budget*(roundMirror?4:1),totalGroups-groupCursor);
+      const unitScale=sampleThreads/64;
+      const plan=chunkBudget.plan(interactive,budget*(roundMirror?4:1)*unitScale,totalGroups-groupCursor);
       const requested=chunked?plan.groups:totalGroups-groupCursor;
       const scratchGroups=useSplit?Math.floor(splitRays.size/(64*budget*SPLIT_RAY_BYTES)):totalGroups;
-      const groups=Math.min(requested,scratchGroups);
-      const dispatch=(chunked||(roundMirror&&integrationMode==='split'))?chunkDispatch(groups,device.limits.maxComputeWorkgroupsPerDimension):{x:groupsX,y:groupsY};
+      const maxDimension=device.limits.maxComputeWorkgroupsPerDimension;
+      const dispatchCapacity=Math.floor(maxDimension**2/(useSplit?4:1));
+      const groups=Math.min(requested,scratchGroups,dispatchCapacity);
+      const linearDispatch=chunked||Boolean(roundMirror)||groups<totalGroups||groupsX>maxDimension||groupsY>maxDimension;
+      const dispatch=linearDispatch?chunkDispatch(groups,maxDimension):{x:groupsX,y:groupsY};
       if(roundMirror>=3&&!pipelines.sampleValidation)throw new Error('Call prepareSampling before requesting mirror validation modes');
       const counted=counting&&Boolean(tile.sampleCounting)&&!pinhole;
-      const submission={revision:currentRevision,chunked,interactive,groups,work:groups*budget*(roundMirror?4:1),capacity:Math.min(totalGroups,scratchGroups)*budget*(roundMirror?4:1),tail:plan.tail,targetMs:plan.targetMs,gpuMs:null,counted,mirrorMode:roundMirror,integrationMode:useSplit?'split':'fused'};
+      const submission={revision:currentRevision,chunked,interactive,groups,work:groups*budget*(roundMirror?4:1)*unitScale,capacity:Math.min(totalGroups,scratchGroups,dispatchCapacity)*budget*(roundMirror?4:1)*unitScale,tail:plan.tail,targetMs:plan.targetMs,gpuMs:null,counted,mirrorMode:roundMirror,integrationMode:useSplit?'split':'fused',sampleThreads};
       if(counted)workUnits+=submission.work;
       lastSubmission=submission;
       const bytes=new ArrayBuffer(192),f=new Float32Array(bytes),u=new Uint32Array(bytes);f.set(pinhole?.cameraToWorld??pose.elements);
       u.set([dimensions.width,dimensions.height,budget,roundTarget,seed,diagnosticIndex(diagnostic),constantEnvironment?1:0,tile.y],16);
-      f.set([...(constantEnvironment??[0,0,0]),0],24);u[27]=tile.halfHeight;u.set([pinhole?1:roundMirror,(chunked||roundMirror)?groupCursor:0,(chunked||roundMirror)?dispatch.x:0,(chunked||roundMirror)?groups:0],28);if(pinhole)f.set(pinhole.clipToCamera,32);
+      f.set([...(constantEnvironment??[0,0,0]),0],24);u[27]=tile.halfHeight;u.set([pinhole?1:roundMirror,linearDispatch?groupCursor:0,linearDispatch?dispatch.x:0,linearDispatch?groups:0],28);if(pinhole)f.set(pinhole.clipToCamera,32);
       const sceneDispatch=useSplit?chunkDispatch(groups*4,device.limits.maxComputeWorkgroupsPerDimension):null;
       if(useSplit)u[32]=sceneDispatch.x;
       device.queue.writeBuffer(render,0,bytes);
@@ -303,10 +321,21 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     async statistics(){
       if(statsPending)return statsPending;if(!tiles[0]?.sample)return null;const revision=currentRevision;
       const snapshot=tiles.slice();
-      statsPending=(async()=>{const totals=interop.storage(snapshot.length*256,'Tile statistics snapshot');try{const data=new Float64Array(12);
+      const pending=(async()=>{let totals;const partials=[];try{const data=new Float64Array(12);
+        const groupCounts=snapshot.map(t=>Math.ceil(t.bytes/(PIXEL_BYTES*configuration.statisticsPixels)));
+        interop.memoryBudget?.assertAdditional(snapshot.length*512+groupCounts.reduce((n,g)=>n+(g>1?g*48:0),0),'统计快照、部分归约与回读');
+        totals=interop.storage(snapshot.length*256,'Tile statistics snapshot');
         // Enqueue the entire snapshot before yielding, so subsequent frames
         // cannot mix counters from different accumulation rounds.
-        for(let i=0;i<snapshot.length;i++)submit(pipelines.statistics,group(pipelines.statistics,[uniformBinding(0,snapshot[i].buffer),{binding:1,resource:{buffer:totals,offset:i*256,size:48}}]));
+        for(let i=0;i<snapshot.length;i++){
+          const groups=groupCounts[i];
+          const output={binding:1,resource:{buffer:totals,offset:i*256,size:48}};
+          if(groups===1){submit(pipelines.statistics,group(pipelines.statistics,[uniformBinding(0,snapshot[i].buffer),output]));continue;}
+          const partial=interop.storage(groups*48,'Parallel tile statistics partials');partials.push(partial);
+          const grid=chunkDispatch(groups,device.limits.maxComputeWorkgroupsPerDimension);
+          submit(pipelines.statistics,group(pipelines.statistics,[uniformBinding(0,snapshot[i].buffer),uniformBinding(1,partial)]),grid.x,grid.y);
+          submit(pipelines.statisticsReduce,group(pipelines.statisticsReduce,[uniformBinding(0,partial),output]));
+        }
         const part=new Float32Array(await interop.readBuffer(totals,snapshot.length*256));
         for(let t=0;t<snapshot.length;t++)for(let i=0;i<12;i++)data[i]+=part[t*64+i];
         if(revision!==currentRevision)return null;const n=Math.max(1,data[4]),passed=Math.max(1,data[7]);
@@ -315,7 +344,8 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
           bvhErrorRate:data[3]/passed,hitRate:data[5]/n,backgroundRate:data[6]/n,opticalPassRate:data[7]/n,
           unsupportedRate:data[8]/passed,transparencyLimitRate:data[9]/passed,radianceInvalidRate:data[10]/n,reflectionOutsideRate:data[11]/passed,
           sceneHitOfPassed:data[5]/passed,backgroundOfPassed:data[6]/passed};
-      }finally{interop.release(totals);statsPending=null;}})();return statsPending;
+      }finally{for(const partial of partials)interop.release(partial);if(totals)interop.release(totals);}})();
+      statsPending=pending;const clear=()=>{if(statsPending===pending)statsPending=null;};pending.then(clear,clear);return pending;
     },
     async referenceTarget(){
       bindScene();if(!groups.target)throw new Error('场景 BVH 不可用');submit(pipelines.target,groups.target);
@@ -370,14 +400,17 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   };
 }
 
-function createSplitStageTimer(device){
+function createSplitStageTimer(interop){
+  const {device}=interop;
   if(!device.features.has('timestamp-query'))return null;
   const queries=device.createQuerySet({type:'timestamp',count:4});
-  const resolve=device.createBuffer({size:32,usage:GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC});
-  const read=device.createBuffer({size:32,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});let pending=false;
+  let resolve,read;
+  try{resolve=interop.buffer(32,GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC,'Split timestamp resolve');read=interop.buffer(32,GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ,'Split timestamp readback');}
+  catch(error){queries.destroy();if(resolve)interop.release(resolve);throw error;}
+  let pending=false;
   return {
     begin(){if(pending)return undefined;pending=true;return {lens:{querySet:queries,beginningOfPassWriteIndex:0,endOfPassWriteIndex:1},scene:{querySet:queries,beginningOfPassWriteIndex:2,endOfPassWriteIndex:3}};},
     end(encoder,stamps,callback){encoder.resolveQuerySet(queries,0,4,resolve,0);encoder.copyBufferToBuffer(resolve,0,read,0,32);return ()=>read.mapAsync(GPUMapMode.READ).then(()=>{const t=new BigUint64Array(read.getMappedRange());callback({ms:Number(t[3]-t[0])/1e6,lensMs:Number(t[1]-t[0])/1e6,sceneMs:Number(t[3]-t[2])/1e6});read.unmap();pending=false;},()=>{pending=false;});},
-    dispose(){queries.destroy();resolve.destroy();read.destroy();},
+    dispose(){queries.destroy();interop.release(resolve);interop.release(read);},
   };
 }

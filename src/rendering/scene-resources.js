@@ -126,18 +126,20 @@ export function createSceneResources({ interop, scene, camera = null, starAngula
     for (const [name, data] of Object.entries({ nodes: packed.nodes, instances: packed.instances, triangles: packed.triangles, vertices: packed.vertices })) {
       if (data.byteLength > limit) throw new Error(`场景 ${name} 缓冲 ${data.byteLength} 字节超出此 GPU 的存储绑定上限 ${limit}`);
     }
+    const materialData=packMaterialTable(ex.materials,starData(scene,starAngularRadius));
+    const data={nodes:packed.nodes,instances:packed.instances,triangles:packed.triangles,vertices:packed.vertices};
+    interop.memoryBudget?.assertAdditional(Object.values(data).reduce((n,a)=>n+a.byteLength,materialData.byteLength),'新旧 BVH 与材质表并存的分配峰值');
     device.pushErrorScope('out-of-memory');
-    const next = {
-      nodes: interop.storage(packed.nodes, 'Lens BVH nodes (TLAS + BLAS)'),
-      instances: interop.storage(packed.instances, 'Lens BVH instances'),
-      triangles: interop.storage(packed.triangles, 'Lens BVH triangles'),
-      vertices: interop.storage(packed.vertices, 'Lens BVH vertex attributes'),
-    };
-    const oom = await device.popErrorScope();
-    if (oom) { for (const b of Object.values(next)) interop.release(b); throw new Error('场景 BVH 显存分配失败：' + oom.message); }
+    const next={};let nextTables,allocationError;
+    try{
+      for(const [name,values] of Object.entries(data))next[name]=interop.storage(values,`Lens BVH ${name}`);
+      nextTables=interop.storage(materialData,'Lens material / star tables');
+    }catch(error){allocationError=error;}
+    const oom=await device.popErrorScope();
+    if(allocationError||oom){for(const b of Object.values(next))interop.release(b);if(nextTables)interop.release(nextTables);throw allocationError||new Error('场景 BVH 显存分配失败：'+oom.message);}
     if (buffers) for (const b of Object.values(buffers)) interop.release(b);
+    if(tables)interop.release(tables);tables=nextTables;counters.materialUploads++;materialRevision++;
     buffers = next; extracted = ex; signatures = ex.objects.map(objectSignature);
-    writeTables();
     const t = packed.stats.timing;
     counters.blasBuilt += t.blasRebuilt; counters.blasReused += t.blasReused;
     if (reason === 'tlas') counters.tlasRebuilds++; else counters.fullBuilds++;
@@ -149,7 +151,7 @@ export function createSceneResources({ interop, scene, camera = null, starAngula
   }
   function writeTables() {
     const data = packMaterialTable(extracted.materials, starData(scene, starAngularRadius));
-    if (!tables || tables.size < data.byteLength) { if (tables) interop.release(tables); tables = interop.storage(data, 'Lens material / star tables'); }
+    if (!tables || tables.size < data.byteLength) { const next=interop.storage(data,'Lens material / star tables');if(tables)interop.release(tables);tables=next; }
     else device.queue.writeBuffer(tables, 0, data);
     counters.materialUploads++; materialRevision++;
   }

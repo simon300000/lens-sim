@@ -40,9 +40,9 @@ function catalogueFocalLengthMm(lens){
  *   optics    (lens/stop/focus) -> optics buffer + accumulation; never BVH or shadows
  *   display   (exposure/bloom/output) -> display only
  */
-export async function createHybridRuntime({renderer,scene,camera,adapterInfo,rasterPipeline,rasterBeauty,rasterGlare,refreshContext,cameraExposure,hdr,environment,requestFrame,onOutputState=()=>{},useWorker=true,maxSamplesInFlight=2}) {
+export async function createHybridRuntime({renderer,scene,camera,adapterInfo,rasterPipeline,rasterBeauty,rasterGlare,refreshContext,cameraExposure,hdr,environment,requestFrame,onOutputState=()=>{},useWorker=true,maxSamplesInFlight=2,memoryBudget,computeConfig}) {
   if(!Number.isInteger(maxSamplesInFlight)||maxSamplesInFlight<1||maxSamplesInFlight>2)throw new RangeError('Samples in flight must be 1 or 2');
-  const store=createControlStore(),interop=createGPUInterop(renderer),focusSolver=createFocusSolver();
+  const store=createControlStore(),interop=createGPUInterop(renderer,{memoryBudget}),focusSolver=createFocusSolver();
   const sceneResources=createSceneResources({interop,scene,camera,starAngularRadius:STAR_ANGULAR_RADIUS,useWorker});
   const lighting=createLightingResources({interop,renderer,scene,camera,environment,refreshContext});
   let lens=null,baseLens=null,baseAsset=null,manifest=null,engine=null,baseExposure=cameraExposure.value,interacting=false,pointerActive=false,releaseTimer;
@@ -92,7 +92,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
     update({sampling:{...s.sampling,spp:engine.spp},diagnostics:{...s.diagnostics,pipelineCompilations:interop.compilations,
       integrationMode:engine.lastSubmission?.integrationMode??engine.integrationMode,computeMs:engine.computeMs,lightingRefreshMs:lighting.refreshMs,lightingRefreshes:lighting.refreshes,
       timingSource:engine.timestampSupported?'GPU timestamp（单个采样分块：镜头+BVH+着色）/ CPU 提交耗时（光栅资源刷新）':'无 timestamp：仅 CPU 提交耗时',
-      ...engine.dimensions,memoryBytes:engine.memoryBytes+(sceneResources.stats?.gpuBytes??0)+1008},
+      ...engine.dimensions,memoryBytes:engine.memoryBytes+(sceneResources.stats?.gpuBytes??0)+1008,memoryBudget:interop.memoryBudget.snapshot,computeConfiguration:engine.computeConfiguration},
       scene:{...s.scene,...(sceneSummary()?{summary:sceneSummary()}:{}),lighting:{ok:ls.ok,errors:ls.errors??[],warnings:ls.warnings??[],lights:ls.lights,environment:ls.environment,reflection:ls.reflection}}});
   }
   function resetAccumulation(kind='accumulation'){cancelFocus();engine?.reset();clearMetrics();statisticsRevision++;lastStatisticsSerial=-1;revision(kind);publishEngine();requestFrame();}
@@ -289,7 +289,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
     if(!(engine.spp>0))throw new Error('还没有累计任何样本');
     await interop.device.queue.onSubmittedWorkDone();
     const raw=s.display.diagnostic!=='beauty';
-    const blob=await exportLensTexture({device:interop.device,texture:engine.outputGPU,width,height,exposure:cameraExposure.value,raw});
+    const blob=await exportLensTexture({interop,texture:engine.outputGPU,width,height,exposure:cameraExposure.value,raw});
     const lensName=s.lenses.find(l=>l.id===s.lensId)?.name??s.lensId;
     const fileName=`lens-sim_${safe(lensName)}_f${Number(s.optics.fNumber.toFixed(2))}_${engine.spp}spp${raw?`_${s.display.diagnostic}`:''}_${stamp}.png`;
     return {blob,fileName,width,height,spp:engine.spp,kind:raw?'diagnostic':'lens'};
@@ -415,7 +415,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
       update({lenses:manifest.lenses.map(l=>({id:l.id,name:l.name,brand:l.brand??null,available:l.supported,reason:l.reason,
         validation:l.validation,surfaceCount:l.surfaceCount,focalLengthMm:catalogueFocalLengthMm(l)})),source:manifest.source});
       await onProgress(8,'编译真实镜组、光谱采样与自动对焦');
-      engine=await createOpticalEngine({interop,sceneResources,lighting,integrationMode:preferredIntegrationMode(adapterInfo),width:state().sampling.resolution});
+      engine=await createOpticalEngine({interop,sceneResources,lighting,integrationMode:preferredIntegrationMode(adapterInfo),width:state().sampling.resolution,computeConfig});
       if(workCounting)setWorkCounting(true).catch(error=>console.warn('Work counting unavailable',error));
       await loadLens(manifest.defaultId);displayGraph();displayChanged();
       await build;

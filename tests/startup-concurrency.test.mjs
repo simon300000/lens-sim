@@ -8,7 +8,8 @@ import {packLens} from '../src/optics/lens-state.js';
 test('concurrent pipeline compilation closes every device error scope before awaiting',async()=>{
  let depth=0,maxDepth=0,started=0,complete;
  const ready=new Promise(resolve=>{complete=resolve;});
- const device={lost:new Promise(()=>{}),pushErrorScope(){maxDepth=Math.max(maxDepth,++depth);},popErrorScope(){assert.equal(depth,1);depth--;return Promise.resolve(null);},
+ const limits={maxTextureDimension2D:8192,maxBindGroups:4,maxBindingsPerBindGroup:1000,maxUniformBuffersPerShaderStage:12,maxStorageBuffersPerShaderStage:8,maxStorageTexturesPerShaderStage:4,maxSampledTexturesPerShaderStage:16,maxSamplersPerShaderStage:16,maxUniformBufferBindingSize:65536,maxComputeInvocationsPerWorkgroup:256,maxComputeWorkgroupSizeX:256,maxComputeWorkgroupSizeY:256,maxComputeWorkgroupStorageSize:16384,maxComputeWorkgroupsPerDimension:65535,maxBufferSize:256*1024**2,maxStorageBufferBindingSize:128*1024**2};
+ const device={limits,lost:new Promise(()=>{}),pushErrorScope(){maxDepth=Math.max(maxDepth,++depth);},popErrorScope(){assert.equal(depth,1);depth--;return Promise.resolve(null);},
   createShaderModule({label}){return {getCompilationInfo:()=>ready.then(()=>({messages:label==='invalid'?[{type:'error',lineNum:1,linePos:1,message:'fixture error'}]:[]}))};},
   createComputePipelineAsync({label}){started++;return ready.then(()=>{if(label==='invalid')throw Error('fixture pipeline rejected');return {label};});}};
  const interop=createGPUInterop({backend:{device,isWebGPUBackend:true,get(){}}});

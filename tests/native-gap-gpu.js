@@ -22,7 +22,9 @@ try{
       const packed=engine.setLens(lens,{sensorZMm:lens.sensorZMm,dispersion:false});
       check(packed.region.directional,'native gap must use full hemisphere');
       check(packed.sensorZMm===lens.sensorZMm,'prescribed sensor was moved');
-      for(let i=0;i<SPP/4;i++)engine.sample({batchSpp:4,targetSpp:SPP,seed,constantEnvironment:[1,1,1]});
+      // The f64 reference below uses independent per-pixel sample keys. Do not
+      // compare that finite sample sequence with the shared mirror estimator.
+      for(let i=0;i<SPP/4;i++)engine.sample({batchSpp:4,targetSpp:SPP,seed,constantEnvironment:[1,1,1],mirrorReuse:false});
       const raw=await engine.readAccumulation(),f=new Float32Array(raw),u=new Uint32Array(raw);let sumY=0;
       for(let p=0;p<W*H;p++){check(u[p*16+3]===SPP,'fixed attempt budget changed');sumY+=f[p*16+1]/SPP;}
       const stats=await engine.statistics();

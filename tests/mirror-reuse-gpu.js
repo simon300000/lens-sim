@@ -5,7 +5,8 @@ import {createOpticalEngine} from '../src/rendering/optical-engine.js';
 const out=document.querySelector('#result'),check=(v,m)=>{if(!v)throw new Error(m);};
 let rig,renderer;const errors=[],runs=[];
 const params=new URLSearchParams(location.search),width=Number(params.get('width')??99),spp=Number(params.get('spp')??64);
-const engineOptions={integrationMode:params.get('integrationMode')??'fused',...(params.has('scratchBytes')?{splitRayBufferBytes:Number(params.get('scratchBytes'))}:{})};
+const computeConfig=Object.fromEntries(['sampleX','sampleY','statisticsThreads','statisticsPixels'].filter(k=>params.has(k)).map(k=>[k,Number(params.get(k))]));
+const engineOptions={integrationMode:params.get('integrationMode')??'fused',computeConfig,...(params.has('scratchBytes')?{splitRayBufferBytes:Number(params.get('scratchBytes'))}:{})};
 try{
   const started=performance.now();
   renderer=new THREE.WebGPURenderer();await renderer.init();renderer.setSize(120,80);
@@ -67,6 +68,12 @@ try{
   const workStatus=await original.setWorkCounting(true);original.reset();original.setPose(camera);
   original.sample({batchSpp:4,targetSpp:4,mirrorReuse:true,constantEnvironment:[1,1,1]});await device.queue.onSubmittedWorkDone();
   const work=await original.readWork();if(workStatus==='counting')check(work.counts[0]===original.dimensions.width*original.dimensions.height*4,'work path count changed');
+  await original.setWorkCounting(false);
+  const liveBeforeStatistics=interop.liveBuffers;
+  for(let i=0;i<3;i++)await original.statistics();
+  check(interop.liveBuffers===liveBeforeStatistics,'parallel statistics leaked partial buffers');
+  const staleStatistics=original.statistics();original.reset();
+  check(await staleStatistics===null,'statistics published a snapshot from before reset');
   check(!errors.length,errors.join('\n'));tiled.dispose();
   window.__mirrorRuns=runs;
   const report={passed:true,integrationMode:original.integrationMode,lens:params.get('lens')??'canon-fl-50mm-f1-8',summary:runs.map(r=>({mirror:r.mirrorReuse,tiles:r.tiles,attempts:r.attempts,reference:r.referenceComparison})),compilationMs,userAgent:navigator.userAgent,foreground:!document.hidden,runs:runs.map(({raw,rgb,...r})=>r),workStatus,work,errors};

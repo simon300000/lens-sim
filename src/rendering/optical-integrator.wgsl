@@ -10,6 +10,9 @@ struct RenderParameters {
   debug: vec4<u32>,     // x: 0 independent, 1 pinhole, 2 mirror, 3 hybrid, 4 retraced reference; yzw: chunk layout
   pinholeClipToCamera: mat4x4<f32>,
 };
+const SAMPLE_GROUP_X:u32=8u;
+const SAMPLE_GROUP_Y:u32=8u;
+const SAMPLE_GROUP_THREADS:u32=64u;
 // 64 bytes. failures: optical blocked, TIR, optical numerical, BVH traversal error.
 // queries: scene hit, background, optical passed, scene unsupported.
 // extra: transparency limit, invalid radiance, water reflection outside the
@@ -44,7 +47,7 @@ struct PixelAccum {
 // 64-bit work totals as (low, high) u32 pairs.
 @group(0) @binding(21) var<storage,read_write> workTotals: array<atomic<u32>>;
 // Per-lane staging (14 x 64 u32): plain stores, no shared-memory atomics.
-var<workgroup> workgroupWork: array<array<u32, 64>, 14>;
+var<workgroup> workgroupWork: array<array<u32, SAMPLE_GROUP_THREADS>, 14>;
 // WORK-COUNTING-END
 
 const LINEAR_SRGB_TO_XYZ_M = mat3x3<f32>(
@@ -88,7 +91,7 @@ fn recordScene(a: ptr<function, PixelAccum>, scene: SceneSample) {
   (*a).extra.w += scene.layers;
 }
 
-@compute @workgroup_size(8,8)
+@compute @workgroup_size(SAMPLE_GROUP_X,SAMPLE_GROUP_Y)
 fn main(@builtin(global_invocation_id) id:vec3<u32>,@builtin(local_invocation_index) lane:u32){
   if(render.debug.x>=2u){integrateMirrors(id);}else{integratePixel(id);}
   // WORK-COUNTING-BEGIN
@@ -113,7 +116,7 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>,@builtin(local_invocation_in
   // One lane per counter sums the 64 lanes, then a single global 64-bit add.
   if(lane<WORK_COUNTERS){
     var v=0u;
-    for(var i=0u;i<64u;i++){v+=workgroupWork[lane][i];}
+    for(var i=0u;i<SAMPLE_GROUP_THREADS;i++){v+=workgroupWork[lane][i];}
     if(v!=0u){let old=atomicAdd(&workTotals[lane*2u],v);if(old>0xffffffffu-v){atomicAdd(&workTotals[lane*2u+1u],1u);}}
   }
   // WORK-COUNTING-END
@@ -121,12 +124,12 @@ fn main(@builtin(global_invocation_id) id:vec3<u32>,@builtin(local_invocation_in
 fn integratePixel(id:vec3<u32>){
   // Storage tiles keep their original layout. Scheduling chunks only select
   // workgroups within that tile, preserving pixel IDs and random sequences.
-  let groupsX=(render.size.x+7u)/8u;
-  let chunkGroup=(id.y/8u)*render.debug.z+id.x/8u;
+  let groupsX=(render.size.x+SAMPLE_GROUP_X-1u)/SAMPLE_GROUP_X;
+  let chunkGroup=(id.y/SAMPLE_GROUP_Y)*render.debug.z+id.x/SAMPLE_GROUP_X;
   if(render.debug.w!=0u&&chunkGroup>=render.debug.w){return;}
   let linearGroup=render.debug.y+chunkGroup;
-  let imageX=select(id.x,(linearGroup%groupsX)*8u+id.x%8u,render.debug.w!=0u);
-  let localY=select(id.y,(linearGroup/groupsX)*8u+id.y%8u,render.debug.w!=0u);
+  let imageX=select(id.x,(linearGroup%groupsX)*SAMPLE_GROUP_X+id.x%SAMPLE_GROUP_X,render.debug.w!=0u);
+  let localY=select(id.y,(linearGroup/groupsX)*SAMPLE_GROUP_Y+id.y%SAMPLE_GROUP_Y,render.debug.w!=0u);
   let halfHeight=bitcast<u32>(render.environment.w);
   if(halfHeight>0u&&localY>=halfHeight*2u){return;}
   let imageY=select(localY+render.settings.w,render.size.y-1u-render.settings.w-(localY-halfHeight),halfHeight>0u&&localY>=halfHeight);
@@ -288,10 +291,10 @@ fn accumulateOptical(a:ptr<function,PixelAccum>,optical:OpticalSample,sign:vec2<
 fn integrateMirrors(id:vec3<u32>){
   let halfHeight=bitcast<u32>(render.environment.w);
   let halfWidth=(render.size.x+1u)/2u;
-  let groupsX=(halfWidth+7u)/8u;
-  let chunkGroup=(id.y/8u)*render.debug.z+id.x/8u;
+  let groupsX=(halfWidth+SAMPLE_GROUP_X-1u)/SAMPLE_GROUP_X;
+  let chunkGroup=(id.y/SAMPLE_GROUP_Y)*render.debug.z+id.x/SAMPLE_GROUP_X;
   let group=render.debug.y+chunkGroup;
-  let canonicalLocal=vec2<u32>((group%groupsX)*8u+id.x%8u,(group/groupsX)*8u+id.y%8u);
+  let canonicalLocal=vec2<u32>((group%groupsX)*SAMPLE_GROUP_X+id.x%SAMPLE_GROUP_X,(group/groupsX)*SAMPLE_GROUP_Y+id.y%SAMPLE_GROUP_Y);
   if(chunkGroup>=render.debug.w||canonicalLocal.x>=halfWidth||canonicalLocal.y>=halfHeight){return;}
   let canonical=canonicalLocal+vec2<u32>(0,render.settings.w);
   let first=accumulation[canonicalLocal.y*render.size.x+canonical.x].attempts;

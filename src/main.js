@@ -17,6 +17,7 @@ import { startup } from './startup-progress.js';
 import { installURLState } from './url-state.js';
 import { createCameraRig, createScenePicker } from './camera-controls.js';
 import { installSceneCard } from './ui/scene-card.js';
+import {requiredGPULimits} from './rendering/gpu-policy.js';
 
 const faults=[];
 window.addEventListener('error',event=>faults.push(event.message));
@@ -34,10 +35,7 @@ async function createScene(){
   const rendererOptions={antialias:false,alpha:false,powerPreference:'high-performance',
     // The lens BVH and large sensor tiles are storage buffers; request what the
     // adapter actually offers instead of relying on the 128/256 MiB defaults.
-    requiredLimits:{maxTextureDimension2D:adapter.limits.maxTextureDimension2D,
-      maxStorageBufferBindingSize:adapter.limits.maxStorageBufferBindingSize,maxBufferSize:adapter.limits.maxBufferSize,
-      // The optional work-counting integrator (diagnostics HUD) binds a ninth storage buffer.
-      maxStorageBuffersPerShaderStage:adapter.limits.maxStorageBuffersPerShaderStage}};
+    requiredLimits:requiredGPULimits(adapter.limits)};
   let renderer=new THREE.WebGPURenderer({...rendererOptions,...outputRendererOptions(hdr.supported)});
   await renderer.init();
   if(hdr.supported&&(!renderer.backend.isWebGPUBackend||!isHDRConfiguration(renderer.backend.context.getConfiguration?.()))){

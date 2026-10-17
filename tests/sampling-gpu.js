@@ -13,8 +13,7 @@ try{
   rig=await createLensRig({renderer,scene,camera,width:96});interop=rig.interop;engine=rig.engine;const device=interop.device;
   device.addEventListener('uncapturederror',e=>errors.push(e.error.message));
   const asset=await(await fetch('/lenses/canon-fl-50mm-f1-8.json')).json(),lens=asset.configurations[0];
-  const limitedDevice=new Proxy(device,{get(target,key){if(key==='limits')return {...device.limits,maxTextureDimension2D:device.limits.maxTextureDimension2D,maxStorageBufferBindingSize:96*8*64,maxBufferSize:device.limits.maxBufferSize};const value=target[key];return typeof value==='function'?value.bind(target):value;}});
-  tiled=await createOpticalEngine({interop:{...interop,device:limitedDevice},sceneResources:rig.sceneResources,lighting:rig.lighting,width:96});tiled.setPose(camera);
+  tiled=await createOpticalEngine({interop,sceneResources:rig.sceneResources,lighting:rig.lighting,width:96,accumulationBindingBytes:96*16*64});tiled.setPose(camera);
   for(const e of [engine,tiled]){e.setLens(lens,{fNumber:2.8,sensorZMm:lens.sensorZMm,dispersion:true});
     do{e.sample({batchSpp:4,targetSpp:4,seed:7});}while(e.spp<4); // real BVH scene, not a constant environment
   }
@@ -38,7 +37,9 @@ try{
       check(message&&engine.dimensions.width===before.width,'Over-limit size was not rejected explicitly');
       sizes.push({width,rejected:message,adapterMaxTexture:device.limits.maxTextureDimension2D});continue;
     }
-    await engine.resizeChecked(width);
+    const previous=engine.dimensions;let budgetError='';
+    try{await engine.resizeChecked(width);}catch(error){if(!error.message.includes('预算不足'))throw error;budgetError=error.message;}
+    if(budgetError){check(JSON.stringify(engine.dimensions)===JSON.stringify(previous),'Budget rejection destroyed the current image');sizes.push({width,rejected:budgetError,budget:interop.memoryBudget.snapshot});continue;}
     do{engine.sample({batchSpp:1,targetSpp:1,constantEnvironment:[1,1,1]});await device.queue.onSubmittedWorkDone();}while(engine.spp<1);
     const stats=await engine.statistics(),dims=engine.dimensions;
     check(stats.attemptedSamples===dims.width*dims.height,'Some sensor rows were missed');

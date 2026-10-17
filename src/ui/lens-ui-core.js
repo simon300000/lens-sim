@@ -645,6 +645,7 @@ export function createLensUI({ store, container } = {}) {
       ['计时来源', d.timingSource || '—'],
       ['累积缓冲', d.width && d.height ? `${d.width} × ${d.height}` : '—'],
       ['显存', formatBytes(d.memoryBytes)],
+      ['GPU 预算（估算）', d.memoryBudget?`${formatBytes(d.memoryBudget.estimatedBytes)} / ${formatBytes(d.memoryBudget.budgetBytes)}`:'—'],
       ['场景实例', summary ? formatCount(summary.instances) : '—'],
       ['基础三角形', summary ? formatCount(summary.uniqueTriangles) : '—'],
       ['BVH 节点 / 深度', summary ? `${formatCount(summary.bvhNodes)} / TLAS ${formatCount(summary.tlasDepth)} · BLAS ≤${formatCount(summary.maxBlasDepth)}` : '—'],
