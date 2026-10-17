@@ -93,6 +93,11 @@ export function createGPUInterop(renderer,{memoryBudget}={}) {
   };
 }
 
+/** Milliseconds between two resolved timestamps, or null when end <= begin. WebGPU does not
+ * guarantee monotonic timestamps (e.g. across passes or GPU clock recalibration), and BigInt
+ * subtraction does not wrap, so a reordered pair would otherwise read as a negative time. */
+export function timestampSpanMs(begin,end){return end>begin?Number(end-begin)/1e6:null;}
+
 /** Optional real GPU timestamps. One pending read, never stalls each batch. */
 export function createComputeTimer(interop) {
   const {device}=interop;
@@ -106,7 +111,7 @@ export function createComputeTimer(interop) {
     supported:true,
     begin(){if(pending)return undefined;pending=true;return {querySet,beginningOfPassWriteIndex:0,endOfPassWriteIndex:1};},
     end(encoder,measured,onResult){if(!measured)return;encoder.resolveQuerySet(querySet,0,2,resolve,0);encoder.copyBufferToBuffer(resolve,0,read,0,16);
-      return ()=>read.mapAsync(GPUMapMode.READ).then(()=>{const t=new BigUint64Array(read.getMappedRange());onResult(Number(t[1]-t[0])/1e6);read.unmap();pending=false;},()=>{pending=false;});},
+      return ()=>read.mapAsync(GPUMapMode.READ).then(()=>{const t=new BigUint64Array(read.getMappedRange()),ms=timestampSpanMs(t[0],t[1]);read.unmap();if(ms!==null)onResult(ms);pending=false;},()=>{pending=false;});},
     dispose(){querySet.destroy();interop.release(resolve);interop.release(read);},
   };
 }

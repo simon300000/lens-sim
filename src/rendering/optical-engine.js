@@ -15,7 +15,7 @@ import {createPupilPrecomputer} from '../optics/pupil-precompute.js';
 import { buildPupilTable, PUPIL_TABLE_BYTES } from '../optics/pupil-sampling.js';
 import pupilSource from '../optics/pupil-sampling.wgsl?raw';
 import { packLens } from '../optics/lens-state.js';
-import { createComputeTimer } from './three-interop.js';
+import { createComputeTimer,timestampSpanMs } from './three-interop.js';
 import { imagePlan, sampleBudget, PIXEL_BYTES } from './sampling-plan.js';
 import { WORK_COUNTERS } from './work-model.js';
 import { createChunkBudget,chunkDispatch } from './adaptive-chunks.js';
@@ -394,7 +394,7 @@ function createSplitStageTimer(interop){
   catch(error){queries.destroy();if(resolve)interop.release(resolve);throw error;}let pending=false;
   return {
     begin(){if(pending)return undefined;pending=true;return {lens:{querySet:queries,beginningOfPassWriteIndex:0,endOfPassWriteIndex:1},scene:{querySet:queries,beginningOfPassWriteIndex:2,endOfPassWriteIndex:3}};},
-    end(encoder,stamps,callback){encoder.resolveQuerySet(queries,0,4,resolve,0);encoder.copyBufferToBuffer(resolve,0,read,0,32);return ()=>read.mapAsync(GPUMapMode.READ).then(()=>{const t=new BigUint64Array(read.getMappedRange());callback({ms:Number(t[3]-t[0])/1e6,lensMs:Number(t[1]-t[0])/1e6,sceneMs:Number(t[3]-t[2])/1e6});read.unmap();pending=false;},()=>{pending=false;});},
+    end(encoder,stamps,callback){encoder.resolveQuerySet(queries,0,4,resolve,0);encoder.copyBufferToBuffer(resolve,0,read,0,32);return ()=>read.mapAsync(GPUMapMode.READ).then(()=>{const t=new BigUint64Array(read.getMappedRange()),ms=timestampSpanMs(t[0],t[3]),lensMs=timestampSpanMs(t[0],t[1]),sceneMs=timestampSpanMs(t[2],t[3]);read.unmap();pending=false;if(ms!==null)callback({ms,lensMs,sceneMs});},()=>{pending=false;});},
     dispose(){queries.destroy();interop.release(resolve);interop.release(read);},
   };
 }
