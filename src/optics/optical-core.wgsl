@@ -327,10 +327,7 @@ fn opticalIntersect(s: OpticalSurface, p: vec3f, v: vec3f) -> OpticalHit {
   if (!opticalFinite(hit) || normal.w==0.0) { return OpticalHit(p,v,3u); }
   return OpticalHit(hit,normal.xyz,0u);
 }
-fn opticalIndex(record: u32, lambdaNm: f32) -> f32 {
-  let u=(lambdaNm-optics.wavelength.x)/optics.wavelength.z;
-  let index=min(u32(max(floor(u),0.0)),optics.counts.y-2u);
-  let fraction=u-f32(index);
+fn opticalIndexAt(record: u32, index: u32, fraction: f32) -> f32 {
   let offset=record*optics.counts.y+index;
   return mix(glassLut[offset],glassLut[offset+1u],fraction);
 }
@@ -353,17 +350,28 @@ fn traceOptics(origin: vec3f, direction: vec3f, lambdaNm: f32, reverse: bool) ->
   var wavelength=lambdaNm;
   if (optics.counts.w==0u) { wavelength=optics.wavelength.w; }
   if (!opticalFinite(p) || !opticalFinite(v) || wavelength<optics.wavelength.x || wavelength>optics.wavelength.y) { return RayResult(p,v,3u); }
+  // The wavelength does not change at a surface. Keep the LUT coordinate out
+  // of the intersection/refraction dependency chain for every medium lookup.
+  let lutU=(wavelength-optics.wavelength.x)/optics.wavelength.z;
+  let lutIndex=min(u32(max(floor(lutU),0.0)),optics.counts.y-2u);
+  let lutFraction=lutU-f32(lutIndex);
+  var previousRecord=0xffffffffu;var previousIndex=0.0;
   for (var j=0u;j<optics.counts.x;j++) {
     let index=select(j,optics.counts.x-1u-j,reverse);
-    let s=opticalSurfaces[index];
-    let hit=opticalIntersect(s,p,v);
+    let hit=opticalIntersect(opticalSurfaces[index],p,v);
     if (hit.status!=0u) { return RayResult(hit.p,v,hit.status); }
-    let before=select(s.media.x,s.media.y,reverse);
-    let after=select(s.media.y,s.media.x,reverse);
-    let ni=opticalIndex(before,wavelength);
-    let nt=opticalIndex(after,wavelength);
+    // Load post-intersection fields here, rather than retaining the full
+    // surface (including asphere/phase coefficients) across the root solver.
+    let media=opticalSurfaces[index].media;
+    let before=select(media.x,media.y,reverse);
+    let after=select(media.y,media.x,reverse);
+    var ni=previousIndex;
+    if(before!=previousRecord){ni=opticalIndexAt(before,lutIndex,lutFraction);}
+    let nt=opticalIndexAt(after,lutIndex,lutFraction);
+    previousRecord=after;previousIndex=nt;
     let eta=ni/nt;
-    if(s.diffraction.x>0.0) {
+    if(opticalSurfaces[index].diffraction.x>0.0) {
+      let s=opticalSurfaces[index];
       // Reciprocal phase delay: SAME kick in reverse; exchanged media and
       // reversed incident momentum then recover the reversed original path.
       let kick=wavelength*1e-6/(2.0*3.141592653589793);
