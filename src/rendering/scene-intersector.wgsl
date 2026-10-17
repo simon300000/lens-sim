@@ -67,12 +67,20 @@ fn sceneSafeInverse(d: vec3f) -> vec3f {
   let tiny = select(vec3f(1e-30), vec3f(-1e-30), d < vec3f(0.0));
   return 1.0 / select(d, tiny, abs(d) < vec3f(1e-30));
 }
-fn sceneBox(n: BvhNode, o: vec3f, inv: vec3f, tMin: f32, tMax: f32) -> f32 {
+fn sceneBox(n: BvhNode, o: vec3f, d: vec3f, inv: vec3f, tMin: f32, tMax: f32) -> f32 {
   workCounters[WORK_BOX]++;
-  let t0 = (n.lo - o) * inv;
-  let t1 = (n.hi - o) * inv;
-  let tn = min(t0, t1);
-  let tf = max(t0, t1);
+  // A ray parallel to an axis occupies that slab for its entire interval if
+  // its origin is inside the CLOSED slab. In particular an origin exactly on
+  // the upper face must not turn the slab exit into zero via 0 * safeInverse.
+  // Test the actual direction: a tiny nonzero direction is not parallel.
+  let parallel = d == vec3f(0.0);
+  if ((parallel.x && (o.x < n.lo.x || o.x > n.hi.x)) ||
+      (parallel.y && (o.y < n.lo.y || o.y > n.hi.y)) ||
+      (parallel.z && (o.z < n.lo.z || o.z > n.hi.z))) { return SCENE_NO_HIT; }
+  let t0 = select(n.lo - o, vec3f(0.0), parallel) * inv;
+  let t1 = select(n.hi - o, vec3f(0.0), parallel) * inv;
+  let tn = select(min(t0, t1), vec3f(-SCENE_NO_HIT), parallel);
+  let tf = select(max(t0, t1), vec3f(SCENE_NO_HIT), parallel);
   let enter = max(max(tn.x, tn.y), max(tn.z, tMin));
   let exit = min(min(tf.x, tf.y), min(tf.z, tMax)) * 1.0000004;
   return select(SCENE_NO_HIT, enter, enter <= exit);
@@ -147,7 +155,7 @@ fn sceneIntersect(originW: vec3f, dirW: vec3f, tMin: f32, tMax: f32) -> SceneHit
   var ray = sceneWatertight(originW, dirW);
   var inBlas = false; var blasBase = 0u; var instance = 0u; var flags = 0u;
   var visits = 0u;
-  if (sceneBox(sceneNodes[0], o, inv, tMin, hit.t) >= SCENE_NO_HIT) { return hit; }
+  if (sceneBox(sceneNodes[0], o, d, inv, tMin, hit.t) >= SCENE_NO_HIT) { return hit; }
   var node = 0u;
   loop {
     visits++;
@@ -167,7 +175,7 @@ fn sceneIntersect(originW: vec3f, dirW: vec3f, tMin: f32, tMax: f32) -> SceneHit
         let root = I.info.x;
         if (root >= nodeCount) { return sceneError(hit, BVH_ERR_NODE, visits); }
         let linv = sceneSafeInverse(ld);
-        if (sceneBox(sceneNodes[root], lo, linv, tMin, hit.t) < SCENE_NO_HIT) {
+        if (sceneBox(sceneNodes[root], lo, ld, linv, tMin, hit.t) < SCENE_NO_HIT) {
           inBlas = true; blasBase = sp; instance = n.a; flags = I.info.z;
           o = lo; d = ld; inv = linv; ray = sceneWatertight(lo, ld);
           next = root;
@@ -188,8 +196,8 @@ fn sceneIntersect(originW: vec3f, dirW: vec3f, tMin: f32, tMax: f32) -> SceneHit
       }
     } else {
       if (n.a >= nodeCount || n.b >= nodeCount) { return sceneError(hit, BVH_ERR_NODE, visits); }
-      let tl = sceneBox(sceneNodes[n.a], o, inv, tMin, hit.t);
-      let tr = sceneBox(sceneNodes[n.b], o, inv, tMin, hit.t);
+      let tl = sceneBox(sceneNodes[n.a], o, d, inv, tMin, hit.t);
+      let tr = sceneBox(sceneNodes[n.b], o, d, inv, tMin, hit.t);
       if (tl < SCENE_NO_HIT && tr < SCENE_NO_HIT) {
         if (sp >= SCENE_STACK_SIZE) { return sceneError(hit, BVH_ERR_STACK, visits); }
         if (tl <= tr) { stackNode[sp] = n.b; stackT[sp] = tr; next = n.a; }

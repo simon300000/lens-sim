@@ -98,6 +98,31 @@ test('instance transform preserves the world t parameter (unnormalized local dir
   assert.ok(Math.abs(hit.t - 1.5) < 1e-6); // f32-stored world→object rows
 });
 
+test('parallel BVH slabs include exact boundary faces, reject outside origins and preserve tiny nonzero directions', () => {
+  const scene = new THREE.Scene();
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat(THREE.DoubleSide));
+  plane.position.z = -4; scene.add(plane);
+  const ex = extractScene(scene), packed = buildSceneBuffers({ blasSources: ex.blas, instances: ex.instances });
+  const cases = [
+    [[1, 1, 0], [0, 0, -1], true, 'upper corner'],
+    [[1, 0, 0], [-0, 0, -1], true, 'upper x face and negative zero'],
+    [[0, 1, 0], [0, -0, -1], true, 'upper y face and negative zero'],
+    [[-1, -1, 0], [0, 0, -2], true, 'lower corner and nonunit direction'],
+    [[1 + 2 ** -20, 0, 0], [0, 0, -1], false, 'outside upper face'],
+    [[-1 - 2 ** -20, 0, 0], [0, 0, -1], false, 'outside lower face'],
+    [[1, 0, 0], [1e-12, 0, -1], false, 'tiny direction leaves upper face'],
+    [[1, 0, 0], [-1e-12, 0, -1], true, 'tiny direction enters upper face'],
+    [[-1, 0, 0], [-1e-12, 0, -1], false, 'tiny direction leaves lower face'],
+    [[-1, 0, 0], [1e-12, 0, -1], true, 'tiny direction enters lower face'],
+  ];
+  for (const [origin, direction, expected, label] of cases) {
+    const ref = bruteForceIntersect(ex, origin, direction), hit = traversePacked(packed, origin, direction).hit;
+    assert.equal(Boolean(ref), expected, `reference: ${label}`);
+    assert.equal(Boolean(hit), expected, `packed BVH: ${label}`);
+    if (hit) assert.ok(Math.abs(hit.t - ref.t) < 1e-12, label);
+  }
+});
+
 test('material classification reports unsupported node graphs instead of a grey fallback', () => {
   const m = mat(); m.colorNode = new THREE.MeshBasicNodeMaterial().colorNode ?? { isNode: true };
   m.colorNode = { isNode: true };
