@@ -1,0 +1,159 @@
+{
+  "sourceHead": "ef433118eb0a899c4aaf59d6d86c56e20bdd9f48",
+  "branch": "main",
+  "commits": [
+    {
+      "hash": "07bef84",
+      "change": "Shader diagnostic CRLF/EOF handling"
+    },
+    {
+      "hash": "46763a9",
+      "change": "Closed BVH slabs for parallel boundary rays"
+    },
+    {
+      "hash": "68be60d",
+      "change": "Parallel image statistics reduction"
+    },
+    {
+      "hash": "7bd1b45",
+      "change": "Zero-degree conic early return"
+    },
+    {
+      "hash": "2feb99d",
+      "change": "Wavelength LUT coordinates and adjacent-medium index reuse"
+    },
+    {
+      "hash": "7fbb6ad",
+      "change": "GPU limits and opt-in allocation budgets"
+    },
+    {
+      "hash": "ef43311",
+      "change": "NVIDIA-only LUT reuse default to avoid measured Apple regression"
+    }
+  ],
+  "lutReuse": {
+    "mechanism": [
+      "Compute wavelength LUT coordinates once per ray",
+      "Reuse previous transmitted index only when its medium record matches the next incident medium",
+      "Reload needed surface fields after intersection"
+    ],
+    "defaultPolicy": {
+      "NVIDIA": true,
+      "Apple": false,
+      "unknown": false
+    },
+    "fallback": "Verified byte-for-byte equal to the pre-LUT optical core, retaining the conic early return",
+    "benchmark": {
+      "environment": {
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Safari/605.1.15",
+        "adapter": {
+          "vendor": "apple",
+          "architecture": "apple",
+          "description": "apple"
+        }
+      },
+      "image": [
+        480,
+        320
+      ],
+      "spp": 128,
+      "rounds": 5,
+      "timing": "Queue-complete wall time, fixed full-image batch 4 spp, no GPU timestamp query; excludes statistics, readback, hashing and preparation",
+      "scope": "Forced LUT-on versus pre-LUT; both include the conic early return and other integrated changes. Preparation/compile are separately recorded and excluded from rendering times. Setup is cache/order dependent, not a cold compilation comparison.",
+      "cases": [
+        {
+          "lens": "canon-fl-50mm-f1-8",
+          "integration": "fused",
+          "baselineMedianMs": 1862,
+          "optimizedMedianMs": 1983,
+          "timeIncreasePercent": 6.498388829215895,
+          "rawBitwiseEqual": true
+        },
+        {
+          "lens": "canon-fl-50mm-f1-8",
+          "integration": "split",
+          "baselineMedianMs": 1966,
+          "optimizedMedianMs": 1971,
+          "timeIncreasePercent": 0.254323499491349,
+          "rawBitwiseEqual": true
+        },
+        {
+          "lens": "sony-fe-600mm-f4-gm-oss",
+          "integration": "fused",
+          "baselineMedianMs": 953,
+          "optimizedMedianMs": 959,
+          "timeIncreasePercent": 0.6295907660021083,
+          "rawBitwiseEqual": true
+        },
+        {
+          "lens": "sony-fe-600mm-f4-gm-oss",
+          "integration": "split",
+          "baselineMedianMs": 754,
+          "optimizedMedianMs": 765,
+          "timeIncreasePercent": 1.458885941644561,
+          "rawBitwiseEqual": true
+        }
+      ]
+    }
+  },
+  "validation": {
+    "cpuFullSuite": {
+      "passed": 212,
+      "failed": 0
+    },
+    "focusedAfterPlatformGate": {
+      "passed": 13,
+      "failed": 0
+    },
+    "productionBuild": "passed, no files emitted; temporary root resolved with canonical path",
+    "statisticsGPU": "passed through 24 MP; exact expected values",
+    "budgetGPU": "passed rejection, recovery, stale-query and disposal lifecycle",
+    "bvhGPU": "18108 rays; 9624 robust hits/identity matches",
+    "opticalProbeGPU": "Both variants passed 2794 probes each",
+    "rawParity": "All four FP32 accumulation/counter buffers bitwise equal",
+    "finalApplicationSmoke": {
+      "passed": true,
+      "foreground": true,
+      "integration": "split",
+      "opticalLutReuse": false,
+      "workCounting": true,
+      "workCounters": 16,
+      "statistics": {
+        "attemptedSamples": 614400,
+        "opticalBlockedRate": 0.29720703125,
+        "tirRate": 0,
+        "numericalErrorRate": 0,
+        "bvhErrorRate": 0,
+        "hitRate": 0.70279296875,
+        "backgroundRate": 0,
+        "opticalPassRate": 0.70279296875,
+        "unsupportedRate": 0,
+        "transparencyLimitRate": 0,
+        "radianceInvalidRate": 0,
+        "reflectionOutsideRate": 0,
+        "sceneHitOfPassed": 1,
+        "backgroundOfPassed": 0
+      },
+      "memory": {
+        "enabled": false,
+        "budgetBytes": null,
+        "reserveBytes": 805306368,
+        "managedBytes": 76773116,
+        "estimatedBytes": 882079484,
+        "availableBytes": null,
+        "peakEstimatedBytes": 900511484,
+        "scope": "Managed buffers/images plus configurable reserve, not physical VRAM residency"
+      },
+      "errors": []
+    }
+  },
+  "excludedFromIntegration": [
+    "surface material and diffuse lighting caches",
+    "leaf-8 BVH performance variant",
+    "branchless slabs performance variant",
+    "global 16x16 workgroups",
+    "fixed 4 GiB default memory budget"
+  ],
+  "delivery": "Local main commits only; no push",
+  "preservation": "Pre-existing experimental optical-engine changes and pupil-sampling documentation remain unstaged"
+}
