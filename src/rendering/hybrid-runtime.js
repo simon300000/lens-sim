@@ -1,3 +1,4 @@
+import {preferredIntegrationMode} from './integration-mode.js';
 import * as THREE from 'three/webgpu';
 import { texture, screenUV, uniform, vec2, vec4, step, mix } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
@@ -39,7 +40,7 @@ function catalogueFocalLengthMm(lens){
  *   optics    (lens/stop/focus) -> optics buffer + accumulation; never BVH or shadows
  *   display   (exposure/bloom/output) -> display only
  */
-export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,rasterBeauty,rasterGlare,refreshContext,cameraExposure,hdr,environment,requestFrame,onOutputState=()=>{},useWorker=true,maxSamplesInFlight=2}) {
+export async function createHybridRuntime({renderer,scene,camera,adapterInfo,rasterPipeline,rasterBeauty,rasterGlare,refreshContext,cameraExposure,hdr,environment,requestFrame,onOutputState=()=>{},useWorker=true,maxSamplesInFlight=2}) {
   if(!Number.isInteger(maxSamplesInFlight)||maxSamplesInFlight<1||maxSamplesInFlight>2)throw new RangeError('Samples in flight must be 1 or 2');
   const store=createControlStore(),interop=createGPUInterop(renderer),focusSolver=createFocusSolver();
   const sceneResources=createSceneResources({interop,scene,camera,starAngularRadius:STAR_ANGULAR_RADIUS,useWorker});
@@ -89,7 +90,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
     if(!engine)return;const s=state();
     const ls=lighting.status;
     update({sampling:{...s.sampling,spp:engine.spp},diagnostics:{...s.diagnostics,pipelineCompilations:interop.compilations,
-      computeMs:engine.computeMs,lightingRefreshMs:lighting.refreshMs,lightingRefreshes:lighting.refreshes,
+      integrationMode:engine.lastSubmission?.integrationMode??engine.integrationMode,computeMs:engine.computeMs,lightingRefreshMs:lighting.refreshMs,lightingRefreshes:lighting.refreshes,
       timingSource:engine.timestampSupported?'GPU timestamp（单个采样分块：镜头+BVH+着色）/ CPU 提交耗时（光栅资源刷新）':'无 timestamp：仅 CPU 提交耗时',
       ...engine.dimensions,memoryBytes:engine.memoryBytes+(sceneResources.stats?.gpuBytes??0)+1008},
       scene:{...s.scene,...(sceneSummary()?{summary:sceneSummary()}:{}),lighting:{ok:ls.ok,errors:ls.errors??[],warnings:ls.warnings??[],lights:ls.lights,environment:ls.environment,reflection:ls.reflection}}});
@@ -390,7 +391,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
         if(workCounting&&!workBusy&&engine.workCounting&&now-lastWorkAt>=1000){
           workBusy=true;lastWorkAt=now;
           engine.readWork().then(result=>{
-            if(result&&result.workUnits>0&&workCounting&&!disposed)update({diagnostics:{...state().diagnostics,work:{status:'ok',...summarizeWork(result.counts,result),timedChunks:result.timedChunks}}});
+            if(result&&result.workUnits>0&&workCounting&&!disposed)update({diagnostics:{...state().diagnostics,work:{status:'ok',...summarizeWork(result.counts,result),integrationMode:result.integrationMode,timedChunks:result.timedChunks}}});
           }).catch(()=>{}).finally(()=>{workBusy=false;});
         }
         const sampleSerial=engine.sampleSerial;
@@ -414,7 +415,7 @@ export async function createHybridRuntime({renderer,scene,camera,rasterPipeline,
       update({lenses:manifest.lenses.map(l=>({id:l.id,name:l.name,brand:l.brand??null,available:l.supported,reason:l.reason,
         validation:l.validation,surfaceCount:l.surfaceCount,focalLengthMm:catalogueFocalLengthMm(l)})),source:manifest.source});
       await onProgress(8,'编译真实镜组、光谱采样与自动对焦');
-      engine=await createOpticalEngine({interop,sceneResources,lighting,width:state().sampling.resolution});
+      engine=await createOpticalEngine({interop,sceneResources,lighting,integrationMode:preferredIntegrationMode(adapterInfo),width:state().sampling.resolution});
       if(workCounting)setWorkCounting(true).catch(error=>console.warn('Work counting unavailable',error));
       await loadLens(manifest.defaultId);displayGraph();displayChanged();
       await build;

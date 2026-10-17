@@ -639,6 +639,7 @@ export function createLensUI({ store, container } = {}) {
       ['实际 / 目标', `${formatCount(sampling.spp)} / ${sampling.targetSpp===0?'∞':formatCount(sampling.targetSpp)} spp`],
       ['每批', `${formatCount(sampling.batchSpp)} spp`],
       ['尝试路径', formatCount(d.attemptedSamples)],
+      ['追迹路径', d.integrationMode==='split'?'四象限 · 镜头/场景分阶段':d.integrationMode==='fused'?'四象限 · 融合':'—'],
       ['计算耗时（GPU，单分块）', formatMs(d.computeMs)],
       ['光照刷新（CPU 提交）', `${formatMs(d.lightingRefreshMs)} · ${formatCount(d.lightingRefreshes)} 次`],
       ['计时来源', d.timingSource || '—'],
@@ -726,7 +727,8 @@ export function createLensUI({ store, container } = {}) {
     const g = work.gflops;
     const value = g === null ? '—' : g >= 1000 ? `${(g / 1000).toFixed(2)}` : g >= 100 ? g.toFixed(0) : g.toFixed(1);
     const unit = g === null ? '' : g >= 1000 ? 'TFLOP/s' : 'GFLOP/s';
-    const timing = work.timing === 'gpu' ? `GPU 时间戳 · ${work.timedChunks} 块` : work.timing === 'wall' ? '无时间戳：墙钟近似，偏低' : '尚无计时';
+    const workPath=work.integrationMode==='fused'?'融合计数 · ':'';
+    const timing = workPath + (work.timing === 'gpu' ? `GPU 时间戳 · ${work.timedChunks} 块` : work.timing === 'wall' ? '无时间戳：墙钟近似，偏低' : '尚无计时');
     const groups = Object.entries(WORK_GROUPS);
     refs.hudWork.replaceChildren(
       h('div', { class: 'lu-work-head' },

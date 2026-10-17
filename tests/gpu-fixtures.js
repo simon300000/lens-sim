@@ -25,11 +25,11 @@ export function stripedPanel(scene, { x = 0, y = 0, z = -5, w = 1, h = 1, color 
     scene.add(mesh);
   }
 }
-export async function createLensRig({ renderer, scene, camera, width = 96, environment = null, refreshSize }) {
+export async function createLensRig({ renderer, scene, camera, width = 96, environment = null, refreshSize, engineOptions = {} }) {
   const interop = createGPUInterop(renderer);
   const sceneResources = createSceneResources({ interop, scene, camera, starAngularRadius: 0, useWorker: true });
   const lighting = createLightingResources({ interop, renderer, scene, camera, environment, refreshSize });
-  const engine = await createOpticalEngine({ interop, sceneResources, lighting, width });
+  const engine = await createOpticalEngine({ interop, sceneResources, lighting, width, ...engineOptions });
   const sceneStats = await sceneResources.build();
   lighting.refresh();
   if (!lighting.status.ok) throw new Error('lighting bridge: ' + lighting.status.errors.join('; '));
