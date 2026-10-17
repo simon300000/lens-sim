@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import {stripWorkCounting} from './shader-source.js';
 import opticalSource from '../optics/optical-core.wgsl?raw';
 import { SCENE_INTERSECTOR_WGSL, SCENE_SHADING_WGSL, WORK_COUNTERS_WGSL } from './scene-wgsl.js';
 import rawIntegratorSource from './optical-integrator.wgsl?raw';
@@ -42,7 +43,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   // reduction (its private tallies are dead code), the diagnostics one keeps it.
   const sampleSource=WORK_COUNTERS_WGSL+opticalSource+SCENE_INTERSECTOR_WGSL+SCENE_SHADING_WGSL+SPECTRAL_WGSL+SAMPLING_WGSL+pupilSource;
   const countingSource=sampleSource+integratorSource;
-  const stripped=integratorSource.replace(/\/\/ WORK-COUNTING-BEGIN[\s\S]*?\/\/ WORK-COUNTING-END\n/g,'');
+  const stripped=stripWorkCounting(integratorSource);
   const entry='if(render.debug.x>=2u){integrateMirrors(id);}else{integratePixel(id);}';
   const independentSource=stripped.replace(entry,'integratePixel(id);');
   const validationSource=stripped.replace(entry,'integrateMirrors(id);');
