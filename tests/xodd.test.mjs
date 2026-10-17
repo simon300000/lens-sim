@@ -91,15 +91,17 @@ test('Canon RF28 full-frame original ray prefix proves finite-cap misses instead
  }
  assert.deepEqual(counts,[1,49151,0,0]); // Before interval proof: [1,4753,0,44398].
 });
-test('Nikon35 S12 unknown aperture and truncated primary domain retain unresolved status3',async()=>{
+test('Nikon35 S12 drawing-radius fallback blocks a miss; an unbounded cap remains unresolved',async()=>{
  const record=JSON.parse(await fs.readFile(new URL('../vendor/lens-bench/data/lenses/nikon-af-s-nikkor-35mm-f1-4g.json',import.meta.url),'utf8'));
  const surface=adaptLensRecord(record,catalog).surfaces[11];
  const p=[-16.545095756392662,3.6140373712304967,76.10157898678621],d=[.17129670479788217,.05856267434810089,-.9834774283625353];
- assert.equal(surface.apertureRadiusMm,null);close(Math.abs(surface.radiusMm)/Math.sqrt(1+surface.conic),16.06219882334983,1e-10);
- assert.equal(intersectSurface(surface,p,d).status,3);
- // If a complete radius15 cap WERE prescribed, the same ray provably misses it.
- // This assertion does not promote the source's unknown aperture to that value.
- assert.equal(intersectSurface({...surface,apertureRadiusMm:15},p,d).status,1);
+ assert.equal(surface.apertureSource,'sdDraw-approximation');
+ assert.equal(surface.apertureRadiusMm,surface.drawRadiusMm);
+ close(Math.abs(surface.radiusMm)/Math.sqrt(1+surface.conic),16.06219882334983,1e-10);
+ assert.equal(intersectSurface(surface,p,d).status,1);
+ // Without either aperture bound, keep the tracer's unresolved status rather
+ // than suppressing a numerical failure globally.
+ assert.equal(intersectSurface({...surface,apertureRadiusMm:null},p,d).status,3);
 });
 
 test('source-f64 Bernstein conversion and f32 de Casteljau retain dense XODD sag and analytic derivatives',async()=>{

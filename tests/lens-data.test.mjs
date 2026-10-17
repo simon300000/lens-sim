@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { loadUpstreamCatalog, extractStaticObject } from '../scripts/build-lens-data.mjs';
 import { AIR, FRAUNHOFER_NM, refractiveIndex, resolveGlass, modelGlass, parseGlassCatalog, createGlassLUT, lookupGlassLUT } from '../src/optics/glass.js';
 import { parsePrescriptionText, adaptLensRecord, inspectLensRecord } from '../src/optics/prescription.js';
+import { intersectSurface } from '../src/optics/optical-reference.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const vendor = path.join(root, 'vendor/lens-bench');
@@ -116,14 +117,29 @@ test('one-based stop and zero-based cfg thickness/radius overrides apply before 
   assert.equal(infinityConfig.objectDistanceMm, null);
 });
 
-test('unknown clear aperture is warned and never promoted from sdDraw', () => {
+test('missing clear aperture falls back to drawing radius with approximation provenance', () => {
   const lens = adaptLensRecord(fixture({ tx: '50 3 N-BK7 -\n-50 40 - -', sdDraw: [10, 10], sdAp: [null, 9] }), catalog);
-  assert.equal(lens.surfaces[0].apertureRadiusMm, null);
-  assert.equal(lens.surfaces[0].apertureSource, 'unknown');
+  assert.equal(lens.surfaces[0].apertureRadiusMm, 10);
+  assert.equal(lens.surfaces[0].apertureSource, 'sdDraw-approximation');
   assert.equal(lens.surfaces[1].apertureRadiusMm, 9);
   assert.equal(lens.surfaces[1].apertureSource, 'sdAp-explicit');
   assert.equal(lens.apertureDataComplete, false);
-  assert.ok(lens.warnings.some(w => w.includes('通光数据不完整')));
+  assert.deepEqual(lens.approximatedApertureSurfaces, [1]);
+  assert.deepEqual(lens.missingApertureSurfaces, [1]);
+  assert.ok(lens.warnings.some(w => w.includes('已使用绘图半径')));
+  assert.equal(intersectSurface(lens.surfaces[0], [9.5, 0, -5], [0, 0, 1]).status, 0);
+  assert.equal(intersectSurface(lens.surfaces[0], [10.5, 0, -5], [0, 0, 1]).status, 1);
+  // The second surface keeps its explicit 9 mm aperture despite sdDraw=10.
+  assert.equal(intersectSurface(lens.surfaces[1], [9.5, 0, -5], [0, 0, 1]).status, 1);
+});
+
+test('missing or invalid drawing radii remain unknown without inventing an aperture', () => {
+  for (const sdDraw of [undefined, [0, -1], [null, null]]) {
+    const lens = adaptLensRecord(fixture({ tx: '50 3 N-BK7 -\n-50 40 - -', sdDraw }), catalog);
+    assert.ok(lens.surfaces.every(s => s.apertureRadiusMm === null && s.apertureSource === 'unknown'));
+    assert.deepEqual(lens.approximatedApertureSurfaces, []);
+    assert.ok(lens.warnings.some(w => w.includes('无真实通光半径及有效绘图半径')));
+  }
 });
 
 test('Legacy ODD, unknown glasses and invalid configurations remain unavailable', () => {

@@ -29,8 +29,9 @@ one bracket at most 32 times. All of these iterations solve **the same ray**.
 Tangential roots or exceptionally oscillatory aspheres that escape this finite
 bracketing remain numerical errors; they are not silently labeled vignetting.
 GPU sag residual tolerance is `1e-5 + 8e-7*max(abs(vertexZ), length(rayOrigin))`
-mm. CPU reference tolerances are stricter. Physical clear aperture and the
-separate numerical domain are never interchangeable.
+mm. CPU reference tolerances are stricter. Explicit clear apertures take precedence. Missing clear apertures use a positive
+drawing radius as an approximate clipping boundary, labeled `sdDraw-approximation`.
+If neither is available, the separate numerical domain remains a solving bound.
 
 GPU packing normalizes radial polynomial coefficients: `u=r/rScale`,
 `Bp=Ap*rScale^p`. `bounds.y` in the unchanged 96-byte surface ABI is the positive
