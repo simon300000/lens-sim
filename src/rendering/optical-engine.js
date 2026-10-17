@@ -35,6 +35,8 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   // images. It can only reduce, never exceed the actual device limits.
   const imageLimits={maxTextureDimension2D:device.limits.maxTextureDimension2D,maxBufferSize:device.limits.maxBufferSize,
     maxStorageBufferBindingSize:Math.min(device.limits.maxStorageBufferBindingSize,accumulationBindingBytes)};
+  const initialPlan=imagePlan(width,imageLimits,{paired:true});
+  interop.memoryBudget?.assertAdditional(initialPlan.memoryBytes+(integrationMode==='split'?splitRayBytes(initialPlan):0)+PUPIL_TABLE_BYTES+1024,'镜头初始资源');
   const optics=interop.uniform(new Uint8Array(64),'Optics runtime parameters');
   const render=interop.uniform(new Uint8Array(192),'Pixel budgets, pose and diagnostic ray mode');
   const resolve=interop.uniform(new Uint8Array(16),'Display resolve parameters');
@@ -63,11 +65,12 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     ['statisticsReduce',specializeStatistics(statisticsReduceSource,statisticsConfig),'Attempt statistics final reduction'],
   ];
   const compiled=await Promise.allSettled(jobs.map(([,code,label])=>interop.computePipeline(code,label)));
-  const failure=compiled.find(result=>result.status==='rejected');if(failure)throw failure.reason;
+  const startupBuffers=[optics,render,resolve,camera,target,pupil,work];
+  const failure=compiled.find(result=>result.status==='rejected');if(failure){for(const b of startupBuffers)interop.release(b);throw failure.reason;}
   const pipelines=Object.fromEntries(jobs.map(([name],i)=>[name,compiled[i].value]));
   const timer=createComputeTimer(interop),pupilPrecomputer=createPupilPrecomputer();
   const splitPipelines=splitSources?{raygen:pipelines.split_raygen,scene:pipelines.split_scene}:null;let splitRays=null;
-  const stageTimer=splitStageTiming?createSplitStageTimer(device):null;
+  const stageTimer=splitStageTiming?createSplitStageTimer(interop):null;
   let pupilTable;
   let surfaces,lut,tiles=[],tileCursor=0,groupCursor=0,chunkBudget=createChunkBudget(),lastSubmission=null,sampleSerial=0,roundBudget=0,roundTarget=0,roundMirror=0,image,packed,lens,groups={},spp=0,disposed=false,computeMs=null,statsPending=null,lastTiming=null;
   let dimensions={width:0,height:0},currentRevision=0,resizeRevision=0;
@@ -118,6 +121,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   }
   function allocate(nextWidth){
     const plan=imagePlan(nextWidth,imageLimits,{paired:true}),buffers=[];let output,rayBuffer;
+    interop.memoryBudget?.assertAdditional(plan.memoryBytes+(integrationMode==='split'?splitRayBytes(plan):0),'新旧图像并存的分配峰值');
     try{
       for(const t of plan.tiles)buffers.push({...t,buffer:interop.storage(t.bytes,'Tiled XYZ and attempted-path counters')});
       output=interop.storageImage(plan.width,plan.height);
@@ -149,7 +153,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     if(token!==resizeRevision){releaseCandidate(candidate);return false;}
     return install(candidate);
   }
-  resize(width);
+  try{resize(width);}catch(error){pupilPrecomputer.dispose();timer.dispose();stageTimer?.dispose();for(const b of startupBuffers)interop.release(b);throw error;}
   function updatePupil(nextLens,next,state){
     const table=buildPupilTable(nextLens,next,{enabled:state?.pupilSampling!==false,bins:state?.pupilBins,movingCenter:state?.pupilMovingCenter});
     if(table!==pupilTable){device.queue.writeBuffer(pupil,0,table.data);pupilTable=table;}
@@ -248,9 +252,10 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     /** Copy-and-clear in one submission, so every chunk is counted exactly once. */
     async readWork(){
       if(workPending||!counting)return workPending;
+      const staging=interop.buffer(WORK_BYTES,GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ,'Work counter readback');
+      try{const encoder=device.createCommandEncoder();encoder.copyBufferToBuffer(work,0,staging,0,WORK_BYTES);encoder.clearBuffer(work);device.queue.submit([encoder.finish()]);}
+      catch(error){interop.release(staging);throw error;}
       const units=workUnits,epoch=countEpoch,window=workWindow++;workUnits=0;
-      const staging=device.createBuffer({size:WORK_BYTES,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
-      const encoder=device.createCommandEncoder();encoder.copyBufferToBuffer(work,0,staging,0,WORK_BYTES);encoder.clearBuffer(work);device.queue.submit([encoder.finish()]);
       workPending=(async()=>{
         try{
           await staging.mapAsync(GPUMapMode.READ);if(epoch!==countEpoch)return null;const u=new Uint32Array(staging.getMappedRange());
@@ -258,7 +263,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
           const timings=workTimings.filter(t=>t.window===window),ms=timings.reduce((a,t)=>a+t.ms,0),measured=timings.reduce((a,t)=>a+t.units,0);
           closedWorkWindow=window;for(let i=workTimings.length-1;i>=0;i--)if(workTimings[i].window<=window)workTimings.splice(i,1);
           return {integrationMode,counts,workUnits:units,measuredWorkUnits:measured,timingCoverage:units>0?measured/units:0,msPerWorkUnit:measured>0?ms/measured:null,timing:timings.at(-1)?.source??null,timedChunks:timings.length};
-        }finally{if(staging.mapState==='mapped')staging.unmap();staging.destroy();workPending=null;}
+        }finally{if(staging.mapState==='mapped')staging.unmap();interop.release(staging);workPending=null;}
       })();
       return workPending;
     },
@@ -318,6 +323,8 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       if(statsPending)return statsPending;if(!tiles[0]?.sample)return null;const revision=currentRevision;
       const snapshot=tiles.slice();
       const pending=(async()=>{let totals;const partials=[];try{const data=new Float64Array(12);
+        const partialBytes=snapshot.reduce((sum,t)=>{const n=Math.ceil(t.bytes/(PIXEL_BYTES*statisticsConfig.pixels));return sum+(n>1?n*48:0);},0);
+        interop.memoryBudget?.assertAdditional(snapshot.length*512+partialBytes,'统计快照、部分归约与回读');
         totals=interop.storage(snapshot.length*256,'Tile statistics snapshot');
         // Enqueue the entire snapshot before yielding, so subsequent frames
         // cannot mix counters from different accumulation rounds.
@@ -371,14 +378,16 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   };
 }
 
-function createSplitStageTimer(device){
+function createSplitStageTimer(interop){
+  const {device}=interop;
   if(!device.features.has('timestamp-query'))return null;
   const queries=device.createQuerySet({type:'timestamp',count:4});
-  const resolve=device.createBuffer({size:32,usage:GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC});
-  const read=device.createBuffer({size:32,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});let pending=false;
+  let resolve,read;
+  try{resolve=interop.buffer(32,GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC,'Split timestamp resolve');read=interop.buffer(32,GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ,'Split timestamp readback');}
+  catch(error){queries.destroy();if(resolve)interop.release(resolve);throw error;}let pending=false;
   return {
     begin(){if(pending)return undefined;pending=true;return {lens:{querySet:queries,beginningOfPassWriteIndex:0,endOfPassWriteIndex:1},scene:{querySet:queries,beginningOfPassWriteIndex:2,endOfPassWriteIndex:3}};},
     end(encoder,stamps,callback){encoder.resolveQuerySet(queries,0,4,resolve,0);encoder.copyBufferToBuffer(resolve,0,read,0,32);return ()=>read.mapAsync(GPUMapMode.READ).then(()=>{const t=new BigUint64Array(read.getMappedRange());callback({ms:Number(t[3]-t[0])/1e6,lensMs:Number(t[1]-t[0])/1e6,sceneMs:Number(t[3]-t[2])/1e6});read.unmap();pending=false;},()=>{pending=false;});},
-    dispose(){queries.destroy();resolve.destroy();read.destroy();},
+    dispose(){queries.destroy();interop.release(resolve);interop.release(read);},
   };
 }

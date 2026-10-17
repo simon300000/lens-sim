@@ -289,7 +289,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
     if(!(engine.spp>0))throw new Error('还没有累计任何样本');
     await interop.device.queue.onSubmittedWorkDone();
     const raw=s.display.diagnostic!=='beauty';
-    const blob=await exportLensTexture({device:interop.device,texture:engine.outputGPU,width,height,exposure:cameraExposure.value,raw});
+    const blob=await exportLensTexture({interop,texture:engine.outputGPU,width,height,exposure:cameraExposure.value,raw});
     const lensName=s.lenses.find(l=>l.id===s.lensId)?.name??s.lensId;
     const fileName=`lens-sim_${safe(lensName)}_f${Number(s.optics.fNumber.toFixed(2))}_${engine.spp}spp${raw?`_${s.display.diagnostic}`:''}_${stamp}.png`;
     return {blob,fileName,width,height,spp:engine.spp,kind:raw?'diagnostic':'lens'};

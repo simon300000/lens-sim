@@ -1,4 +1,5 @@
 import test from 'node:test';
+import {gpuLimits} from './gpu-limits-fixture.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {createGPUInterop} from '../src/rendering/three-interop.js';
@@ -8,7 +9,7 @@ import {packLens} from '../src/optics/lens-state.js';
 test('concurrent pipeline compilation closes every device error scope before awaiting',async()=>{
  let depth=0,maxDepth=0,started=0,complete;
  const ready=new Promise(resolve=>{complete=resolve;});
- const device={lost:new Promise(()=>{}),pushErrorScope(){maxDepth=Math.max(maxDepth,++depth);},popErrorScope(){assert.equal(depth,1);depth--;return Promise.resolve(null);},
+ const device={limits:gpuLimits,lost:new Promise(()=>{}),pushErrorScope(){maxDepth=Math.max(maxDepth,++depth);},popErrorScope(){assert.equal(depth,1);depth--;return Promise.resolve(null);},
   createShaderModule({label}){return {getCompilationInfo:()=>ready.then(()=>({messages:label==='invalid'?[{type:'error',lineNum:1,linePos:1,message:'fixture error'}]:[]}))};},
   createComputePipelineAsync({label}){started++;return ready.then(()=>{if(label==='invalid')throw Error('fixture pipeline rejected');return {label};});}};
  const interop=createGPUInterop({backend:{device,isWebGPUBackend:true,get(){}}});

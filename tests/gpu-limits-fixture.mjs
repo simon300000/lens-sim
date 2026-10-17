@@ -1,0 +1,4 @@
+export const gpuLimits={maxTextureDimension2D:16384,maxBindGroups:4,maxBindingsPerBindGroup:1000,maxUniformBuffersPerShaderStage:12,
+ maxStorageBuffersPerShaderStage:16,maxStorageTexturesPerShaderStage:4,maxSampledTexturesPerShaderStage:16,maxSamplersPerShaderStage:16,
+ maxUniformBufferBindingSize:65536,maxComputeInvocationsPerWorkgroup:1024,maxComputeWorkgroupSizeX:1024,maxComputeWorkgroupSizeY:1024,
+ maxComputeWorkgroupStorageSize:32768,maxComputeWorkgroupsPerDimension:65535,maxBufferSize:2**31-4,maxStorageBufferBindingSize:2**31-4};

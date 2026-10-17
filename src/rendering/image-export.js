@@ -60,13 +60,14 @@ function makeCanvas(width, height) {
 const toPNG = (canvas) => (canvas.convertToBlob ? canvas.convertToBlob({ type: 'image/png' })
   : new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('PNG 编码失败'))), 'image/png')));
 
-export async function exportLensTexture({ device, texture, width = texture.width, height = texture.height, exposure, raw }) {
+export async function exportLensTexture({ interop, texture, width = texture.width, height = texture.height, exposure, raw }) {
+  const {device}=interop;
   if (texture.format !== 'rgba16float') throw new Error(`未预期的镜头图像格式 ${texture.format}`);
   const canvas = makeCanvas(width, height), context = canvas.getContext('2d');
   if (!context) throw new Error(`无法创建 ${width}×${height} 的导出画布（超出浏览器上限）`);
   const bytesPerRow = Math.ceil((width * 8) / 256) * 256;
   const rowsPerChunk = Math.max(1, Math.min(height, Math.floor(MAX_CHUNK_BYTES / bytesPerRow)));
-  const buffer = device.createBuffer({ size: bytesPerRow * rowsPerChunk, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const buffer = interop.buffer(bytesPerRow*rowsPerChunk,GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ,'PNG export row staging');
   try {
     for (let y0 = 0; y0 < height; y0 += rowsPerChunk) {
       const rows = Math.min(rowsPerChunk, height - y0);
@@ -80,7 +81,7 @@ export async function exportLensTexture({ device, texture, width = texture.width
       buffer.unmap();
       context.putImageData(image, 0, y0);
     }
-  } finally { if (buffer.mapState === 'mapped') buffer.unmap(); buffer.destroy(); }
+  } finally { if (buffer.mapState === 'mapped') buffer.unmap(); interop.release(buffer); }
   return toPNG(canvas);
 }
 
