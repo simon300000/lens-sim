@@ -391,7 +391,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
         if(workCounting&&!workBusy&&engine.workCounting&&now-lastWorkAt>=1000){
           workBusy=true;lastWorkAt=now;
           engine.readWork().then(result=>{
-            if(result&&result.workUnits>0&&workCounting&&!disposed)update({diagnostics:{...state().diagnostics,work:{status:'ok',...summarizeWork(result.counts,result),integrationMode:result.integrationMode,timedChunks:result.timedChunks}}});
+            if(result&&result.workUnits>0&&workCounting&&!disposed)update({diagnostics:{...state().diagnostics,work:{status:'ok',...summarizeWork(result.counts,result),integrationMode:result.integrationMode,timingCoverage:result.timingCoverage,timedChunks:result.timedChunks}}});
           }).catch(()=>{}).finally(()=>{workBusy=false;});
         }
         const sampleSerial=engine.sampleSerial;

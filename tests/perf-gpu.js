@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { buildSanteiScene } from '../src/scene/santei-scene.js';
 import { createDaylight } from '../src/lighting.js';
-import { createLensRig } from './gpu-fixtures.js';
+import { createLensRig,focusTestLens } from './gpu-fixtures.js';
 /** Performance record of the V2 lens path on the full villa scene. GPU times
  * are timestamp-query durations of one compute pass (one tile batch); CPU
  * times are labelled as such. Results describe THIS adapter only. */
@@ -30,7 +30,7 @@ try {
   const { interop, engine, lighting, sceneResources } = rig;
   const lens = (await (await fetch('/lenses/canon-fl-50mm-f1-8.json')).json()).configurations[0];
   engine.setLens(lens, { fNumber: 2.8, sensorZMm: lens.sensorZMm, dispersion: false });
-  const focus = await engine.focusPoint([0, 0, -30000]); engine.updateOptics({ fNumber: 2.8, sensorZMm: focus.sensorZMm, dispersion: false });
+  const focus = focusTestLens(engine,lens,30); engine.setLens(focus.lens,{ sensorZMm:focus.lens.sensorZMm, fNumber: 2.8, dispersion: false });
   async function refreshTimed() {
     const a = performance.now(); lighting.refresh(); const submit = performance.now() - a;
     await interop.device.queue.onSubmittedWorkDone(); return { cpuSubmitMs: submit, submitToDoneWallMs: performance.now() - a };
@@ -58,4 +58,4 @@ try {
     image: [W, W / 1.5], batchSpp: 4, sceneBuildMs, firstRasterWallMs, rigWallMs, bvh: sceneResources.stats, refresh, day, night, opticsOnly,
     memory: { bvhAndTablesBytes: sceneResources.stats.gpuBytes, engineBytes: engine.memoryBytes }, lighting: lighting.status, errors };
   out.textContent = JSON.stringify(result, null, 2); document.body.dataset.passed = String(result.passed);
-} catch (error) { out.textContent = error.stack || String(error); document.body.dataset.passed = 'false'; console.error(error); }
+} catch (error) { out.textContent = error.message+'\n'+(error.stack||String(error)); document.body.dataset.passed = 'false'; console.error(error); }

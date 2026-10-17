@@ -5,6 +5,8 @@ import * as THREE from 'three/webgpu';
 import { createGPUInterop } from '../src/rendering/three-interop.js';
 import { createSceneResources } from '../src/rendering/scene-resources.js';
 import { createLightingResources } from '../src/rendering/lighting-resources.js';
+import {searchFocus} from '../src/optics/focus-search.js';
+import {packLens,paraxialSensorZ} from '../src/optics/lens-state.js';
 import { createOpticalEngine } from '../src/rendering/optical-engine.js';
 
 export function absorber() { return new THREE.MeshStandardNodeMaterial({ color: 0x000000, roughness: 1, metalness: 0 }); }
@@ -35,4 +37,15 @@ export async function createLensRig({ renderer, scene, camera, width = 96, envir
   if (!lighting.status.ok) throw new Error('lighting bridge: ' + lighting.status.errors.join('; '));
   engine.setPose(camera);
   return { interop, sceneResources, lighting, engine, sceneStats };
+}
+
+/** Exercise the same lens-bench focus search used by the production Worker. */
+export function focusTestLens(engine,lens,distanceM,{fNumber=engine.packed.fNumber,dispersion=false}={}){
+  const packed=packLens(lens,{fNumber,dispersion});
+  // Fixed-lens imaging fixtures include macro distances. Place the local
+  // RMS search around the known paraxial conjugate, not the infinity plane.
+  // This is fixture setup; the application's focus command is unchanged.
+  const z=lens.focusMotion?lens.sensorZMm:paraxialSensorZ(lens,distanceM);
+  const seed=lens.focusMotion?lens:{...lens,sensorZMm:z,imageDistanceMm:z-lens.lastVertexZMm};
+  return searchFocus(seed,distanceM,{currentLens:{...lens,sensorZMm:engine.packed.sensorZMm},stopRadiusMm:packed.stopRadiusMm,dispersion});
 }

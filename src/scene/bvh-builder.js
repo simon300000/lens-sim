@@ -12,8 +12,8 @@
  */
 export const LEAF_BIT = 0x80000000;
 export const STACK_SIZE = 64;           // must equal SCENE_STACK_SIZE in scene-intersector.wgsl
-export const NODE_BYTES = 32, TRIANGLE_BYTES = 64, VERTEX_BYTES = 48, INSTANCE_BYTES = 128;
-export const BLAS_MAX_LEAF = 4, TLAS_MAX_LEAF = 1;
+const TRIANGLE_BYTES = 64, VERTEX_BYTES = 48, INSTANCE_BYTES = 128;
+const BLAS_MAX_LEAF = 4, TLAS_MAX_LEAF = 1;
 
 const f32 = new Float32Array(1), u32 = new Uint32Array(f32.buffer);
 function nextDown(x) { // largest f32 <= x
@@ -116,7 +116,7 @@ export function buildBVH(bounds, { maxLeaf = 4, bins = 16, traversalCost = 1, in
 }
 
 /** BLAS over one geometry range, in geometry-local coordinates. */
-export function buildBlas(source) {
+function buildBlas(source) {
   const { positions, indices } = source, n = indices.length / 3, bounds = new Float64Array(n * 6);
   for (let t = 0; t < n; t++) {
     for (let a = 0; a < 3; a++) {
@@ -131,7 +131,7 @@ export function buildBlas(source) {
 
 /** TLAS over world-space instance bounds. Bounds are padded so that f32
  * world→object transforms in the shader cannot place a hit outside them. */
-export function buildTlas(instanceBounds, count) {
+function buildTlas(instanceBounds, count) {
   const bounds = new Float64Array(count * 6);
   for (let i = 0; i < count; i++) {
     let scale = 1;
@@ -156,7 +156,7 @@ function writeNodes(target, nodes, nodeCount, nodeOffset, primitiveOffset) {
 }
 
 /** Pack built BLASes + TLAS + instances into the GPU buffer images. */
-export function packScene({ blasSources, blasBuilt, tlas, instances }) {
+function packScene({ blasSources, blasBuilt, tlas, instances }) {
   const blasNodes = blasBuilt.reduce((s, b) => s + b.nodeCount, 0);
   const nodeCount = tlas.nodeCount + blasNodes;
   const triangleCount = blasBuilt.reduce((s, b) => s + b.triangles, 0);

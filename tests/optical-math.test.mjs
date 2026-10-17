@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { AIR, modelGlass, createGlassLUT, lookupGlassLUT } from '../src/optics/glass.js';
-import { sag, surfaceNormal, intersectSurface, refract, traceLens, unit, dot, add, cameraWeight } from '../src/optics/optical-reference.js';
+import { sag, surfaceNormal, intersectSurface, refract, traceLens, unit, add, cameraWeight } from '../src/optics/optical-reference.js';
 import { firstOrder, apertureLimits, paraxialSensorZ, rearSamplingRegion, packLens, normalizeAsphere } from '../src/optics/lens-state.js';
 import { sampleDimension, concentricDisk } from '../src/spectral/sampler.js';
 

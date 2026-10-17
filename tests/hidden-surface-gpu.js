@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { createLensRig, stripedPanel, emissivePanel, emitter, absorber } from './gpu-fixtures.js';
+import { createLensRig,focusTestLens, stripedPanel, emissivePanel, emitter, absorber } from './gpu-fixtures.js';
 import { apertureLimits } from '../src/optics/lens-state.js';
 /** Test B: first hit + hidden background. Emissive/absorbing geometry only
  * (no lights), so every value comes from geometry visibility through the
@@ -30,7 +30,7 @@ try {
   const A = await rig([16, 11]);
   const render = async (r, { fNumber, focusM, pinhole = false, spp = SPP }) => {
     const e = r.engine;
-    if (!pinhole) { e.updateOptics({ fNumber, sensorZMm: lens.sensorZMm, dispersion: false }); const focus = await e.focusPoint([0, 0, -focusM * 1000]); e.updateOptics({ fNumber, sensorZMm: focus.sensorZMm, dispersion: false }); }
+    if (!pinhole) { const focus = focusTestLens(e,lens,focusM,{fNumber}); e.setLens(focus.lens,{ sensorZMm:focus.lens.sensorZMm, fNumber, dispersion: false }); }
     e.reset();
     const pin = pinhole ? { cameraToWorld: camera.matrixWorld.elements, clipToCamera: camera.projectionMatrixInverse.elements } : null;
     for (let i = 0; i < spp / 4; i++) { e.sample({ batchSpp: 4, targetSpp: spp, seed: 5, pinhole: pin }); await r.interop.device.queue.onSubmittedWorkDone(); }
@@ -81,4 +81,4 @@ try {
   const result = { passed: true, environment: { userAgent: navigator.userAgent, adapter: adapter.info }, size: [W, H], spp: SPP, hidden, refreshResolutionIndependent: true, sweep, bokeh,
     stats: { open6: open6.stats, closed6: closed6.stats }, errors };
   out.textContent = JSON.stringify(result, null, 2); document.body.dataset.passed = 'true'; window.__hiddenTest = { result, open6, open12 };
-} catch (error) { out.textContent = error.stack || String(error); document.body.dataset.passed = 'false'; console.error(error); }
+} catch (error) { out.textContent = error.message+'\n'+(error.stack||String(error)); document.body.dataset.passed = 'false'; console.error(error); }

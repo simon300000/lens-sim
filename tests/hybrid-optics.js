@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import {texture,float} from 'three/tsl';
-import {createLensRig,stripedPanel,emissivePanel} from './gpu-fixtures.js';
+import {createLensRig,stripedPanel,emissivePanel,focusTestLens} from './gpu-fixtures.js';
 import {paraxialSensorZ} from '../src/optics/lens-state.js';
 import {outputRendererOptions,probeHDRCanvas,displayOutputNode} from '../src/hdr-output.js';
 import {runSpectralProbe} from './spectral-optical-probe.js';
@@ -61,11 +61,11 @@ try{
   engine.setLens(lens,{fNumber:2.8,sensorZMm:paraxialSensorZ(lens,10),dispersion:false});
   step('energy done');
   const target=await engine.referenceTarget();check(target.status===4&&Math.abs(target.distanceM-10)<.3,'AF reference target mapping failed: '+JSON.stringify({target,stats}));
-  const focusNear=await engine.focusPoint([0,0,-5000]),focusFar=await engine.focusPoint([0,0,-15000]);
-  check(focusNear.sensorZMm>focusFar.sensorZMm,'AF sensor position must change with target distance');
-  check(focusNear.afterRmsMm<=focusNear.beforeRmsMm+1e-5&&focusFar.afterRmsMm<=focusFar.beforeRmsMm+1e-5,'AF quadratic did not improve fixed beam merit');
+  const focusNear=focusTestLens(engine,lens,5),focusFar=focusTestLens(engine,lens,15);
+  check(focusNear.lens.sensorZMm>focusFar.lens.sensorZMm,'AF sensor position must change with target distance');
+  check(focusNear.afterRmsMm<=focusNear.beforeRmsMm+1e-5&&focusFar.afterRmsMm<=focusFar.beforeRmsMm+1e-5,'AF search did not improve pupil-grid RMS');
   step('af done');
-  engine.updateOptics({fNumber:2.8,sensorZMm:focusNear.sensorZMm,dispersion:true});
+  engine.setLens(focusNear.lens,{sensorZMm:focusNear.lens.sensorZMm,fNumber:2.8,dispersion:true});
   for(let i=0;i<16;i++){engine.sample({batchSpp:4,targetSpp:64});await interop.device.queue.onSubmittedWorkDone();}
   step('scene samples done');pipeline.render();await interop.device.queue.onSubmittedWorkDone();step('display rendered');
   const image=await interop.readTexture(engine.outputGPU);check(image.every(Number.isFinite),'Nonfinite optical output');
@@ -73,4 +73,4 @@ try{
   check(errors.length===0,'GPU validation errors: '+errors.join('\n'));
   const result={passed:true,lens:id,surfaces:lens.surfaces.length,width:96,height:64,spp:engine.spp,prefixError,stats,energy,target,focusNear,focusFar,spectralProbe,opticalPathProbe,lightingRefreshes:lighting.refreshes,bvh:sceneResources.stats,pipelines:interop.compilations,memoryBytes:engine.memoryBytes,computeMs:engine.computeMs,timestampSupported:engine.timestampSupported,initializationAndTestsMs:performance.now()-start,finite:true,imagePeak:Math.max(...image),errors};
   out.textContent=JSON.stringify(result,null,2);document.body.dataset.passed='true';window.__opticalTest={result,engine,renderer,interop};
-}catch(error){out.textContent=error.stack||String(error);document.body.dataset.passed='false';console.error(error);}
+}catch(error){out.textContent=error.message+'\n'+(error.stack||String(error));document.body.dataset.passed='false';console.error(error);}

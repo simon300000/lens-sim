@@ -5,14 +5,13 @@
  * https://jcgt.org/published/0002/02/01/ . No supplemental code/table copied.
  * See docs/spectral.md for normalization, approximation, sources and tests.
  */
-export const VISIBLE_RANGE_NM = Object.freeze([380, 780]);
-export const LINEAR_SRGB_TO_XYZ = Object.freeze([
+const LINEAR_SRGB_TO_XYZ = Object.freeze([
   [0.4124564, 0.3575761, 0.1804375],
   [0.2126729, 0.7151522, 0.0721750],
   [0.0193339, 0.1191920, 0.9503041],
 ]);
 // Inverse of the matrix above (D65, Ywhite = 1).
-export const XYZ_TO_LINEAR_SRGB = Object.freeze([
+const XYZ_TO_LINEAR_SRGB = Object.freeze([
   [3.2404548360214087, -1.5371388501025751, -0.4985315468684809],
   [-0.9692663898756537, 1.876010928842491, 0.04155608234667355],
   [0.05564341960421367, -0.20402585426769815, 1.057225162457929],
@@ -147,15 +146,6 @@ export function createSpectralReconstruction({ minNm = 380, maxNm = 780 } = {}) 
 export const spectralReconstruction = createSpectralReconstruction();
 export const spectralRadiance = spectralReconstruction.radiance;
 
-/** Optional parameter-buffer basis for an explicitly restricted glass band.
- * Nine vec4f entries, primary-major, each [centerNm,sigmaNm,weight,0].
- * Pass to spectralRadianceWithBasis; changing support need not compile WGSL.
- */
-export function packSpectralBasis(reconstruction = spectralReconstruction) {
-  return Float32Array.from(reconstruction.primaries.flatMap(lobes =>
-    lobes.flatMap(l => [l.center, l.sigma, l.weight, 0])));
-}
-
 export function sampleWavelength(u, minNm = 380, maxNm = 780) {
   if (!(Number.isFinite(u) && Number.isFinite(minNm) && Number.isFinite(maxNm) && u >= 0 && u < 1 && minNm >= 380 && maxNm <= 780 && maxNm > minNm)) throw new RangeError('Invalid wavelength sample or support.');
   return { wavelengthNm: minNm + u * (maxNm - minNm), pdfPerNm: 1 / (maxNm - minNm) };
@@ -168,7 +158,7 @@ export function spectralXYZContribution(rgb, wavelengthNm, pdfPerNm, cameraWeigh
 }
 
 const wgslNumber = x => Number(x).toExponential(10);
-export function spectralWGSL(reconstruction = spectralReconstruction) {
+function spectralWGSL(reconstruction = spectralReconstruction) {
   const spectra = reconstruction.primaries.map(lobes => lobes.map(l =>
     `${wgslNumber(l.weight)} * spectralGaussian(lambdaNm, ${wgslNumber(l.center)}, ${wgslNumber(l.sigma)})`).join(' + '));
   return /* wgsl */`
@@ -188,20 +178,6 @@ fn cieXYZ(lambdaNm: f32) -> vec3f {
 }
 fn spectralGaussian(w: f32, center: f32, sigma: f32) -> f32 {
   let d=(w-center)/sigma; return exp(-0.5*d*d);
-}
-// Parameter-buffer variant: caller checks lambda against its explicit range.
-// Array is value data, not a binding/lifecycle owned by this math module.
-fn spectralRadianceWithBasis(rgb: vec3f, lambdaNm: f32, basis: array<vec4f,9>) -> f32 {
-  let safeRGB=max(rgb,vec3f(0.0));
-  let amplitude=max(max(safeRGB.r,safeRGB.g),safeRGB.b);
-  if(amplitude==0.0){return 0.0;}
-  let shape=safeRGB/amplitude;
-  var primary=vec3f(0.0);
-  for(var i=0u;i<9u;i=i+1u){
-    let l=basis[i];
-    primary[i/3u]=primary[i/3u]+l.z*spectralGaussian(lambdaNm,l.x,l.y);
-  }
-  return amplitude*dot(shape,primary);
 }
 fn spectralRadiance(rgb: vec3f, lambdaNm: f32) -> f32 {
   if (lambdaNm < ${wgslNumber(reconstruction.minNm)} || lambdaNm > ${wgslNumber(reconstruction.maxNm)}) { return 0.0; }

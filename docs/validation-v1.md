@@ -45,6 +45,8 @@ The reference plane is the rear vertex plane. Its disk encloses projections of t
 
 Glass LUT is 0.25 nm, current-lens-only. The spectral support is 380–780 nm; the source lacks manufacturer-certified range metadata, so that limitation is visible. RGB spectral reconstruction is an emission metamer approximation, not measured D65 or recovered material/light spectra. XYZ has normalized Ywhite=1, D65 sRGB primaries, fixed XYZ→Linear-sRGB conversion. See [spectral sources and tolerances](spectral.md).
 
+> Historical method: the GPU beam/quadratic autofocus described below has been retired. Current autofocus uses the Worker-based lens-bench search (`src/optics/focus-search.js`); GPU tracing acquires the real scene target. These recorded results describe the earlier implementation.
+
 AF uses one reference wavelength and one final image plane for all wavelengths. It traces a deterministic fixed first-plane beam budget selected before tracing (2048 baseline, increased for small apertures, bounded at 65536). Failed AF beams are not replenished. The same valid beams form a quadratic variance in z; GPU trace and cross-workgroup reduction are separate. A common z origin at the current sensor reduces f32 moment cancellation. Values below the estimated moment precision are displayed as a bound, not a perfect zero RMS. Infinite focus uses parallel object-side beams. This is sensor translation with fixed internal structure, not a commercial internal-focus mechanism.
 
 ## Native GPU environment and numerical results

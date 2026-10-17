@@ -2,7 +2,6 @@
 import { radialPolynomial, conicOnly } from './asphere.js';
 import { phaseGradient } from './diffractive.js';
 import { refractiveIndex } from './glass.js';
-export const OpticalStatus = Object.freeze({ OK: 0, OPTICAL_BLOCKED: 1, OPTICAL_TIR: 2, OPTICAL_NUMERICAL_ERROR: 3 });
 export const dot = (a,b) => a.reduce((s,v,i)=>s+v*b[i],0);
 export const add = (a,b,t=1) => a.map((v,i)=>v+t*b[i]);
 export const unit = a => {const n=Math.hypot(...a);return a.map(v=>v/n);};
@@ -196,7 +195,7 @@ export function refract(direction,normal,nFrom,nTo) {
 /** Generalized Snell law on the actual curved carrier surface. The prescribed phase delay is reciprocal: the same transverse kick applies
  * in both directions. Reversing the incident momentum and exchanging media
  * then returns the negative original momentum (including signed orders). */
-export function diffract(direction,normal,nFrom,nTo,gradient,wavelengthNm) {
+function diffract(direction,normal,nFrom,nTo,gradient,wavelengthNm) {
   const kick=wavelengthNm*1e-6/(2*Math.PI);
   const momentum=direction.map((v,i)=>nFrom*v+kick*gradient[i]);
   const projected=dot(momentum,normal);
