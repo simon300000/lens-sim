@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { positionLocal, positionView, normalView, sin, mix, materialColor, mx_noise_float, vec3 } from 'three/tsl';
 import { WOOD } from './scene/procedural-params.js';
 import { setLensMaterial, PROCEDURAL } from './scene/lens-registry.js';
@@ -17,6 +18,15 @@ export function mat(color, roughness = .85, extra = {}) {
   return new THREE.MeshStandardNodeMaterial({ color, roughness, ...extra });
 }
 
+/** Surface-gradient bump mapping from a scalar height node (metres). It works
+ * on custom geometry as well as UV primitives, so procedural relief never
+ * requires an image or UV attribute. */
+export function bumpNormal(height) {
+  const dx=positionView.dFdx(),dy=positionView.dFdy();
+  const r1=dy.cross(normalView),r2=normalView.cross(dx),det=dx.dot(r1);
+  return normalView.mul(det.abs()).sub(r1.mul(height.dFdx()).add(r2.mul(height.dFdy())).mul(det.sign())).normalize();
+}
+
 export function woodMat(tint='#92714b') {
   const m=mat(tint,.79),W=WOOD;
   const p=positionLocal;
@@ -24,12 +34,7 @@ export function woodMat(tint='#92714b') {
   const grain=sin(p.y.mul(W.grainFrequency).add(n.mul(W.grainWarp))).mul(.5).add(.5);
   m.colorNode=materialColor.mul(mix(W.colorLow,W.colorHigh,grain.mul(W.colorGrain).add(n.mul(W.colorNoise)).add(W.colorBias)));
   m.roughnessNode=grain.mul(W.roughnessGrain).add(W.roughnessBase);
-  // Surface-gradient bump mapping works on the custom gables as well as UV
-  // primitives, so procedural grain never requires an image or UV attribute.
-  const height=grain.mul(W.bumpHeight);
-  const dx=positionView.dFdx(),dy=positionView.dFdy();
-  const r1=dy.cross(normalView),r2=normalView.cross(dx),det=dx.dot(r1);
-  m.normalNode=normalView.mul(det.abs()).sub(r1.mul(height.dFdx()).add(r2.mul(height.dFdy())).mul(det.sign())).normalize();
+  m.normalNode=bumpNormal(grain.mul(W.bumpHeight));
   // The lens evaluator re-implements exactly this graph from the same WOOD
   // constants, with an analytic grain/finite-difference noise gradient.
   setLensMaterial(m,{kind:PROCEDURAL.WOOD});
@@ -78,5 +83,31 @@ export function stoneGeometry(seed=1, detail=0) {
   const random=rng(seed),g=new THREE.IcosahedronGeometry(1,detail),p=g.attributes.position;
   const factors=new Map();
   for(let i=0;i<p.count;i++) {const key=[p.getX(i),p.getY(i),p.getZ(i)].map(v=>v.toFixed(3)).join(',');if(!factors.has(key)) factors.set(key,.82+random()*.3);const s=factors.get(key);p.setXYZ(i,p.getX(i)*s,p.getY(i)*s,p.getZ(i)*s);}
+  // Shared corners are welded so stones shade as rounded, weathered forms.
+  g.deleteAttribute('normal');g.deleteAttribute('uv');
+  const welded=mergeVertices(g);welded.computeVertexNormals();g.dispose();return welded;
+}
+
+/** A sculpted boulder: a finely subdivided sphere displaced by layered value
+ * noise, with bedding strata and a flattened base where it sits in the ground. */
+export function rockGeometry(seed=1, detail=11) {
+  const random=rng(seed),lattice=new Map();
+  const hash=(x,y,z)=>{const key=`${x},${y},${z}`;if(!lattice.has(key))lattice.set(key,random()*2-1);return lattice.get(key);};
+  const smooth=t=>t*t*(3-2*t);
+  const noise=(x,y,z)=>{
+    const ix=Math.floor(x),iy=Math.floor(y),iz=Math.floor(z),fx=smooth(x-ix),fy=smooth(y-iy),fz=smooth(z-iz);
+    const lerp=(a,b,t)=>a+(b-a)*t;
+    const plane=k=>lerp(lerp(hash(ix,iy,iz+k),hash(ix+1,iy,iz+k),fx),lerp(hash(ix,iy+1,iz+k),hash(ix+1,iy+1,iz+k),fx),fy);
+    return lerp(plane(0),plane(1),fz);
+  };
+  const g=mergeVertices(new THREE.IcosahedronGeometry(1,detail).deleteAttribute('normal').deleteAttribute('uv'));
+  const p=g.attributes.position,v=new THREE.Vector3(),tilt=random()*3;
+  for(let i=0;i<p.count;i++){
+    v.fromBufferAttribute(p,i);
+    const r=1+.2*noise(v.x*1.4+7,v.y*1.4,v.z*1.4)+.08*noise(v.x*3.3,v.y*3.3+11,v.z*3.3)+.03*noise(v.x*8,v.y*8,v.z*8+5)
+      +.018*Math.sin((v.y+.12*v.x*Math.sin(tilt))*23);
+    v.multiplyScalar(r);if(v.y<-.55)v.y=-.55+(v.y+.55)*.2;
+    p.setXYZ(i,v.x,v.y,v.z);
+  }
   g.computeVertexNormals();return g;
 }

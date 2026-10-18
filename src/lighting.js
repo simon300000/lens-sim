@@ -29,7 +29,7 @@ function skyMaterial(parameters) {
   const m = new THREE.MeshBasicNodeMaterial({side:THREE.BackSide,depthWrite:false,fog:false});
   const direction=normalize(positionWorld.sub(cameraPosition));
   const height=max(direction.y,0);
-  const gradient=pow(height,.42);
+  const gradient=pow(height,.65);
   const sky=mix(parameters.horizon,parameters.zenith,gradient).mul(parameters.skyLuminance);
   // The angular Rayleigh phase and a narrow forward Mie lobe orient haze
   // towards the actual Sun. Weather is an explicit clear-sky approximation.

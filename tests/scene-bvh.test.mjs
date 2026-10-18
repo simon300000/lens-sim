@@ -164,5 +164,5 @@ test('full villa/forest scene: extraction + BVH build within stack bound, real c
   assert.equal(ex.report.negativeDeterminant, 0);
   console.log(JSON.stringify({ report: { ...ex.report, unsupported: ex.report.unsupported.length }, stats: s }));
   // Same instance count as raster draw: expanded triangles must match the raster inventory.
-  assert.equal(ex.report.expandedTriangles, 3399513 + 246 + isoChart.indices.length/3);
+  assert.equal(ex.report.expandedTriangles, 3583259 + 246 + isoChart.indices.length/3);
 });

@@ -104,7 +104,7 @@ test('full-day sweep: finite, bounded, correct disk phase basis and no subterran
     near(Math.hypot(...state.moon.illuminationDirection), 1, 1e-12);
     near(dot(state.moon.brightLimbDirection, state.moon.geometricDirection), 0, 1e-10);
     assert.ok(state.moon.angularRadius > .23 && state.moon.angularRadius < .3);
-    assert.ok(state.lighting.ev100 >= -2 && state.lighting.ev100 <= 16);
+    assert.ok(state.lighting.ev100 >= 0 && state.lighting.ev100 <= 16);
     assert.ok(state.lighting.moonLux >= 0 && state.lighting.moonLux < .5);
   }
   const noon = computeCelestialState({ hour: 12 }).lighting;

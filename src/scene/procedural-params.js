@@ -17,6 +17,23 @@ export const WOOD = Object.freeze({
 export const MEADOW = Object.freeze({
   // positionWorld scaling of the multiplicative colour variation.
   noiseScale: [2.5, 1, 2.5], amplitude: .065, bias: .95,
+  // Broad patches of drier, yellower turf: mix towards patchTint by
+  // smoothstep(patchLow, patchHigh, noise(positionWorld * patchScale)) * patchAmount.
+  patchScale: [.19, .5, .23], patchLow: -.05, patchHigh: .45, patchAmount: .55,
+  patchTint: [1.22, 1.06, .62],
+});
+
+export const GRAVEL = Object.freeze({
+  // Raked karesansui gravel, positionWorld metres. Rings of rake lines follow
+  // each rock (xz centre, radius); outside every ring band the lines run along x.
+  rocks: [[-5.45, 11.25, .62], [-4.42, 12.32, .36], [.15, 11.95, .5]],
+  ringBand: .62,              // metres of concentric rings beyond each rock radius
+  spacing: .085,              // metres between rake furrows
+  depth: .014,                // furrow height amplitude, metres
+  shade: .3,                  // furrow cavity darkening
+  grainScale: 38,             // stones per metre (MaterialX noise frequency)
+  grainContrast: .2,
+  roughness: .93,
 });
 
 export const WATER = Object.freeze({

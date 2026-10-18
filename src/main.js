@@ -60,7 +60,7 @@ async function createScene(){
     console.error('WebGPU validation:',event.error.message);
   });
   document.querySelector('#scene').appendChild(renderer.domElement);
-  renderer.domElement.setAttribute('aria-label','可环视的山间别墅、庭院、鱼塘与远山三维模型');
+  renderer.domElement.setAttribute('aria-label','可环视的山间别墅、枯山水庭院、拱桥鱼塘与远山三维模型');
   const displayHDR=matchMedia('(dynamic-range: high)');
   const outputStatus=document.querySelector('#output-status');
   function updateOutputStatus(){
@@ -76,7 +76,7 @@ async function createScene(){
   updateOutputStatus();displayHDR.addEventListener('change',updateOutputStatus);
 
   await startup.stage(2,'铺设庭园，栽种花木');
-  const {scene,garden,landscape,villa,vegetation,details,testTargets}=buildSanteiScene();
+  const {scene,garden,landscape,villa,vegetation,details,features,testTargets}=buildSanteiScene();
   const userModels=new THREE.Group();userModels.name='User models';scene.add(userModels);
   const portrait=innerWidth/innerHeight<.85;
   const camera=new THREE.PerspectiveCamera(portrait?48:40,innerWidth/innerHeight,.15,450);
@@ -84,9 +84,9 @@ async function createScene(){
   if(portrait)camera.position.multiplyScalar(1.48);
   camera.lookAt(0,2.7,2.0);
   // One rig for look / orbit / pan / dolly / walk. Picking skips dense vegetation instances.
-  const groundPicker=createScenePicker([villa.group,garden.garden,details.group,testTargets.group,landscape.meadow]);
+  const groundPicker=createScenePicker([villa.group,garden.garden,details.group,features.group,testTargets.group,landscape.meadow]);
   const controls=createCameraRig(camera,renderer.domElement,{
-    pick:createScenePicker([villa.group,garden.garden,details.group,testTargets.group,landscape.meadow,userModels]),
+    pick:createScenePicker([villa.group,garden.garden,details.group,features.group,testTargets.group,landscape.meadow,userModels]),
     requestFrame:()=>wake()});
   controls.target.set(0,2.7,2.0);camera.lookAt(controls.target);controls.update(0);
 
@@ -171,7 +171,7 @@ async function createScene(){
       canvasConfiguration:renderer.backend.context.getConfiguration?.(),outputTransfer:'sRGB',fallback:'ACESFilmic',
       fullFrameReadback:pixelDiagnostics?'startup-night-opt-in':'on-demand-only'}};
   scene.traverse(o=>{if(o.isMesh){diagnostics.meshes++;if(o.isInstancedMesh)diagnostics.instances+=o.count;diagnostics.triangles+=(o.geometry.index?.count||o.geometry.attributes.position.count)/3*(o.isInstancedMesh?o.count:1);}});
-  for(const [name,item]of Object.entries({villa,vegetation,garden,landscape,details}))diagnostics.groups[name]=item?.metadata||item?.userData||(name==='vegetation'?item:{});
+  for(const [name,item]of Object.entries({villa,vegetation,garden,landscape,details,features}))diagnostics.groups[name]=item?.metadata||item?.userData||(name==='vegetation'?item:{});
   window.__SANTEI__={scene,camera,renderer,controls,pipeline,diagnostics,garden,daylight,timeControls,scenePass,testTargets};
   const gardenView={position:camera.position.toArray(),target:controls.target.toArray()};
   function showTestTarget(key){

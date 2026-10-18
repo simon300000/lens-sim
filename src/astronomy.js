@@ -118,7 +118,8 @@ function diffuseSolarLux(altitude) {
  * lighting: sunLux/moonLux DIRECT NORMAL lux (apply cosine for horizontal lux).
  * ambientLux is diffuse horizontal illuminance. RGB colors are LINEAR sRGB with
  * luminance 1 (channels may exceed 1), Kelvin values are appearance approximations.
- * exposure is physical photographic gain 1/(1.2*2^EV100), EV100 limited [-2,16].
+ * exposure is photographic gain 1/(1.2*2^EV100), EV100 limited [0,16], metered with a
+ * brightness-dependent key (bright daylight is exposed up to 1.3 EV brighter).
  * If a renderer divides all illuminance by S, multiply exposure by S as well.
  * sky RGB are illustrative LINEAR chromatic colors; brightness is renderer-owned.
  * events are hours on the returned localDate; null means no event that day.
@@ -180,13 +181,18 @@ export function computeCelestialState({ hour, date = '2026-09-26', latitude = SI
   const moonHorizontalLux = moonLux * Math.max(0, Math.sin(moon.altitude * DEG));
   const ambientLux = diffuseSolarLux(sun.geometricAltitude) + .15 * moonHorizontalLux;
   const meteredLux = sunHorizontalLux + moonHorizontalLux + ambientLux;
-  const ev100 = clamp(Math.log2(Math.max(.0001, meteredLux) / 2.5), -2, 16);
+  // Reflected-light metering would render every daylight hour as the same mid
+  // grey. Photographs of bright scenes are printed brighter (a higher key), so
+  // strong daylight keeps up to 1.3 EV of its extra brightness. Night is exposed
+  // as a photograph of the lamp-lit house (EV 0), not as a moonlight long exposure.
+  const key = 1.3 * smooth(4.2, 5.0, Math.log10(Math.max(1, meteredLux)));
+  const ev100 = clamp(Math.log2(Math.max(.0001, meteredLux) / 2.5) - key, 0, 16);
   const daylight = smooth(-6, 8, sun.geometricAltitude);
   const night = 1 - smooth(-18, -6, sun.geometricAltitude);
   const twilight = smooth(-18, -5, sun.geometricAltitude) * (1 - smooth(0, 12, sun.geometricAltitude));
   const sunKelvin = 2000 + 3778 * (1 - Math.exp(-Math.max(0, sun.altitude) / 15));
   const moonKelvin = 2400 + 1700 * (1 - Math.exp(-Math.max(0, moon.altitude) / 12));
-  const zenith = mix([.0025, .0045, .012], [.12, .31, .65], daylight);
+  const zenith = mix([.0025, .0045, .012], [.16, .35, .68], daylight);
   const horizon = mix(mix([.008, .012, .027], [.55, .22, .085], twilight), [.62, .76, .88], smooth(0, 20, sun.geometricAltitude));
   return {
     date, localDate, localHour, requestedHour: hour, utcISO: instant.toISOString(),

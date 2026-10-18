@@ -1,4 +1,5 @@
 import { THREE, mat, makeBatch, leafGeometry, stoneGeometry, rng } from './kit.js';
+import { clearOfFeatures } from './garden-layout.js';
 
 // All plants are modelled geometry. No texture, alpha card, or downloaded asset.
 export function buildVegetation(scene) {
@@ -30,11 +31,14 @@ export function buildVegetation(scene) {
   }
   function leafAt(list, x,y,z, size, color, angle=next(0,tau), pitch=next(-.65,.65), width=1) {
     if ((list===shrubLeaves||list===fernLeaves||list===flowerLeaves) &&
-      (!clearPond(x,z,.12)||!clearPond(x+Math.sin(angle)*size,z+Math.cos(angle)*size,.12))) return;
+      (!clearPond(x,z,.12)||!clearPond(x+Math.sin(angle)*size,z+Math.cos(angle)*size,.12)||!clearOfFeatures(x,z,.05))) return;
     list.push({p:[x,y,z],s:[size*width,size,size],r:[pitch,angle,next(-.4,.4)],c:color});
   }
   const broadColors = ['#335e35','#416b39','#50763e','#5b7f43','#69894a','#77914e'];
   const mapleColors = ['#426539','#527641','#658349','#728c4b','#849550','#9a9452'];
+  // Two Japanese maples have begun to turn: one crimson, one amber and gold.
+  const crimsonMaple = ['#7e1d15','#952417','#a9301b','#bb421e','#c75a24','#8d3a1c'];
+  const amberMaple = ['#b86a22','#c98a2c','#8f8a35','#6d8441','#a6772a','#7f8c3e','#5f7d3c'];
   const pineColors = ['#345940','#43694a','#537249','#5e7d4e'];
   function colorFrom(palette) { return palette[Math.floor(random()*palette.length)]; }
 
@@ -51,13 +55,13 @@ export function buildVegetation(scene) {
   }
   const mapleLeaf = palmMapleGeometry();
 
-  function tree(x,z,height,spread,type,leafCount) {
+  function tree(x,z,height,spread,type,leafCount,leafPalette) {
     const base = [x,.055,z], top=[x+next(-.17,.17),height*.58,z+next(-.1,.1)];
     addBeam(branches,base,top,height*.044);
     // Sculptural roots emerge from the mulch, each with a distinct direction.
     for(let i=0;i<7;i++) {const a=i/7*tau+next(-.2,.2),r=height*.12;
       addBeam(branches,[x,.13,z],[x+Math.cos(a)*r,.045,z+Math.sin(a)*r],height*.015);}
-    const palette = type===1 ? mapleColors : type===2 ? pineColors : broadColors;
+    const palette = leafPalette ?? (type===1 ? mapleColors : type===2 ? pineColors : broadColors);
     const hubs = [];
     for(let i=0;i<10;i++) {
       const angle = i/10*tau + next(-.23,.23), reach=spread*next(.6,1), lift=next(.3,.95);
@@ -92,20 +96,20 @@ export function buildVegetation(scene) {
     }
   }
   tree(-12.7,.5,6.7,2.7,0,3300);
-  tree(-11.9,11.4,4.85,2.25,1,2900);
+  tree(-11.9,11.4,4.85,2.25,1,3300,crimsonMaple);
   tree(13.4,2.25,7.3,2.5,0,3600);
-  tree(17.5,11.8,5.3,2.1,1,3000);
+  tree(17.5,11.8,5.3,2.1,1,3300,amberMaple);
   tree(-14,-5,6.7,2.1,2,2200);
   tree(6.0,-4.7,5.8,1.8,0,2500);
 
   function clearPond(x,z,pad=0) {return ((x-6.8)/(3.8+pad))**2+((z-7.7)/(4.5+pad))**2>=1;}
   function pathX(z) { return -2.2+1.8*Math.sin(z*.27); }
   function clearLawn(x,z) {
-    return clearPond(x,z,.12)&&!(x>-10.2&&x<4.2&&z<1.75)&&
+    return clearPond(x,z,.12)&&clearOfFeatures(x,z,.04)&&!(x>-10.2&&x<4.2&&z<1.75)&&
       Math.abs(x-pathX(z))>.61&&Math.hypot(x+5.8,z-4.7)>2.25;
   }
   function bedSpot(x,z) {
-    return clearPond(x,z,.12)&&!(x>-10.2&&x<4.2&&z<1.6)&&
+    return clearPond(x,z,.12)&&clearOfFeatures(x,z,.15)&&!(x>-10.2&&x<4.2&&z<1.6)&&
       Math.abs(x-pathX(z))>.8&&Math.hypot(x+5.8,z-4.7)>2.35;
   }
 
@@ -116,7 +120,7 @@ export function buildVegetation(scene) {
     g.computeVertexNormals();return g;
   }
   const blade=bladeGeometry();
-  const grassColors=['#628544','#72904b','#7b984f','#5c7e3c','#8c9e58','#6b8d48'];
+  const grassColors=['#5f8a3f','#6f9645','#7c9f4b','#57803a','#8fa456','#68913f','#a3a961'];
   let attempts=0;
   while(grass.length<34000&&attempts++<160000) {
     let x=next(-17,19),z=next(1.8,18);

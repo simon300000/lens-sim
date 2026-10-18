@@ -59,6 +59,7 @@ const MAT_CLEARCOAT: u32 = 32u;
 const PROC_WOOD: u32 = 1u;
 const PROC_MEADOW: u32 = 2u;
 const PROC_WATER: u32 = 3u;
+const PROC_GRAVEL: u32 = 8u;
 fn sceneMaterial(index: u32) -> SceneMaterial {
   let o = 1u + index * 5u;
   let q0 = sceneTableF(o); let q1 = sceneTableF(o + 1u); let q2 = sceneTableF(o + 2u); let q3 = sceneTableF(o + 3u); let q4 = sceneTables[o + 4u];
@@ -275,7 +276,7 @@ fn scenePow(x: f32, y: f32) -> f32 { return select(pow(x, y), 0.0, x <= 0.0); }
 fn sceneSky(d: vec3f) -> vec3f {
   let L = sceneLighting;
   let height = max(d.y, 0.0);
-  let gradient = scenePow(height, 0.42);
+  let gradient = scenePow(height, 0.65);
   let sky = mix(L.skyHorizon.rgb, L.skyZenith.rgb, gradient) * L.skyParams.x;
   let sunCos = dot(d, L.skySun.xyz);
   let rayleigh = sunCos * sunCos * 0.22 + 0.78;
@@ -379,6 +380,19 @@ fn sceneReconstruct(hit: SceneHit, rayDir: vec3f, rayOrigin: vec3f) -> SceneSurf
   s.material = I.info.y; s.flags = I.info.z; s.instance = hit.instance;
   return s;
 }
+// Raked gravel coordinate u (x) and its world xz gradient (yz): signed
+// distance outside the nearest rock inside the ring band, else world z.
+fn sceneGravelRake(P: vec3f) -> vec3f {
+  var best = 1.0e9; var grad = vec2f(0.0, 1.0);
+  var rocks = GRAVEL_ROCKS;
+  for (var k = 0u; k < GRAVEL_ROCK_COUNT; k++) {
+    let rock = rocks[k];
+    let d = P.xz - rock.xy; let len = length(d);
+    if (len - rock.z < best) { best = len - rock.z; grad = d / max(len, 1e-6); }
+  }
+  if (best < GRAVEL_RING_BAND) { return vec3f(best, grad); }
+  return vec3f(P.z, 0.0, 1.0);
+}
 fn sceneWaterRipple(P: vec3f) -> f32 {
   return sin(dot(P.xz, WATER_RIPPLE_A)) * WATER_RIPPLE_AMP0 + cos(dot(P.xz, WATER_RIPPLE_B)) * WATER_RIPPLE_AMP1;
 }
@@ -414,6 +428,18 @@ fn sceneShade(s: SceneSurface, wo: vec3f, key: u32) -> SceneShade {
     N = normalize(N - (g - N * dot(N, g)));
   } else if (m.kind == PROC_MEADOW) {
     base *= noise.x * MEADOW_AMPLITUDE + MEADOW_BIAS;
+    let dryTurf = smoothstep(MEADOW_PATCH_LOW, MEADOW_PATCH_HIGH, mxNoise3(s.P * MEADOW_PATCH_SCALE)) * MEADOW_PATCH_AMOUNT;
+    base *= mix(vec3f(1.0), MEADOW_PATCH_TINT, dryTurf);
+  } else if (m.kind == PROC_GRAVEL) {
+    let rake = sceneGravelRake(s.P);
+    let k = 6.283185307179586 / GRAVEL_SPACING;
+    let ridge = sin(rake.x * k) * 0.5 + 0.5;
+    let grain = mxNoise3(s.P * GRAVEL_GRAIN_SCALE);
+    base *= (1.0 - GRAVEL_SHADE * (1.0 - ridge)) * (1.0 + GRAVEL_GRAIN_CONTRAST * grain);
+    // Height = depth * ridge; its world gradient tilts the shading normal.
+    let slope = GRAVEL_DEPTH * 0.5 * k * cos(rake.x * k);
+    let g = vec3f(rake.y * slope, 0.0, rake.z * slope);
+    N = normalize(N - (g - N * dot(N, g)));
   } else if (m.kind == PROC_WATER) {
     let r = sceneWaterRipple(s.P);
     // normalMap on the planar uv = (x, -z) mapping: T = +x, B = -z.

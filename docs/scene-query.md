@@ -19,7 +19,7 @@
 | 模块 | 作用 |
 | --- | --- |
 | `src/scene/lens-registry.js` | 显式注册：天空/月亮/星空为环境对象（不作遮挡几何）；程序材质描述符。不按名称猜测。 |
-| `src/scene/procedural-params.js` | 木纹、草地色变、水面的唯一常量来源；TSL 光栅图与生成的 WGSL 常量都读它。 |
+| `src/scene/procedural-params.js` | 木纹、草地色变、枯山水耙纹、水面的唯一常量来源；TSL 光栅图与生成的 WGSL 常量都读它。 |
 | `src/scene/scene-extract.js` | 场景 → 类型化数组（复制属性，不 detach Three 的几何）：每个 (geometry, group, drawRange) 一个 BLAS 源；每个 Mesh/实例一条实例记录；材质分类与不支持原因。 |
 | `src/scene/bvh-builder.js` | 分箱 SAH（16 bins，三轴），f64 构建、f32 向外取整的保守包围盒；BLAS 叶 ≤4 三角形，TLAS 叶恰好 1 个实例；打包 GPU 缓冲。 |
 | `src/scene/bvh-worker.js` | 在 Worker 中构建，按 key 缓存 BLAS 与源数据，实例变化只重建 TLAS。 |
@@ -63,7 +63,8 @@
 程序材质：
 
 * **木纹**（`woodMat`）：在 `positionLocal`（InstancedMesh 为实例矩阵后的坐标，与 Three 的 InstanceNode 一致）上求 MaterialX Perlin 噪声、纹理颜色与粗糙度。光栅用屏幕导数（dFdx/dFdy）做表面梯度凹凸；compute 改为在交点求高度场的空间梯度：颗粒项解析求导，噪声项用噪声晶格单位 h = 1/1024 的中心差分（截断误差 ~1e-6），再按局部→世界的逆转置变换到世界并投影到表面：`N' = normalize(N − (g − N(N·g)))`，与 Mikkelsen 表面梯度公式等价。单位：高度为米。
-* **草地色变**：`noise(positionWorld × (2.5,1,2.5)) × 0.065 + 0.95`。
+* **草地色变**：`noise(positionWorld × (2.5,1,2.5)) × 0.065 + 0.95`，再乘以大尺度枯黄斑块 `mix(1, patchTint, smoothstep(-0.05, 0.45, noise(positionWorld × patchScale)) × 0.55)`。
+* **枯山水耙纹**（`applyRakedGravel`，`PROCEDURAL.GRAVEL`）：在 `positionWorld` 上取耙纹坐标 u——落在任一石块的环带内时为到该石块的有符号距离（同心环），否则为世界 z（平行直纹）；高度 = depth × (sin(2πu/spacing)·½+½)，沟槽按同一项压暗，并乘以 MaterialX 噪声颗粒色。compute 对高度解析求梯度（∇u 为离开石心的单位向量或 +z），再按上式投影法线。光栅预览把窄于约一个像素的沟槽淡化为平均值以避免摩尔纹；镜头路径不做淡化，逐样本求出真实沟槽，分辨率、摩尔纹与焦外过渡完全由镜头积分给出。
 * **水面**：程序波纹 → 切线空间法线（平面 uv=(x,−z)，T=+x，B=−z）；clearcoat；自发光 = 平面反射纹理 × Fresnel(wo) × 2.2；不透明度 0.35。
 
 MaterialX 噪声逐行移植（哈希、梯度、fade、trilerp、0.982 缩放），光栅/compute 对照误差 ~0.1%。未支持特性（非 Standard/Physical 类型、图片纹理、alphaTest/alphaHash、transmission/sheen/iridescence/anisotropy、非 Normal 混合、flatShading/wireframe、没有描述符的自定义节点）在提取报告和 UI 中列出。

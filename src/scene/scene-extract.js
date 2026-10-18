@@ -22,6 +22,7 @@ const DESCRIPTOR_COVERS = {
   [PROCEDURAL.WOOD]: ['colorNode', 'roughnessNode', 'normalNode'],
   [PROCEDURAL.MEADOW]: ['colorNode'],
   [PROCEDURAL.WATER]: ['normalNode', 'emissiveNode'],
+  [PROCEDURAL.GRAVEL]: ['colorNode', 'normalNode'],
   ...Object.fromEntries([PROCEDURAL.CHART_SIEMENS,PROCEDURAL.CHART_ISO12233,PROCEDURAL.CHART_RULER,PROCEDURAL.CHART_FOCUS].map(kind=>[kind,['colorNode']])),
 };
 const TEXTURE_PROPS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'emissiveMap', 'alphaMap', 'bumpMap', 'aoMap', 'lightMap',

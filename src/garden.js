@@ -1,5 +1,6 @@
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { THREE, mat, woodMat, box, sphere, cylinder, beam, makeBatch, stoneGeometry, leafGeometry, rng } from './kit.js';
+import { THREE, mat, woodMat, box, sphere, cylinder, beam, makeBatch, stoneGeometry, rockGeometry, leafGeometry, rng } from './kit.js';
+import { nearBridge } from './garden-layout.js';
 
 // All surfaces in this garden are geometry and colour. There are no image assets.
 const TAU = Math.PI * 2;
@@ -20,15 +21,17 @@ function pondShape() {
   return { shape, points };
 }
 
-function slab(parent, material, p, width, depth, height, angle = 0, seed = 1) {
+export function slab(parent, material, p, width, depth, height, angle = 0, seed = 1) {
   const draw = rng(seed), outline = new THREE.Shape();
-  for (let i = 0; i < 8; i++) {
-    const a = i / 8 * TAU, r = .82 + draw() * .18;
+  // Smoothly irregular natural outline: two random harmonics, not a polygon.
+  const p1 = draw() * TAU, p2 = draw() * TAU, a1 = .05 + draw() * .05, a2 = .03 + draw() * .04;
+  for (let i = 0; i < 18; i++) {
+    const a = i / 18 * TAU, r = .9 + a1 * Math.sin(2 * a + p1) + a2 * Math.sin(3 * a + p2) + draw() * .03;
     const x = Math.cos(a) * width * .5 * r, z = Math.sin(a) * depth * .5 * r;
     if (i === 0) outline.moveTo(x, z); else outline.lineTo(x, z);
   }
   outline.closePath();
-  const geometry = new THREE.ExtrudeGeometry(outline, { depth: height, bevelEnabled: true, bevelSegments: 1, bevelSize: .035, bevelThickness: .018, steps: 1 });
+  const geometry = new THREE.ExtrudeGeometry(outline, { depth: height, bevelEnabled: true, bevelSegments: 2, bevelSize: .03, bevelThickness: .02, steps: 1 });
   geometry.rotateX(-Math.PI / 2);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(...p); mesh.rotation.y = angle; mesh.receiveShadow = true; mesh.castShadow = true;
@@ -256,6 +259,7 @@ function addReeds(parent) {
     const centre = pondPoint(t, -.06);
     for (let i = 0; i < 11; i++) {
       const x = centre.x + (random() - .5) * .42, z = centre.y + (random() - .5) * .42, height = .62 + random() * .6;
+      if (nearBridge(x, z, .12)) continue;
       const bend = (random() - .5) * .28, start = new THREE.Vector3(x, .07, z), end = new THREE.Vector3(x + bend, .07 + height, z + bend * .6), d = end.clone().sub(start);
       const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.clone().normalize());
       stalks.push({ p: start.clone().add(end).multiplyScalar(.5).toArray(), s: [.008, d.length(), .008], q: q.toArray(), c: i % 3 ? '#708551' : '#8b9567' });
@@ -299,6 +303,8 @@ function addPondStones(parent) {
   const stones = [], small = [], moss = [], gravel = [];
   for (let i = 0; i < 69; i++) {
     const t = i / 69 * TAU + (random() - .5) * .023, p = pondPoint(t, .05 + random() * .12), width = .32 + random() * .29, h = .14 + random() * .23;
+    // The bridge abutments replace the edging stones where it lands.
+    if (nearBridge(p.x, p.y, .12)) continue;
     stones.push({ p: [p.x, .045 + h * .15, p.y], s: [width, h, .29 + random() * .22], r: [random() * .6, random() * TAU, random() * .3], c: ['#919084', '#8c9284', '#a6a594', '#7c8675', '#b1ab96'][i % 5] });
     if (i % 3 === 0) moss.push({ p: [p.x - .05, .046 + h * .74, p.y + .03], s: [width * .56, .035, .19], r: [0, random() * TAU, .1], c: i % 2 ? '#617849' : '#7a8750' });
     if (i % 2 === 0) {
@@ -317,7 +323,7 @@ function addPondStones(parent) {
   makeBatch(parent, stoneGeometry(901), mat('#ffffff', .91), gravel, { shadow: false });
   // Three large weathered rocks anchor the pond composition; low pebbles fill their bases.
   const boulders = [[9.92, .25, 9.33, .72, .47, .65], [9.95, .19, 9.87, .5, .31, .41], [4.5, .16, 4.34, .63, .36, .51], [4.75, .12, 4.0, .38, .26, .34]];
-  makeBatch(parent, stoneGeometry(703, 1), mat('#8b9382', .95), boulders.map(([x, y, z, sx, sy, sz], i) => ({ p: [x, y, z], s: [sx, sy, sz], r: [.13, i * 1.7, -.12] })));
+  makeBatch(parent, rockGeometry(703), mat('#8b9382', .93), boulders.map(([x, y, z, sx, sy, sz], i) => ({ p: [x, y, z], s: [sx, sy, sz], r: [.13, i * 1.7, -.12] })));
 }
 
 function addPaths(parent) {
