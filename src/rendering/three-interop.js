@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu';
 import {computeConfiguration,createGPUMemoryBudget} from './gpu-policy.js';
 
 /** The ONLY new module touching Three's private backend. Pinned r183 ABI.
- * Raw WGSL is used because the testable fused optical kernel has heterogeneous
+ * Raw WGSL is used because the staged optical kernels has heterogeneous
  * storage/texture bindings. Textures stay on Three's one device/queue; no copy
  * through CPU and no second rendering device. Public StorageTexture owns output.
  */

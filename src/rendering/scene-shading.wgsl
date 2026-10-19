@@ -599,7 +599,7 @@ fn sceneRadianceFromHit(origin: vec3f, direction: vec3f, key: u32, first: SceneH
   res.status = TRANSPARENCY_LIMIT; res.rgb = vec3f(0.0); res.layers = SCENE_MAX_TRANSPARENT_LAYERS + 1u;
   return res;
 }
-/// The fused lens kernel's SceneRadianceProvider: nearest real surface, its
+/// The lens shading stage's SceneRadianceProvider: nearest real surface, its
 /// material and lighting, and a BOUNDED front-to-back composite through
 /// alpha-blended layers along the same ray (no refraction is simulated).
 fn sceneRadiance(origin: vec3f, direction: vec3f, key: u32) -> SceneSample {

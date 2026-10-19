@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import {requiredGPULimits} from '../src/rendering/gpu-policy.js';
 import { buildSanteiScene } from '../src/scene/santei-scene.js';
 import { createDaylight } from '../src/lighting.js';
 import { createLensRig,focusTestLens } from './gpu-fixtures.js';
@@ -12,7 +13,8 @@ const step = l => console.log('[step] ' + l + ' ' + performance.now().toFixed(0)
 const stats = a => { const s = [...a].sort((x, y) => x - y); return { n: s.length, min: s[0], median: s[Math.floor(s.length / 2)], max: s.at(-1), mean: s.reduce((x, y) => x + y, 0) / s.length }; };
 try {
   const adapter = await navigator.gpu.requestAdapter();
-  const renderer = new THREE.WebGPURenderer({ antialias: false, requiredLimits: { maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize, maxBufferSize: adapter.limits.maxBufferSize, maxStorageBuffersPerShaderStage: adapter.limits.maxStorageBuffersPerShaderStage } });
+  const device = await adapter.requestDevice({requiredFeatures:[...adapter.features],requiredLimits:requiredGPULimits(adapter.limits)});
+  const renderer = new THREE.WebGPURenderer({antialias:false,device});
   await renderer.init(); renderer.setSize(W, W / 1.5); renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; renderer.toneMapping = THREE.NoToneMapping;
   const errors = []; renderer.backend.device.addEventListener('uncapturederror', e => { errors.push(e.error.message); step('GPU ERROR ' + e.error.message.split('\n')[0]); });
   let t = performance.now();
@@ -26,8 +28,8 @@ try {
   renderer.setRenderTarget(firstTarget); renderer.render(scene, camera); renderer.setRenderTarget(null); await renderer.backend.device.queue.onSubmittedWorkDone();
   const firstRasterWallMs = performance.now() - t; step('first raster');
   t = performance.now();
-  // ?mode=split selects the two-kernel (lens batch, then scene) integrator for comparison.
-  const rig = await createLensRig({ renderer, scene, camera, width: W, environment: daylight, engineOptions: { ...(q.get('mode') ? { integrationMode: q.get('mode') } : {}), splitStageTiming: q.get('stages') === '1' } });
+  // The staged integrator is the sole production path.
+  const rig = await createLensRig({ renderer, scene, camera, width: W, environment: daylight, engineOptions: { stageTiming: q.get('stages') === '1' } });
   const rigWallMs = performance.now() - t; step('rig');
   const { interop, engine, lighting, sceneResources } = rig;
   const lens = (await (await fetch('/lenses/canon-fl-50mm-f1-8.json')).json()).configurations[0];
@@ -43,7 +45,7 @@ try {
       const a = performance.now(); engine.sample({ batchSpp: 4, targetSpp: 0, ...options }); await interop.device.queue.onSubmittedWorkDone(); wall.push(performance.now() - a);
       await new Promise(r => setTimeout(r, 20)); if (engine.lastTiming) { gpu.push(engine.lastTiming.ms); stages.push(engine.lastTiming); }
     }
-    // ?stages=1 with a split/staged integrator: per-kernel GPU medians (lensMs, traceMs, sceneMs).
+    // ?stages=1 with the staged integrator: per-kernel GPU medians (lensMs, traceMs, sceneMs).
     const stageMs = Object.fromEntries(['lensMs', 'traceMs', 'sceneMs'].filter(k => stages.some(t => t[k] != null)).map(k => [k, stats(stages.map(t => t[k]).filter(v => v != null)).median]));
     const s = await engine.statistics();
     return { gpuTimestampMsPerBatch: gpu.length ? stats(gpu) : null, submitToDoneWallMsPerBatch: stats(wall), raw: { gpu, wall }, stageMs, pathsPerBatch: W * W / 1.5 * 4, attemptedSamples: s.attemptedSamples, spp: engine.spp,

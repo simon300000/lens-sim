@@ -1,7 +1,8 @@
-// Fused lens integrator: pixel/pupil/wavelength sample -> reverse real-lens
+// Shared staged shading/launch helpers and diagnostic reference integration.
+// Reference path: pixel/pupil/wavelength sample -> reverse real-lens
 // trace -> BVH nearest real surface -> material + raster-resource lighting ->
 // RGB->spectral XYZ -> f32 progressive accumulation. One invocation per pixel.
-// Mirror mode: each invocation traces one optical path, then four scene paths.
+// Validation explicitly retraces each quadrant; production uses staged-integrator.js.
 struct RenderParameters {
   cameraToWorld: mat4x4<f32>,
   size: vec4<u32>,      // width, height, batch spp, target attempted spp
@@ -306,8 +307,6 @@ fn integrateMirrors(id:vec3<u32>){
   for(var j=0u;j<min(render.size.z,4u);j++){
     let index=first+j;
     if(render.size.w!=0u&&index>=render.size.w){break;}
-    var sharedOptical:OpticalSample;
-    if(render.debug.x!=4u){sharedOptical=sampleOptical(canonical,index,render.settings.x,vec2<f32>(1));}
     // Only one accumulator is live during the large BVH/shading call. Keeping
     // four full records live, or adding workgroup barriers around that call,
     // can spill registers and erase the optical savings on desktop GPUs.
@@ -317,10 +316,9 @@ fn integrateMirrors(id:vec3<u32>){
       if(mirrorX&&image.x==canonical.x){continue;}
       let pixel=(canonicalLocal.y+select(0u,halfHeight,mirrorY))*render.size.x+image.x;
       var a=accumulation[pixel];
-      var optical=sharedOptical;
       var sign=vec2<f32>(select(1.0,-1.0,mirrorX),select(1.0,-1.0,mirrorY));
       // Matched-sample validation explicitly traces each reflected input ray.
-      if(render.debug.x==4u){optical=sampleOptical(canonical,index,render.settings.x,sign);sign=vec2<f32>(1);}
+      let optical=sampleOptical(canonical,index,render.settings.x,sign);sign=vec2<f32>(1);
       let globalPixel=image.y*render.size.x+image.x;
       let key=spectralHash32(globalPixel^spectralHash32(a.attempts+render.settings.x*0x632be5abu));
       a.attempts++;workCounters[WORK_PATH]++;

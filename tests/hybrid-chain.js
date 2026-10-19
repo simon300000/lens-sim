@@ -4,7 +4,7 @@ import {displayOutputNode,outputRendererOptions,probeHDRCanvas} from '../src/hdr
 import {createLensRig,emitter} from './gpu-fixtures.js';
 /** Minimal integration chain on ONE GPUDevice: Three's own renderer creates a
  * shadow map and a PMREM texture -> the lens bridge binds those textures (no
- * CPU copy) -> the fused compute shades a real BVH hit -> linear HDR result
+ * CPU copy) -> the staged compute shades a real BVH hit -> linear HDR result
  * -> RenderPipeline display. */
 const check=(c,m)=>{if(!c)throw new Error(m);};
 try{

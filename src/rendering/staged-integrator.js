@@ -1,39 +1,36 @@
 import {normalizeShaderEOL,stripWorkCounting} from './shader-source.js';
-/** Derived from the separate lens/scene experiment, adapted to mirrored batches.
+/** Three-stage mirrored integration.
  * One GPU-only lens-space packet per canonical pixel/sample; scene workgroups
  * interleave q0/q1/q2/q3 for each canonical 8x8 block. No CPU ray readback. */
-export const SPLIT_RAY_BYTES=48;
+export const STAGED_RAY_BYTES=48;
 /** Staged mode: one first-hit record per (sample, quadrant) packet. */
-export const SPLIT_HIT_BYTES=32;
-/** staged=true adds a lean traversal kernel between the lens batch and shading:
+export const STAGED_HIT_BYTES=32;
+/** A lean traversal kernel runs between the lens batch and shading:
  * it writes the nearest hit of every optical sample's four quadrant rays, and the
  * scene kernel composites from that record (transparent layers continue inline).
  * The traversal then runs without the shading/optics register footprint. */
-export function splitMirrorSources({integrator,optical,work,intersector,shading,spectral,sampling,pupil,counting=false,staged=false}){
+export function stagedIntegratorSources({integrator,optical,work,intersector,shading,spectral,sampling,pupil,counting=false}){
   integrator=normalizeShaderEOL(integrator);
-  const fused=stripWorkCounting(integrator);
-  const between=(s,a,b)=>{const i=s.indexOf(a),j=s.indexOf(b,i+a.length);if(i<0||j<0)throw new Error(`Split mirror delimiter missing: ${a}/${b}`);return s.slice(i,j);};
-  const types=between(fused,'struct RenderParameters','@group(0) @binding(0)');
+  const source=stripWorkCounting(integrator);
+  const between=(s,a,b)=>{const i=s.indexOf(a),j=s.indexOf(b,i+a.length);if(i<0||j<0)throw new Error(`Staged integrator delimiter missing: ${a}/${b}`);return s.slice(i,j);};
+  const types=between(source,'struct RenderParameters','@group(0) @binding(0)');
   const opticsType=between(optical,'struct OpticsParameters','struct RayResult');
-  const rayAndLaunch=between(fused,'struct OpticalSample','fn accumulateOptical');
+  const rayAndLaunch=between(source,'struct OpticalSample','fn accumulateOptical');
   const rayType=between(rayAndLaunch,'struct OpticalSample','fn sampleOptical');
-  const helpers=between(fused,'const LINEAR_SRGB_TO_XYZ_M','@compute @workgroup_size');
-  let accumulate=between(fused,'fn accumulateOptical','// Reflection has unit absolute Jacobian');
-  if(staged){
-    // Same accumulation, but layer 0 comes from the traversal kernel's record.
-    const signature='fn accumulateOptical(a:ptr<function,PixelAccum>,optical:OpticalSample,sign:vec2<f32>,key:u32){',call='let scene=sceneRadiance(worldOrigin,worldDirection,key);';
-    if(!accumulate.includes(signature)||!accumulate.includes(call))throw new Error('Staged accumulation anchors changed');
-    accumulate=accumulate.replace(signature,'fn accumulateOptical(a:ptr<function,PixelAccum>,optical:OpticalSample,sign:vec2<f32>,key:u32,hit:SceneHit){').replace(call,'let scene=sceneRadianceFromHit(worldOrigin,worldDirection,key,hit);');
-  }
+  const helpers=between(source,'const LINEAR_SRGB_TO_XYZ_M','@compute @workgroup_size');
+  let accumulate=between(source,'fn accumulateOptical','// Reflection has unit absolute Jacobian');
+  // Same accumulation, but layer 0 comes from the traversal kernel's record.
+  const signature='fn accumulateOptical(a:ptr<function,PixelAccum>,optical:OpticalSample,sign:vec2<f32>,key:u32){',call='let scene=sceneRadiance(worldOrigin,worldDirection,key);';
+  if(!accumulate.includes(signature)||!accumulate.includes(call))throw new Error('Staged accumulation anchors changed');
+  accumulate=accumulate.replace(signature,'fn accumulateOptical(a:ptr<function,PixelAccum>,optical:OpticalSample,sign:vec2<f32>,key:u32,hit:SceneHit){').replace(call,'let scene=sceneRadianceFromHit(worldOrigin,worldDirection,key,hit);');
   const hitRecord=`
 struct SceneHitRecord { t:f32, b1:f32, b2:f32, instance:u32, triangle:u32, status:u32, error:u32, front:u32 }
 fn packHit(h:SceneHit)->SceneHitRecord { return SceneHitRecord(h.t,h.b1,h.b2,h.instance,h.triangle,h.status,h.error,select(0u,1u,h.front)); }
 fn unpackHit(r:SceneHitRecord)->SceneHit { var h:SceneHit; h.t=r.t; h.b1=r.b1; h.b2=r.b2; h.instance=r.instance; h.triangle=r.triangle; h.status=r.status; h.error=r.error; h.front=r.front!=0u; h.visits=0u; return h; }
 `;
-  const sceneResources=between(fused,'@group(0) @binding(6)','const LINEAR_SRGB_TO_XYZ_M');
+  const sceneResources=between(source,'@group(0) @binding(6)','const LINEAR_SRGB_TO_XYZ_M');
   const index=`
-// Packet slots enumerate 8x8 blocks of the canonical quadrant, like the fused
-// kernel's workgroups: a warp then covers a compact 8x4 pixel footprint.
+// Packet slots enumerate 8x8 blocks of the canonical quadrant: a warp then covers a compact 8x4 pixel footprint.
 fn mirrorPixel(group:u32,lane:u32,halfWidth:u32)->vec2u {
   let blocksX=(halfWidth+7u)/8u;
   return vec2u((group%blocksX)*8u+lane%8u,(group/blocksX)*8u+lane/8u);
@@ -51,7 +48,7 @@ fn outputIndex(c:vec2u,q:u32)->u32 {
 @group(0) @binding(1) var<storage,read> opticalSurfaces:array<OpticalSurface>;
 @group(0) @binding(2) var<storage,read> glassLut:array<f32>;
 @group(0) @binding(4) var<storage,read> accumulation:array<PixelAccum>;
-@group(0) @binding(21) var<storage,read_write> splitRays:array<OpticalSample>;
+@group(0) @binding(21) var<storage,read_write> stagedRays:array<OpticalSample>;
 `+index+`
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
@@ -67,15 +64,15 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   let batch=min(min(render.size.z,remaining),4u);
   let capacity=render.debug.w*64u;
   for(var j=0u;j<batch;j++){
-    splitRays[j*capacity+packet]=sampleOptical(image,first+j,render.settings.x,vec2f(1));
+    stagedRays[j*capacity+packet]=sampleOptical(image,first+j,render.settings.x,vec2f(1));
   }
 }
 `;
   let scene=work+intersector+shading+spectral+sampling+opticsType+types+rayType+common+`
 @group(0) @binding(4) var<storage,read_write> accumulation:array<PixelAccum>;
 @group(0) @binding(5) var lensImage:texture_storage_2d<rgba16float,write>;
-@group(0) @binding(21) var<storage,read> splitRays:array<OpticalSample>;
-`+(staged?'@group(0) @binding(23) var<storage,read> splitHits:array<SceneHitRecord>;'+hitRecord:'')+sceneResources+helpers+accumulate+index+`
+@group(0) @binding(21) var<storage,read> stagedRays:array<OpticalSample>;
+`+'@group(0) @binding(23) var<storage,read> stagedHits:array<SceneHitRecord>;'+hitRecord+sceneResources+helpers+accumulate+index+`
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
   let sceneWidth=bitcast<u32>(render.pinholeClipToCamera[0].x);
@@ -96,10 +93,10 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   let sign=vec2f(select(1.0,-1.0,mirrorX),select(1.0,-1.0,mirrorY));
   let globalPixel=image.y*render.size.x+image.x;
   for(var j=0u;j<batch;j++){
-    let ray=splitRays[j*capacity+packet];
+    let ray=stagedRays[j*capacity+packet];
     let key=spectralHash32(globalPixel^spectralHash32(a.attempts+render.settings.x*0x632be5abu));
     a.attempts++;workCounters[WORK_PATH]++;
-    accumulateOptical(&a,ray,sign,key${staged?',unpackHit(splitHits[(j*4u+quadrant)*capacity+packet])':''});
+    accumulateOptical(&a,ray,sign,key,unpackHit(stagedHits[(j*4u+quadrant)*capacity+packet]));
   }
   accumulation[pixel]=a;textureStore(lensImage,vec2i(image),resolvePixel(a));
 }
@@ -113,8 +110,8 @@ fn main(@builtin(global_invocation_id) id:vec3u){
 @group(0) @binding(6) var<storage,read> sceneNodes:array<BvhNode>;
 @group(0) @binding(7) var<storage,read> sceneInstances:array<SceneInstance>;
 @group(0) @binding(8) var<storage,read> sceneTriangles:array<SceneTriangle>;
-@group(0) @binding(21) var<storage,read> splitRays:array<OpticalSample>;
-@group(0) @binding(23) var<storage,read_write> splitHits:array<SceneHitRecord>;
+@group(0) @binding(21) var<storage,read> stagedRays:array<OpticalSample>;
+@group(0) @binding(23) var<storage,read_write> stagedHits:array<SceneHitRecord>;
 `+hitRecord+index+`
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
@@ -135,15 +132,15 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   let capacity=render.debug.w*64u;
   let sign=vec2f(select(1.0,-1.0,mirrorX),select(1.0,-1.0,mirrorY));
   for(var j=0u;j<batch;j++){
-    let optical=splitRays[j*capacity+packet];
+    let optical=stagedRays[j*capacity+packet];
     if(optical.status!=0u){continue;}
     let worldOrigin=(render.cameraToWorld*vec4<f32>(optical.p*vec3<f32>(sign,1)*.001,1)).xyz;
     let worldDirection=normalize((render.cameraToWorld*vec4<f32>(optical.v*vec3<f32>(sign,1),0)).xyz);
-    splitHits[(j*4u+quadrant)*capacity+packet]=packHit(sceneIntersect(worldOrigin,worldDirection,0.0,1.0e7));
+    stagedHits[(j*4u+quadrant)*capacity+packet]=packHit(sceneIntersect(worldOrigin,worldDirection,0.0,1.0e7));
   }
 }
 `;
-  if(!counting)return staged?{raygen,trace,scene}:{raygen,scene};
+  if(!counting)return {raygen,trace,scene};
   const blocks=[...integrator.matchAll(/\/\/ WORK-COUNTING-BEGIN[^\n]*\n([\s\S]*?)\/\/ WORK-COUNTING-END/g)].map(m=>m[1]);
   if(blocks.length!==2)throw new Error('Work counter reduction changed');
   const entry='@compute @workgroup_size(8,8)\nfn main(@builtin(global_invocation_id) id:vec3u)';
@@ -159,5 +156,5 @@ ${blocks[1]}
 }
 `;
   };
-  return staged?{raygen:counted(raygen),trace:counted(trace),scene:counted(scene)}:{raygen:counted(raygen),scene:counted(scene)};
+  return {raygen:counted(raygen),trace:counted(trace),scene:counted(scene)};
 }

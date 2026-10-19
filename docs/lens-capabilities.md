@@ -39,7 +39,7 @@ At the fixed upstream SHA, the inspected primary CPU Spot and GPU Spot paths **d
 * The same embedded WGSL `aimGenerated` has up to **two solver seeds** (reference prediction, then paraxial seed) for the **same `uv` / stopGoal**. `aimOpticalUniformQueue` solves pending original slots, then marks unsolved slots failed. This is category B numerical aiming, not category A sample replacement, and must not be deleted on that basis.
 * `js/optics.js`, `aim` (from line 817) likewise retries seeds/Newton for the same requested stop coordinate. Surface `intersect` (around lines 600–625) performs at most 40 Newton iterations and then bounded scan/bisection on the same geometric ray. Those are necessary numerical solves, not attempts to manufacture extra transmitted flux.
 
-This audit concerns the named optical/Spot paths at the recorded commit, not an assertion about every unrelated rendering or visualization routine in upstream. Lens-sim's fused integrator has its own fixed-attempt sampling and tests; no upstream application/backend is loaded at runtime.
+This audit concerns the named optical/Spot paths at the recorded commit, not an assertion about every unrelated rendering or visualization routine in upstream. Lens-sim's staged integrator has its own fixed-attempt sampling and tests; no upstream application/backend is loaded at runtime.
 
 ## Validation
 

@@ -1,4 +1,4 @@
-import {preferredIntegrationMode,preferredOpticalLutReuse} from './integration-mode.js';
+import {preferredOpticalLutReuse} from './optical-lut-policy.js';
 import * as THREE from 'three/webgpu';
 import { texture, screenUV, uniform, vec2, vec4, step, mix } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
@@ -427,7 +427,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
       update({lenses:manifest.lenses.map(l=>({id:l.id,name:l.name,brand:l.brand??null,available:l.supported,reason:l.reason,
         validation:l.validation,surfaceCount:l.surfaceCount,focalLengthMm:catalogueFocalLengthMm(l)})),source:manifest.source});
       await onProgress(8,'编译真实镜组、光谱采样与自动对焦');
-      engine=await createOpticalEngine({interop,sceneResources,lighting,integrationMode:preferredIntegrationMode(adapterInfo),chunkTiming:'queue',opticalLutReuse:preferredOpticalLutReuse(adapterInfo),width:state().sampling.resolution});
+      engine=await createOpticalEngine({interop,sceneResources,lighting,chunkTiming:'queue',opticalLutReuse:preferredOpticalLutReuse(adapterInfo),width:state().sampling.resolution});
       if(workCounting)setWorkCounting(true).catch(error=>console.warn('Work counting unavailable',error));
       await loadLens(manifest.defaultId);displayGraph();displayChanged();
       await build;
