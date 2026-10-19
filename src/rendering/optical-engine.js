@@ -16,10 +16,10 @@ import { buildPupilTable, PUPIL_TABLE_BYTES } from '../optics/pupil-sampling.js'
 import pupilSource from '../optics/pupil-sampling.wgsl?raw';
 import { packLens } from '../optics/lens-state.js';
 import { createComputeTimer,timestampSpanMs } from './three-interop.js';
-import { imagePlan, sampleBudget, PIXEL_BYTES } from './sampling-plan.js';
+import { imagePlan, sampleBudget, PIXEL_BYTES, ROUND_SPP_LIMIT, roundSppWGSL } from './sampling-plan.js';
 import { WORK_COUNTERS } from './work-model.js';
 import { createChunkBudget,chunkDispatch } from './adaptive-chunks.js';
-import {stagedIntegratorSources,STAGED_RAY_BYTES,STAGED_HIT_BYTES} from './staged-integrator.js';
+import {stagedIntegratorSources,STAGED_RAY_BYTES,STAGED_HIT_BYTES,STAGED_SCRATCH_BYTES} from './staged-integrator.js';
 
 export const DIAGNOSTIC_MODES=Object.freeze({beauty:0,'scene-error':1,status:2,'geometry-depth':3,'geometry-normal':4,'geometry-material':5});
 // Modes >= 3 change what is accumulated (debug RGB), so switching resets accumulation.
@@ -27,7 +27,7 @@ export const ACCUMULATING_DIAGNOSTICS=Object.freeze(['geometry-depth','geometry-
 const diagnosticIndex=mode=>DIAGNOSTIC_MODES[mode]??0;
 const uniformBinding=(binding,buffer)=>({binding,resource:{buffer}});
 
-export async function createOpticalEngine({interop,sceneResources,lighting,width=480,accumulationBindingBytes=Infinity,stageTiming=false,chunkTiming='timestamp',opticalLutReuse=false,stagedRayBufferBytes=64*1024**2}) {
+export async function createOpticalEngine({interop,sceneResources,lighting,width=480,accumulationBindingBytes=Infinity,stageTiming=false,chunkTiming='timestamp',opticalLutReuse=false,stagedRayBufferBytes=STAGED_SCRATCH_BYTES,roundSppLimit=ROUND_SPP_LIMIT}) {
   const started=performance.now(),{device}=interop;
   const opticalSource=opticalSourceForLutPolicy(rawOpticalSource,opticalLutReuse);
   const statisticsConfig=statisticsConfiguration(device.limits);
@@ -52,12 +52,12 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   const WORK_SAMPLE_EVERY=4;let workRound=0,roundCounted=false;
   // Independent/pinhole rays and explicit quadrant retracing are diagnostic
   // references; production mirror batches always use the three staged passes.
-  const sampleSource=WORK_COUNTERS_WGSL+opticalSource+SCENE_INTERSECTOR_WGSL+SCENE_SHADING_WGSL+SPECTRAL_WGSL+SAMPLING_WGSL+pupilSource;
+  const sampleSource=roundSppWGSL(roundSppLimit)+WORK_COUNTERS_WGSL+opticalSource+SCENE_INTERSECTOR_WGSL+SCENE_SHADING_WGSL+SPECTRAL_WGSL+SAMPLING_WGSL+pupilSource;
   const stripped=stripWorkCounting(rawIntegratorSource);
   const entry='if(render.debug.x>=2u){integrateMirrors(id);}else{integratePixel(id);}';
   const independentSource=stripped.replace(entry,'integratePixel(id);');
   const validationSource=stripped.replace(entry,'integrateMirrors(id);');
-  const stagedSources=stagedIntegratorSources({integrator:rawIntegratorSource,optical:opticalSource,work:WORK_COUNTERS_WGSL,intersector:SCENE_INTERSECTOR_WGSL,shading:SCENE_SHADING_WGSL,spectral:SPECTRAL_WGSL,sampling:SAMPLING_WGSL,pupil:pupilSource});
+  const stagedSources=stagedIntegratorSources({integrator:rawIntegratorSource,optical:opticalSource,work:WORK_COUNTERS_WGSL,intersector:SCENE_INTERSECTOR_WGSL,shading:SCENE_SHADING_WGSL,spectral:SPECTRAL_WGSL,sampling:SAMPLING_WGSL,pupil:pupilSource,roundSppLimit});
   const jobs=[
     ['sample',sampleSource+independentSource,'Independent/pinhole validation reference'],
     ...Object.entries(stagedSources).map(([name,code])=>['staged_'+name,code,'Staged '+name+' batch']),
@@ -122,16 +122,19 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     if(tiles.length){const encoder=device.createCommandEncoder();for(const tile of tiles)encoder.clearBuffer(tile.buffer);device.queue.submit([encoder.finish()]);}
   }
   function stagedRayBytes(plan){
-    const packetBytes=64*4*STAGED_RAY_BYTES;
+    const packetBytes=64*roundSppLimit*STAGED_RAY_BYTES;
     const groups=Math.max(...plan.tiles.map(t=>Math.ceil(Math.ceil(plan.width/2)/8)*Math.ceil(t.halfHeight/8)));
-    // Staged mode also holds 16 hit records per packet slot (8/3 of the ray bytes), so its
-    // scratch is capped lower: at most 64 MiB of rays + ~171 MiB of hits.
-    const scratch=Math.min(stagedRayBufferBytes,64*1024**2);
-    const cap=Math.floor(Math.min(Math.max(64*4*STAGED_RAY_BYTES,scratch),device.limits.maxBufferSize,device.limits.maxStorageBufferBindingSize)/packetBytes);
+    // A round larger than the scratch is split into chunks, and every chunk pays three
+    // kernel launches plus their drain tails, so the scratch bounds throughput on large
+    // images (RTX 4090, 4 spp rounds, GPU ms per spp of the whole frame: 2560 px 7.4 at
+    // 64 MiB, 6.9 at 128, 6.4 at 256 and flat beyond; 45 MP 76 / 65 / 62 / 60 at 512).
+    // Hit records take another 8/3 of the ray bytes; both buffers must fit the device limits.
+    const limit=Math.min(device.limits.maxBufferSize,device.limits.maxStorageBufferBindingSize);
+    const cap=Math.floor(Math.min(Math.max(packetBytes,stagedRayBufferBytes),limit,limit*3/8)/packetBytes);
     return Math.min(groups,cap)*packetBytes;
   }
-  /** Staged mode: 4 quadrant hit records per optical sample (16 records per packet slot). */
-  function stagedHitBytes(plan){return stagedRayBytes(plan)/(4*STAGED_RAY_BYTES)*16*STAGED_HIT_BYTES;}
+  /** Staged mode: 4 quadrant hit records per optical sample. */
+  function stagedHitBytes(plan){return stagedRayBytes(plan)/STAGED_RAY_BYTES*4*STAGED_HIT_BYTES;}
   function allocate(nextWidth){
     const plan=imagePlan(nextWidth,imageLimits,{paired:true}),buffers=[];let output,rayBuffer,hitBuffer;
     interop.memoryBudget?.assertAdditional(plan.memoryBytes+(stagedRayBytes(plan)+stagedHitBytes(plan)),'新旧图像并存的分配峰值');
@@ -264,7 +267,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       if(!counting)return workSupported?'off':'unsupported';
       if(!stagedCountingPipelines){
         stagedCountingCompile??=(async()=>{
-          const sources=stagedIntegratorSources({integrator:rawIntegratorSource,optical:opticalSource,work:WORK_COUNTERS_WGSL,intersector:SCENE_INTERSECTOR_WGSL,shading:SCENE_SHADING_WGSL,spectral:SPECTRAL_WGSL,sampling:SAMPLING_WGSL,pupil:pupilSource,counting:true});
+          const sources=stagedIntegratorSources({integrator:rawIntegratorSource,optical:opticalSource,work:WORK_COUNTERS_WGSL,intersector:SCENE_INTERSECTOR_WGSL,shading:SCENE_SHADING_WGSL,spectral:SPECTRAL_WGSL,sampling:SAMPLING_WGSL,pupil:pupilSource,counting:true,roundSppLimit});
           const results=await Promise.allSettled(Object.entries(sources).map(async([name,code])=>[name,await interop.computePipeline(code,'Staged '+name+' + work counters')]));
           const failed=results.find(r=>r.status==='rejected');if(failed)throw failed.reason;
           return Object.fromEntries(results.map(r=>r.value));
@@ -297,7 +300,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       bindScene();
       if(!tiles[0]?.sample)throw new Error('场景 BVH、光照资源或镜头尚未准备');
       // Complete every storage tile before advancing the global spp counter.
-      const budget=(tileCursor||groupCursor)?roundBudget:sampleBudget(spp,targetSpp,batchSpp);if(!budget)return false;
+      const budget=(tileCursor||groupCursor)?roundBudget:sampleBudget(spp,targetSpp,batchSpp,roundSppLimit);if(!budget)return false;
       if(tileCursor===0&&groupCursor===0){
         roundTarget=targetSpp;roundCounted=workRound++%WORK_SAMPLE_EVERY===0;
         // Paired storage bands own all four destinations, even on GPUs whose

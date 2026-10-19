@@ -137,8 +137,8 @@ fn integratePixel(id:vec3<u32>){
   let remaining=select(render.size.w-min(render.size.w,a.attempts),0xffffffffu-a.attempts,render.size.w==0u);
   let batch=min(render.size.z,remaining);
   let geometryMode=render.settings.y>=MODE_GEOMETRY_DEPTH;
-  // batch <= 4 is a runtime value, so this loop is not unrolled.
-  for(var j=0u;j<min(batch,4u);j++){
+  // batch <= ROUND_SPP_LIMIT is a runtime value, so this loop is not unrolled.
+  for(var j=0u;j<min(batch,ROUND_SPP_LIMIT);j++){
     let index=a.attempts;
     workCounters[WORK_PATH]++;
     let globalPixel=imageY*render.size.x+imageX;
@@ -301,7 +301,7 @@ fn integrateMirrors(id:vec3<u32>){
   if(chunkGroup>=render.debug.w||canonicalLocal.x>=halfWidth||canonicalLocal.y>=halfHeight){return;}
   let canonical=canonicalLocal+vec2<u32>(0,render.settings.w);
   let first=accumulation[canonicalLocal.y*render.size.x+canonical.x].attempts;
-  for(var j=0u;j<min(render.size.z,4u);j++){
+  for(var j=0u;j<min(render.size.z,ROUND_SPP_LIMIT);j++){
     let index=first+j;
     if(render.size.w!=0u&&index>=render.size.w){break;}
     // Only one accumulator is live during the large BVH/shading call. Keeping

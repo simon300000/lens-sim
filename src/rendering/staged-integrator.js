@@ -1,15 +1,22 @@
 import {normalizeShaderEOL,stripWorkCounting} from './shader-source.js';
+import {ROUND_SPP_LIMIT,roundSppWGSL} from './sampling-plan.js';
 /** Three-stage mirrored integration.
  * One GPU-only lens-space packet per canonical pixel/sample; scene workgroups
  * interleave q0/q1/q2/q3 for each canonical 8x8 block. No CPU ray readback. */
 export const STAGED_RAY_BYTES=48;
-/** Staged mode: one first-hit record per (sample, quadrant) packet. */
+/** Staged mode: one first-hit record per (sample, quadrant) packet. A packet slot holds
+ * ROUND_SPP_LIMIT samples of one canonical pixel, each with four quadrant hits. */
 export const STAGED_HIT_BYTES=32;
+/** Default bound on the lens-sample packet scratch; the hit records add 8/3 of it (so
+ * 256 MiB of packets + ~683 MiB of hits at most). Images whose 4 spp round is smaller
+ * allocate only what the round needs (a 1920-wide frame: 118 + 315 MiB). */
+export const STAGED_SCRATCH_BYTES=256*1024**2;
 /** A lean traversal kernel runs between the lens batch and shading:
  * it writes the nearest hit of every optical sample's four quadrant rays, and the
  * scene kernel composites from that record (transparent layers continue inline).
  * The traversal then runs without the shading/optics register footprint. */
-export function stagedIntegratorSources({integrator,optical,work,intersector,shading,spectral,sampling,pupil,counting=false}){
+export function stagedIntegratorSources({integrator,optical,work,intersector,shading,spectral,sampling,pupil,counting=false,roundSppLimit=ROUND_SPP_LIMIT}){
+  work=roundSppWGSL(roundSppLimit)+work;
   integrator=normalizeShaderEOL(integrator);
   const source=stripWorkCounting(integrator);
   const between=(s,a,b)=>{const i=s.indexOf(a),j=s.indexOf(b,i+a.length);if(i<0||j<0)throw new Error(`Staged integrator delimiter missing: ${a}/${b}`);return s.slice(i,j);};
@@ -61,7 +68,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   let image=c+vec2u(0,render.settings.w);
   let first=accumulation[outputIndex(c,0u)].attempts;
   let remaining=select(render.size.w-min(render.size.w,first),0xffffffffu-first,render.size.w==0u);
-  let batch=min(min(render.size.z,remaining),4u);
+  let batch=min(min(render.size.z,remaining),ROUND_SPP_LIMIT);
   let capacity=render.debug.w*64u;
   for(var j=0u;j<batch;j++){
     stagedRays[j*capacity+packet]=sampleOptical(image,first+j,render.settings.x,vec2f(1));
@@ -88,7 +95,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   if(mirrorX&&image.x==c.x){return;}
   let pixel=outputIndex(c,quadrant);var a=accumulation[pixel];
   let remaining=select(render.size.w-min(render.size.w,a.attempts),0xffffffffu-a.attempts,render.size.w==0u);
-  let batch=min(min(render.size.z,remaining),4u);
+  let batch=min(min(render.size.z,remaining),ROUND_SPP_LIMIT);
   let capacity=render.debug.w*64u;
   let sign=vec2f(select(1.0,-1.0,mirrorX),select(1.0,-1.0,mirrorY));
   let globalPixel=image.y*render.size.x+image.x;
@@ -128,7 +135,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   if(mirrorX&&image.x==c.x){return;}
   let attempts=accumulation[outputIndex(c,quadrant)].attempts;
   let remaining=select(render.size.w-min(render.size.w,attempts),0xffffffffu-attempts,render.size.w==0u);
-  let batch=min(min(render.size.z,remaining),4u);
+  let batch=min(min(render.size.z,remaining),ROUND_SPP_LIMIT);
   let capacity=render.debug.w*64u;
   let sign=vec2f(select(1.0,-1.0,mirrorX),select(1.0,-1.0,mirrorY));
   for(var j=0u;j<batch;j++){

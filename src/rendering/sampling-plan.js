@@ -20,5 +20,9 @@ export function imagePlan(width, limits, { paired = false } = {}) {
   }else for (let y = 0; y < h; y += rows) tiles.push({ y, height: Math.min(rows, h - y), bytes: w * Math.min(rows, h - y) * PIXEL_BYTES });
   return { width: w, height: h, tiles, memoryBytes: w * h * (PIXEL_BYTES + 8) };
 }
-export const sampleBudget = (spp, target, batch) => Math.min(4, Math.max(1, batch), target === 0 ? 4 : Math.max(0, target - spp));
+/** Samples per pixel one accumulation round may add: the staged packet slot holds this
+ * many optical samples per canonical pixel, and the fused kernels loop over as many. */
+export const ROUND_SPP_LIMIT = 4;
+export const roundSppWGSL = (limit = ROUND_SPP_LIMIT) => `const ROUND_SPP_LIMIT: u32 = ${limit}u;\n`;
+export const sampleBudget = (spp, target, batch, limit = ROUND_SPP_LIMIT) => Math.min(limit, Math.max(1, batch), target === 0 ? limit : Math.max(0, target - spp));
 export const hasSamplesRemaining = (spp, target) => target === 0 || spp < target;
