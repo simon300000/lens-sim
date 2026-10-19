@@ -190,13 +190,17 @@ async function createScene(){
   pipeline.outputNode=displayOutputNode(vec4(beauty.rgb.add(glare.rgb.div(cameraExposure)),beauty.a),cameraExposure,hdr.supported);
 
   const renderBeauty=pipeline.render.bind(pipeline);
+  // Warm every optional pass before recording bundles, even when saved quality
+  // settings disable it. First use of an RTT initializes/replaces its GPU texture;
+  // recording beauty against the earlier placeholder leaves invalid bindings.
+  let warmingRasterEffects=true;
   // Water reflection off: the reflector's per-frame scene render is skipped for
   // raster frames only (the lens lighting refresh restores it) and its
   // contribution is zeroed in the water material.
   const waterDescriptor=garden.water?lensMaterial(garden.water.material):null,reflectorBase=waterDescriptor?.reflector?.reflector??null;
   pipeline.render=()=>{
-    if(rasterQuality.ambientOcclusion)rasterAO.prepare();
-    if(reflectorBase)reflectorBase.updateBeforeType=rasterQuality.reflection?THREE.NodeUpdateType.FRAME:THREE.NodeUpdateType.NONE;
+    if(warmingRasterEffects||rasterQuality.ambientOcclusion)rasterAO.prepare();
+    if(reflectorBase)reflectorBase.updateBeforeType=(warmingRasterEffects||rasterQuality.reflection)?THREE.NodeUpdateType.FRAME:THREE.NodeUpdateType.NONE;
     try{renderBeauty();}finally{if(reflectorBase)reflectorBase.updateBeforeType=THREE.NodeUpdateType.FRAME;}
     bundles.frameRendered();
   };
@@ -282,6 +286,7 @@ async function createScene(){
   await warm();
   await renderer.backend.device.queue.onSubmittedWorkDone();
   // Every variant is compiled: from here on the static scene replays bundles.
+  warmingRasterEffects=false;
   bundles.enable();
   hybrid=await createHybridRuntime({renderer,scene,camera,adapterInfo:adapter.info,rasterPipeline:pipeline,rasterBeauty:beauty,rasterGlare:glare,refreshContext:()=>passReuse.beautyContext,cameraExposure,hdr,environment:daylight,requestFrame:wake,
     onOutputState:mode=>{outputStatus.textContent=mode==='hdr'?'HDR':'SDR';sceneElement.dataset.outputMode=mode;},
