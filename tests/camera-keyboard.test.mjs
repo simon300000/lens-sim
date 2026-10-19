@@ -79,6 +79,26 @@ test('left drag looks around in place', () => {
   assert.ok(dir.x < dir0.x, 'grab semantics: dragging right turns the view left');
 });
 
+test('pointer look follows the hand in the same event, without smoothing lag', () => {
+  const { camera, pointer, rig } = setup();
+  let changes = 0; rig.addEventListener('change', () => changes++);
+  const dir0 = camera.getWorldDirection(new Vector3());
+  pointer('pointerdown', { clientX: 600, clientY: 400 });
+  pointer('pointermove', { clientX: 700, clientY: 400 });
+  const afterMove = camera.getWorldDirection(new Vector3());
+  assert.ok(afterMove.angleTo(dir0) > 0.05, 'the camera turned before any update()');
+  assert.equal(changes, 1, 'one change event per move');
+  rig.update(1 / 60);
+  assert.ok(camera.getWorldDirection(new Vector3()).angleTo(afterMove) < 1e-9, 'nothing left to smooth');
+  // Arrow keys keep the smoothed, rate-limited turn.
+  const second = setup();
+  second.key('keydown', 'ArrowLeft');
+  const before = second.camera.getWorldDirection(new Vector3());
+  second.rig.update(1 / 60);
+  const after = second.camera.getWorldDirection(new Vector3());
+  assert.ok(after.angleTo(before) > 0 && after.angleTo(before) < 1.1 / 60, 'arrow turn is rate limited and eased');
+});
+
 test('wheel dollies toward the picked surface without passing it', () => {
   const surface = new Vector3(0, 1, 0);
   const pick = (raycaster) => { const d = raycaster.ray.origin.distanceTo(surface); return { point: raycaster.ray.at(d, new Vector3()), distance: d }; };

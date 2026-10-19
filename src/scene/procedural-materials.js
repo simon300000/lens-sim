@@ -1,4 +1,4 @@
-import { vec2, vec3, positionWorld, sin, cos, normalMap, reflector, dot, normalize, cameraPosition, pow, mx_noise_float, materialColor, mix, smoothstep, min, select, float } from 'three/tsl';
+import { vec2, vec3, positionWorld, sin, cos, normalMap, reflector, dot, normalize, cameraPosition, pow, mx_noise_float, materialColor, mix, smoothstep, min, select, float, uniform } from 'three/tsl';
 import { MEADOW, WATER, GRAVEL } from './procedural-params.js';
 import { bumpNormal } from '../kit.js';
 import { setLensMaterial, PROCEDURAL } from './lens-registry.js';
@@ -47,10 +47,14 @@ export function applyWaterSurface(water) {
   mirror.uvNode = mirror.uvNode.add(vec2(ripples.mul(W.reflectionUVOffset[0]), ripples.mul(W.reflectionUVOffset[1])));
   const view = normalize(cameraPosition.sub(positionWorld));
   const fresnel = pow(dot(view, vec3(0, 1, 0)).clamp(0, 1).oneMinus(), W.fresnelPower).mul(W.fresnelScale).add(W.fresnelBias);
-  material.emissiveNode = mirror.rgb.mul(fresnel).mul(W.reflectionGain);
+  // Raster quality setting: 0 hides the (then no longer updated) reflection in
+  // the raster preview only. The lens evaluator composes the reflection itself
+  // from the reflector target that lighting-resources keeps refreshing.
+  const rasterReflection = uniform(1);
+  material.emissiveNode = mirror.rgb.mul(fresnel).mul(W.reflectionGain).mul(rasterReflection);
   material.opacity = W.opacity;
   // The lens evaluator samples this reflector's render target for the main
   // camera: a reference-view planar reflection, not traced reflection rays.
-  setLensMaterial(material, { kind: PROCEDURAL.WATER, reflector: mirror });
+  setLensMaterial(material, { kind: PROCEDURAL.WATER, reflector: mirror, rasterReflection });
   return mirror;
 }

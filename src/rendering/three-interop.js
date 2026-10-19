@@ -67,6 +67,61 @@ export function installSharedInstancing(renderer){
   }
 }
 
+/** Make Three's render bundles usable for a scene that is drawn by several
+ * passes. r183 caches one GPURenderBundle per (BundleGroup, camera), yet a
+ * bundle is only valid for the colour/depth formats and sample count of the
+ * pass it was recorded in: the same group and camera are drawn here into the
+ * normal/depth prepass, the 4x MSAA beauty target, the lens lighting refresh
+ * target and shadow maps. The bundle registry is keyed by the current render
+ * context as well. r183 also executes recorded bundles when the pass ends,
+ * i.e. after Three's directly drawn transparent objects (water, lantern
+ * paper, Moon), which would blend them over an incomplete frame; bundles are
+ * executed as soon as they are added instead, before the direct draws, and
+ * the backend's redundant-state tracking is reset because executeBundles
+ * clears the pass state. Pinned to r183 (RenderBundles, WebGPUBackend);
+ * idempotent; call after renderer.init(). */
+export function installRenderBundleContexts(renderer){
+  if(THREE.REVISION!=='183')throw new Error(`Render bundle contexts require tested Three r183; got ${THREE.REVISION}`);
+  const bundles=renderer._bundles,backend=renderer.backend;
+  if(!bundles?.bundles||typeof backend?.addBundle!=='function'||typeof backend.get!=='function')throw new Error('Render bundle contexts require the initialized WebGPU renderer (Three r183)');
+  if(!bundles.get.bundleContexts){
+    const keys=[],records=new Set();
+    function get(bundleGroup,camera){
+      const context=renderer._currentRenderContext;
+      if(!context)throw new Error('Render bundle requested outside of a render context');
+      keys[0]=bundleGroup;keys[1]=camera;keys[2]=context;
+      let bundle=this.bundles.get(keys);
+      // RenderBundle (not exported by three/webgpu) is a plain {bundleGroup, camera} record used as a backend data key.
+      if(bundle===undefined){bundle={bundleGroup,camera,renderContext:context};this.bundles.set(keys,bundle);records.add(bundle);}
+      keys[0]=keys[1]=keys[2]=null;
+      return bundle;
+    }
+    get.bundleContexts=true;get.records=records;
+    bundles.get=get;
+    const dispose=bundles.dispose.bind(bundles);
+    bundles.dispose=()=>{records.clear();dispose();};
+  }
+  if(!backend.addBundle.bundleContexts){
+    function addBundle(renderContext,bundle){
+      const data=this.get(renderContext);
+      data.currentPass.executeBundles([this.get(bundle).bundleGPU]);
+      data.currentSets={attributes:{},bindingGroups:[],pipeline:null,index:null};
+    }
+    addBundle.bundleContexts=true;
+    backend.addBundle=addBundle;
+  }
+  return {
+    /** Force re-recording of the bundles whose record ({bundleGroup, camera, renderContext})
+     * matches, e.g. only the beauty pass after its AO texture was recreated. */
+    invalidate(predicate=()=>true){
+      let count=0;
+      for(const record of bundles.get.records){if(predicate(record)){backend.get(record).version=-1;count++;}}
+      return count;
+    },
+    get recorded(){return bundles.get.records.size;},
+  };
+}
+
 /** The ONLY module touching Three's private backend and node internals. Pinned r183 ABI.
  * Raw WGSL is used because the staged optical kernels have heterogeneous
  * storage/texture bindings. Textures stay on Three's one device/queue; no copy

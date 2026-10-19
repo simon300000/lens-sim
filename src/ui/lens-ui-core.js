@@ -20,7 +20,7 @@ const COMMAND_LABELS = {
   setFocusDistance: '对焦距离', setImageDistance: '像距', autofocus: 'AF-S', setAutoFocusOnRelease: '松手自动对焦',
   setTargetSpp: '目标 spp', setResolution: '分辨率', setPaused: '暂停/继续', reset: '重置采样',
   setDispersion: '色散', setExposureEV: '显示曝光', setBloom: 'Bloom', setDiagnostic: '诊断视图', setOutput: '输出',
-  rebuildScene: '重新扫描场景', exportImage: '保存图片', loadCustomLens: '载入编辑处方',
+  rebuildScene: '重新扫描场景', exportImage: '保存图片', loadCustomLens: '载入编辑处方', setRasterQuality: '光栅画质',
 };
 /** Slider-like commands coalesce to the latest value while one is in flight. */
 const COALESCED = new Set(['setFNumber', 'setFocusDistance', 'setImageDistance', 'setExposureEV', 'setTargetSpp',
@@ -198,6 +198,15 @@ export function createLensUI({ store, container, liveStats = null } = {}) {
         hint('diagHint'),
         radios('output', '输出', [['auto', OUTPUT_LABELS.auto, '显示链路支持时输出 HDR'], ['sdr', OUTPUT_LABELS.sdr, '强制 SDR 色调映射']]),
         hint('outputHint')),
+
+      // Raster preview quality for slower devices; lens tracing is unaffected.
+      group('rasterGroup', '光栅画质', 'rasterValue',
+        radios('rasterRatio', '渲染分辨率', [['auto', '自动', '随屏幕像素密度，最高 1.5×'], ['1', '1.0×', '每个 CSS 像素一个采样'], ['0.75', '0.75×', '低分辨率，适合较慢的 GPU']]),
+        h('div', { class: 'lu-row lu-row-split' },
+          check('rasterAO', '环境光遮蔽', { title: 'GTAO 屏幕空间环境光遮蔽（含法线/深度预通道）' }),
+          check('rasterReflection', '水面反射', { title: '每帧从水面镜像视点再绘制一次场景' })),
+        check('rasterAdaptive', '移动时自动降低分辨率', { title: '仅在相机移动且 GPU 来不及时降低像素比例，停止后恢复' }),
+        hint('rasterHint', '只影响光栅预览与导航流畅度；镜头追迹的分辨率、阴影与反射不受影响。设置保存在本机浏览器。')),
 
       h('details', { class: 'lu-details' },
         h('summary', { text: '物理范围与局限' }),
@@ -405,6 +414,10 @@ export function createLensUI({ store, container, liveStats = null } = {}) {
   });
   on(refs.evZero, 'click', () => run('setExposureEV', 0));
   on(refs.bloom, 'change', () => run('setBloom', refs.bloom.checked));
+  for (const radio of radioInputs('rasterRatio')) on(radio, 'change', () => radio.checked && run('setRasterQuality', { pixelRatio: radio.value }));
+  on(refs.rasterAO, 'change', () => run('setRasterQuality', { ambientOcclusion: refs.rasterAO.checked }));
+  on(refs.rasterReflection, 'change', () => run('setRasterQuality', { reflection: refs.rasterReflection.checked }));
+  on(refs.rasterAdaptive, 'change', () => run('setRasterQuality', { adaptiveResolution: refs.rasterAdaptive.checked }));
   on(refs.diagSelect, 'change', () => run('setDiagnostic', refs.diagSelect.value));
 
   on(refs.errors, 'click', (event) => {
@@ -989,6 +1002,21 @@ export function createLensUI({ store, container, liveStats = null } = {}) {
       setDisabled(radio, !enabled('setOutput'));
     }
     refs.outputHint.textContent = `实际输出：${ACTUAL_OUTPUT_LABELS[display.actualOutput] || display.actualOutput || '待定'}`;
+
+    // Raster quality
+    const raster = state.raster || {};
+    const rasterEnabled = enabled('setRasterQuality');
+    for (const radio of radioInputs('rasterRatio')) {
+      radio.checked = radio.value === String(raster.pixelRatio ?? 'auto');
+      setDisabled(radio, !rasterEnabled);
+    }
+    for (const [ref, key] of [['rasterAO', 'ambientOcclusion'], ['rasterReflection', 'reflection'], ['rasterAdaptive', 'adaptiveResolution']]) {
+      refs[ref].checked = raster[key] !== false;
+      setDisabled(refs[ref], !rasterEnabled);
+    }
+    const reduced = [raster.pixelRatio && raster.pixelRatio !== 'auto' ? `${raster.pixelRatio}×` : null, raster.ambientOcclusion === false ? '无 AO' : null,
+      raster.reflection === false ? '无反射' : null].filter(Boolean);
+    refs.rasterValue.textContent = reduced.length ? reduced.join(' · ') : '完整';
 
     renderScene();
     renderDiagnostics(d, sampling);

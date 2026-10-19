@@ -47,9 +47,12 @@ export async function installURLState({camera,controls,store,requestFrame,window
     }
   }catch(error){console.warn('无法完全恢复 URL 中的镜头状态：',error);}
 
-  let timer=null,disposed=false,lastOptics='';
+  const IDLE_WRITE_DELAY_MS=1000;
+  let timer=null,disposed=false,lastOptics='',interacting=Boolean(controls.active);
+  const active=()=>interacting||Boolean(controls.active);
+  function cancel(){win.clearTimeout(timer);timer=null;}
   function write(){
-    timer=null;if(disposed)return;
+    timer=null;if(disposed||active())return;
     const state=store.getState();
     if(state.status!=='ready'||state.af.status==='busy')return;
     const url=new URL(win.location.href);
@@ -68,16 +71,21 @@ export async function installURLState({camera,controls,store,requestFrame,window
     }
     if(url.href!==win.location.href)win.history.replaceState(win.history.state,'',url.href);
   }
-  function schedule(){win.clearTimeout(timer);timer=win.setTimeout(write,200);}
+  // A pause between pointer events is not the end of a drag. Avoid history
+  // writes (and timer churn) until the rig has released input AND settled.
+  function schedule(){cancel();if(!disposed&&!active())timer=win.setTimeout(write,IDLE_WRITE_DELAY_MS);}
+  function start(){interacting=true;cancel();}
+  function end(){interacting=false;schedule();}
   const unsubscribe=store.subscribe(state=>{
     const key=JSON.stringify([state.status,state.af.status,state.lensId,state.configurationIndex,
       state.optics.focusDistanceM,state.optics.focusDistanceKnown,state.optics.imageDistanceMm,state.optics.fNumber]);
     if(key!==lastOptics){lastOptics=key;schedule();}
   });
   controls.addEventListener('change',schedule);
-  const flush=()=>{win.clearTimeout(timer);write();};
-  win.addEventListener('pagehide',flush);
+  controls.addEventListener('start',start);
+  controls.addEventListener('end',end);
+  win.addEventListener('pagehide',cancel);
   // The restored view is displayed by the normal render scheduler.
   requestFrame();
-  return {dispose(){flush();disposed=true;win.clearTimeout(timer);unsubscribe();controls.removeEventListener('change',schedule);win.removeEventListener('pagehide',flush);}};
+  return {dispose(){disposed=true;cancel();unsubscribe();controls.removeEventListener('change',schedule);controls.removeEventListener('start',start);controls.removeEventListener('end',end);win.removeEventListener('pagehide',cancel);}};
 }

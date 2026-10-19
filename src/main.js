@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { pass, mrt, normalView, vec4, Fn, float, builtinAOContext, uniform } from 'three/tsl';
+import { pass, mrt, normalView, vec4, Fn, float, mix, builtinAOContext, uniform } from 'three/tsl';
 import { ao } from 'three/addons/tsl/display/GTAONode.js';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import { buildSanteiScene } from './scene/santei-scene.js';
@@ -18,7 +18,11 @@ import { installURLState } from './url-state.js';
 import { createCameraRig, createScenePicker } from './camera-controls.js';
 import { installSceneCard } from './ui/scene-card.js';
 import {requiredGPULimits} from './rendering/gpu-policy.js';
-import { installSharedInstancing } from './rendering/three-interop.js';
+import { installSharedInstancing, installRenderBundleContexts } from './rendering/three-interop.js';
+import { bundleStaticContent } from './scene/render-bundles.js';
+import { createMotionQuality } from './rendering/motion-quality.js';
+import { loadRasterQuality, saveRasterQuality, rasterPixelRatio } from './rendering/raster-quality.js';
+import { lensMaterial } from './scene/lens-registry.js';
 import { installUserModels } from './user-model.js';
 
 const faults=[];
@@ -48,8 +52,14 @@ async function createScene(){
   }
   // One shader build per material for every instanced batch (see three-interop).
   installSharedInstancing(renderer);
+  // Static scene passes replay recorded render bundles (see scene/render-bundles).
+  installRenderBundleContexts(renderer);
   const disposeActiveLights=installActiveLightNodes(renderer);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));
+  // Raster preview quality (lens panel → 光栅画质) persists per browser.
+  let rasterQuality=loadRasterQuality(window.localStorage);
+  const pixelRatioFor=settings=>rasterPixelRatio(settings.pixelRatio,window.devicePixelRatio);
+  let basePixelRatio=pixelRatioFor(rasterQuality),savedRasterJSON=JSON.stringify(rasterQuality);
+  renderer.setPixelRatio(basePixelRatio);
   renderer.setSize(innerWidth,innerHeight);
   renderer.toneMapping=THREE.NoToneMapping;
   renderer.outputColorSpace=THREE.SRGBColorSpace;
@@ -81,6 +91,16 @@ async function createScene(){
   await startup.stage(2,'铺设庭园，栽种花木');
   const {scene,garden,landscape,villa,vegetation,details,features,testTargets}=buildSanteiScene();
   const userModels=new THREE.Group();userModels.name='User models';scene.add(userModels);
+  // Static content is recorded into render bundles once warm-up has compiled
+  // every variant (bundles.enable below). User models stay direct draws.
+  const bundles=bundleStaticContent(scene,[villa.group,garden.garden,landscape.root,details.group,features.group,testTargets.group,
+    scene.getObjectByName('Individually modelled garden planting')]);
+  // Lower the raster resolution only while moving and only when the GPU is
+  // measurably behind; every frame rendered at rest is full quality. The AO
+  // result texture the bundled materials bind keeps its size (raster-ao), so a
+  // step changes no bind group and re-records no bundle.
+  const motionQuality=createMotionQuality({renderer,queue:renderer.backend.device.queue,baseRatio:basePixelRatio,
+    onChange:()=>wake()});
   const portrait=innerWidth/innerHeight<.85;
   const camera=new THREE.PerspectiveCamera(portrait?48:40,innerWidth/innerHeight,.15,450);
   camera.position.set(21,13,27);
@@ -107,7 +127,8 @@ async function createScene(){
     // Commit the entire time state before any scene pass can cache this frame.
     if(pendingTime){const value=pendingTime;pendingTime=null;applyTime(value);}
     const revision=timeRevision,hour=sceneElement.dataset.hour;
-    const cameraMoving=controls.update(delta);if(hybrid)hybrid.frame();else pipeline.render();
+    const cameraMoving=controls.update(delta);
+    if(hybrid){hybrid.frame();if(rasterQuality.adaptiveResolution&&hybrid.store.peekState().mode==='raster')motionQuality.frameSubmitted();}else pipeline.render();
     // Time completion is checked only on a new scene revision, never per optical batch.
     if(completionRevision!==revision&&sceneElement.dataset.renderedHour!==hour){completionRevision=revision;renderer.backend.device.queue.onSubmittedWorkDone().then(()=>{
       if(revision===timeRevision){sceneElement.dataset.renderedHour=hour;document.querySelector('#time-controls').setAttribute('aria-busy','false');}
@@ -157,9 +178,11 @@ async function createScene(){
   const smoothAO=denoise(ambientOcclusion.getTextureNode(),depth,normal,camera);
   // Main-camera AO belongs only to the beauty target. Reflections and the
   // resource-only refresh must not inherit its view-dependent texture graph.
-  const rasterAO=createRasterAO(renderer,smoothAO);
+  const rasterAO=createRasterAO(renderer,smoothAO,{pixelRatio:basePixelRatio,width:innerWidth,height:innerHeight});
   const mainAO=rasterAO.sample;
-  const cameraAO=Fn(builder=>builder.camera===camera?mainAO:float(1))();
+  // Raster quality: AO off blends to 1 (no shader variant) and skips the AO passes.
+  const aoAmount=uniform(1);
+  const cameraAO=Fn(builder=>builder.camera===camera?mix(float(1),mainAO,aoAmount):float(1))();
   scenePass.contextNode=builtinAOContext(cameraAO);
   // Glare is metered after photographic exposure, then converted back to the
   // shared scene radiance before HDR output (or the SDR fallback transform).
@@ -167,7 +190,52 @@ async function createScene(){
   pipeline.outputNode=displayOutputNode(vec4(beauty.rgb.add(glare.rgb.div(cameraExposure)),beauty.a),cameraExposure,hdr.supported);
 
   const renderBeauty=pipeline.render.bind(pipeline);
-  pipeline.render=()=>{rasterAO.prepare();renderBeauty();};
+  // Water reflection off: the reflector's per-frame scene render is skipped for
+  // raster frames only (the lens lighting refresh restores it) and its
+  // contribution is zeroed in the water material.
+  const waterDescriptor=garden.water?lensMaterial(garden.water.material):null,reflectorBase=waterDescriptor?.reflector?.reflector??null;
+  pipeline.render=()=>{
+    if(rasterQuality.ambientOcclusion)rasterAO.prepare();
+    if(reflectorBase)reflectorBase.updateBeforeType=rasterQuality.reflection?THREE.NodeUpdateType.FRAME:THREE.NodeUpdateType.NONE;
+    try{renderBeauty();}finally{if(reflectorBase)reflectorBase.updateBeforeType=THREE.NodeUpdateType.FRAME;}
+    bundles.frameRendered();
+  };
+  // The AO result target is only resized while AO renders: a resized target
+  // that is never rendered again would leave every bundled material bound to
+  // an uninitialized texture. Pending size changes apply when AO turns on.
+  let aoTargetDirty=false;
+  function syncAOTarget(){
+    if(!rasterQuality.ambientOcclusion||!aoTargetDirty)return;
+    aoTargetDirty=false;
+    rasterAO.setPixelRatio(basePixelRatio);rasterAO.setSize(innerWidth,innerHeight);
+    bundles.invalidate(); // recreated texture: bind groups and bundles re-record
+  }
+  // The AO prepass and the water reflection re-draw the whole forest at full
+  // vertex cost. Woodland cells entirely beyond these distances contribute
+  // nothing visible to a 0.45 m AO radius or a rippled 0.45-scale reflection,
+  // so those two passes skip them; the beauty pass always draws everything.
+  const AO_PREPASS_RANGE_M=90,REFLECTION_RANGE_M=120;
+  bundles.setDistanceLimit((passRenderer,passCamera)=>{
+    if(passRenderer.getMRT()===normalMRT)return AO_PREPASS_RANGE_M;
+    if(reflectorBase&&passCamera!==camera&&reflectorBase.virtualCameras?.get(camera)===passCamera)return REFLECTION_RANGE_M;
+    return Infinity;
+  });
+  function applyRasterQuality(settings){
+    rasterQuality=settings;
+    aoAmount.value=settings.ambientOcclusion?1:0;
+    if(waterDescriptor?.rasterReflection)waterDescriptor.rasterReflection.value=settings.reflection?1:0;
+    const ratio=pixelRatioFor(settings);
+    if(ratio!==basePixelRatio){
+      basePixelRatio=ratio;motionQuality.setBaseRatio(ratio);
+      renderer.setPixelRatio(ratio);renderer.setSize(innerWidth,innerHeight);
+      aoTargetDirty=true;
+    }
+    syncAOTarget();
+    Object.assign(document.querySelector('#scene').dataset,{rasterPixelRatio:settings.pixelRatio,rasterAo:String(settings.ambientOcclusion),
+      rasterReflection:String(settings.reflection),rasterAdaptive:String(settings.adaptiveResolution)});
+    wake();
+  }
+  applyRasterQuality(rasterQuality);
 
   const diagnostics={backend:'WebGPU',three:THREE.REVISION,ready:false,errors:faults,groups:{},instances:0,meshes:0,triangles:0,
     hdr:{canvasSupported:hdr.supported,probe:hdr,displayHigh:displayHDR.matches,internalFormat:'rgba16float',
@@ -188,9 +256,9 @@ async function createScene(){
   // Render on time/date changes and camera movement; never run an idle GPU loop.
   controls.addEventListener('change',()=>{hybrid?.cameraChanged();wake();});
   const activeInputs=new Set();
-  controls.addEventListener('start',event=>{activeInputs.add(event.travelSource||'pointer');hybrid?.setInteracting(true);wake();});
-  controls.addEventListener('end',event=>{activeInputs.delete(event.travelSource||'pointer');hybrid?.setInteracting(activeInputs.size>0);wake();});
-  addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);hybrid?.resize();wake();});
+  controls.addEventListener('start',event=>{activeInputs.add(event.travelSource||'pointer');hybrid?.setInteracting(true);motionQuality.setInteracting(true);wake();});
+  controls.addEventListener('end',event=>{activeInputs.delete(event.travelSource||'pointer');hybrid?.setInteracting(activeInputs.size>0);motionQuality.setInteracting(activeInputs.size>0);wake();});
+  addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);aoTargetDirty=true;syncAOTarget();hybrid?.resize();wake();});
   // Warm the visible Moon/stars, lamp shadows and unlit predawn variants while
   // the loading curtain is up, instead of compiling them on the first slider move.
   const initialTime=timeControls.getValue();
@@ -213,8 +281,11 @@ async function createScene(){
   applyTime(initialTime,true);
   await warm();
   await renderer.backend.device.queue.onSubmittedWorkDone();
+  // Every variant is compiled: from here on the static scene replays bundles.
+  bundles.enable();
   hybrid=await createHybridRuntime({renderer,scene,camera,adapterInfo:adapter.info,rasterPipeline:pipeline,rasterBeauty:beauty,rasterGlare:glare,refreshContext:()=>passReuse.beautyContext,cameraExposure,hdr,environment:daylight,requestFrame:wake,
-    onOutputState:mode=>{outputStatus.textContent=mode==='hdr'?'HDR':'SDR';sceneElement.dataset.outputMode=mode;}});
+    onOutputState:mode=>{outputStatus.textContent=mode==='hdr'?'HDR':'SDR';sceneElement.dataset.outputMode=mode;},
+    onRasterQuality:applyRasterQuality,initialState:{raster:rasterQuality}});
   const lensPanel=document.createElement('aside');lensPanel.id='lens-controls';document.body.appendChild(lensPanel);
   const lensUI=createLensUI({store:hybrid.store,container:lensPanel,liveStats:()=>hybrid.liveStats()});
   window.__SANTEI__.hybrid=hybrid;window.__SANTEI__.lensUI=lensUI;
@@ -234,6 +305,8 @@ async function createScene(){
       opticalBlockedRate:state.diagnostics.opticalBlockedRate,opticalTirRate:state.diagnostics.tirRate,
       attemptedSamples:state.diagnostics.attemptedSamples,opticalPipelineCount:state.diagnostics.pipelineCompilations});
     diagnostics.hybrid=state;
+    const rasterJSON=JSON.stringify(state.raster);
+    if(rasterJSON!==savedRasterJSON){savedRasterJSON=rasterJSON;saveRasterQuality(window.localStorage,state.raster);}
   });
   try{await hybrid.initialize({onProgress:(step,label)=>startup.stage(step,label)});}catch(error){hybrid.store.update({status:'error',error:error.message});faults.push(error.message);console.error(error);}
   const urlState=await installURLState({camera,controls,store:hybrid.store,requestFrame:wake});
@@ -262,7 +335,7 @@ async function createScene(){
   sceneElement.dataset.koi=garden.koi.length;
   console.info('SANTEI scene ready',diagnostics);
   startup.complete();
-  addEventListener('pagehide',()=>{userModel.dispose();urlState.dispose();ready=false;lensUI.dispose();hybrid.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
+  addEventListener('pagehide',()=>{userModel.dispose();urlState.dispose();ready=false;lensUI.dispose();hybrid.dispose();motionQuality.dispose();bundles.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
   // Initialization captured the current scene and prepared its first lens
   // sample. Schedule display without throwing away that prepared state.
   wake();

@@ -1,6 +1,10 @@
+import { RASTER_QUALITY_DEFAULTS } from './raster-quality.js';
+
 /** Small UI boundary: immutable snapshots, explicit asynchronous commands. */
 export function createControlStore(initial = {}) {
   let state = {
+    // Raster preview quality (mode A only); persisted by the application.
+    raster: { ...RASTER_QUALITY_DEFAULTS },
     status: 'loading', error: null, mode: 'raster', lenses: [], lensId: '', configurationIndex: 0,
     configurations: [], warnings: [], limits: { fNumber: [1.8, 22], imageDistanceMm: [.1, 200] },
     optics: { fNumber: 2.8, focusDistanceM: 20, imageDistanceMm: 1, focalLengthMm: 55,

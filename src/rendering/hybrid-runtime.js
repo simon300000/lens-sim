@@ -8,6 +8,7 @@ import { createSceneResources } from './scene-resources.js';
 import { createLightingResources, STAR_ANGULAR_RADIUS } from './lighting-resources.js';
 import { hasSamplesRemaining, MAX_IMAGE_WIDTH } from './sampling-plan.js';
 import { createControlStore } from './control-store.js';
+import { normalizeRasterQuality } from './raster-quality.js';
 import { apertureLimits, rearSamplingRegion } from '../optics/lens-state.js';
 import { createFocusSolver } from '../optics/focus-solver.js';
 import { displayOutputNode } from '../hdr-output.js';
@@ -41,9 +42,9 @@ function catalogueFocalLengthMm(lens){
  *   optics    (lens/stop/focus) -> optics buffer + accumulation; never BVH or shadows
  *   display   (exposure/bloom/output) -> display only
  */
-export async function createHybridRuntime({renderer,scene,camera,adapterInfo,rasterPipeline,rasterBeauty,rasterGlare,refreshContext,cameraExposure,hdr,environment,requestFrame,onOutputState=()=>{},useWorker=true,maxSamplesInFlight=2}) {
+export async function createHybridRuntime({renderer,scene,camera,adapterInfo,rasterPipeline,rasterBeauty,rasterGlare,refreshContext,cameraExposure,hdr,environment,requestFrame,onOutputState=()=>{},onRasterQuality=()=>{},initialState={},useWorker=true,maxSamplesInFlight=2}) {
   if(!Number.isInteger(maxSamplesInFlight)||maxSamplesInFlight<1||maxSamplesInFlight>2)throw new RangeError('Samples in flight must be 1 or 2');
-  const store=createControlStore(),interop=createGPUInterop(renderer),focusSolver=createFocusSolver();
+  const store=createControlStore(initialState),interop=createGPUInterop(renderer),focusSolver=createFocusSolver();
   const sceneResources=createSceneResources({interop,scene,camera,starAngularRadius:STAR_ANGULAR_RADIUS,useWorker});
   const lighting=createLightingResources({interop,renderer,scene,camera,environment,refreshContext});
   let lens=null,baseLens=null,baseAsset=null,manifest=null,engine=null,baseExposure=cameraExposure.value,interacting=false,pointerActive=false,releaseTimer;
@@ -242,10 +243,13 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
     // Raster navigation does not consume the optical image. Clear it once and
     // retain the latest pose via lightingDirty, without rebuilding UI snapshots
     // and resetting optical buffers for every damping/keyboard frame.
+    // The optical image is reset once, when lens mode next displays it
+    // (setMode): resetting it on the first move published a store snapshot
+    // and rebuilt the lens panel DOM inside the first navigation frame.
     if(state().mode==='raster'){
-      cancelFocus();
-      if(rasterCameraDirty){if(interacting&&!pointerActive)scheduleRelease();return;}
-      rasterCameraDirty=true;
+      cancelFocus();rasterCameraDirty=true;
+      if(interacting&&!pointerActive)scheduleRelease();
+      return;
     }
     resetAccumulation('camera');
     if(interacting&&!pointerActive)scheduleRelease();
@@ -307,7 +311,15 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
     if(s.status!=='ready'&&!recovery)throw new Error('镜头后端尚未就绪');
     const finite=(min,max)=>{if(!Number.isFinite(value)||value<min||value>max)throw new Error(`参数范围 ${min}–${max}`);return value;};
     switch(type){
-      case 'setMode':if(!['raster','lens'].includes(value))throw new Error('无效视图');rasterCameraDirty=false;update({mode:value});if(value==='lens')lightingDirty=true;requestFrame();break;
+      case 'setMode':{
+        if(!['raster','lens'].includes(value))throw new Error('无效视图');
+        const moved=rasterCameraDirty;rasterCameraDirty=false;update({mode:value});
+        // Raster navigation deferred the camera reset of the accumulated image.
+        if(value==='lens'){lightingDirty=true;if(moved)resetAccumulation('camera');}
+        requestFrame();break;
+      }
+      // Raster preview quality (mode A). The application owns the raster passes and applies it.
+      case 'setRasterQuality':{const raster=normalizeRasterQuality(value,s.raster);update({raster});onRasterQuality(raster);requestFrame();break;}
       case 'selectLens':await loadLens(value);break;
       case 'selectConfiguration':await loadLens(s.lensId,value);break;
       case 'loadCustomLens':if(!engine)throw new Error('镜头后端尚未就绪');return loadCustomLens(value);

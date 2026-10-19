@@ -111,10 +111,16 @@ export function createCameraRig(camera, element, {
   }
 
   // ------------------------------------------------------------- gestures
-  function lookBy(dx, dy) {
-    const k = ((camera.fov ?? 50) * Math.PI / 180) / Math.max(1, element.clientHeight);
+  /** Turn the view. A pointer or touch drag is applied immediately (1:1 with the
+   * hand, like orbit and pan); the smoothing stays for arrow keys and aiming. */
+  // Viewport height is read once per frame (update), not per pointer event: a layout
+  // read inside a 120 Hz pointer stream forces synchronous layout whenever styles are dirty.
+  let viewHeight = Math.max(1, element.clientHeight || 1);
+  function lookBy(dx, dy, immediate = false) {
+    const k = ((camera.fov ?? 50) * Math.PI / 180) / viewHeight;
     goal.yaw += dx * k;
     goal.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, goal.pitch + dy * k));
+    if (immediate) { yaw = goal.yaw; pitch = goal.pitch; commitImmediate(); }
   }
   function orbitBy(pivot, dx, dy) {
     const k = 0.006;
@@ -134,7 +140,7 @@ export function createCameraRig(camera, element, {
   function commitImmediate() { apply(); rig.dispatchEvent({ type: 'change' }); }
   function panBy(depth, dx, dy) {
     basis(goal.yaw, goal.pitch);
-    const k = (2 * depth * Math.tan(((camera.fov ?? 50) * Math.PI) / 360)) / Math.max(1, element.clientHeight);
+    const k = (2 * depth * Math.tan(((camera.fov ?? 50) * Math.PI) / 360)) / viewHeight;
     goal.position.addScaledVector(right, -dx * k).addScaledVector(up, dy * k);
     clampPosition(goal.position);
     camera.position.copy(goal.position);
@@ -173,7 +179,7 @@ export function createCameraRig(camera, element, {
     if (!drag || event.pointerId !== drag.id) return;
     const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
     drag.x = event.clientX; drag.y = event.clientY;
-    if (drag.mode === 'look') lookBy(dx, dy);
+    if (drag.mode === 'look') lookBy(dx, dy, true);
     else if (drag.mode === 'orbit') orbitBy(drag.pivot, dx, dy);
     else panBy(drag.depth, dx, dy);
     poke();
@@ -202,7 +208,7 @@ export function createCameraRig(camera, element, {
   function touchMove() {
     const list = [...pointers.values()];
     if (!touch) return;
-    if (touch.mode === 'look' && list.length === 1) { lookBy(list[0].x - touch.x, list[0].y - touch.y); touch.x = list[0].x; touch.y = list[0].y; }
+    if (touch.mode === 'look' && list.length === 1) { lookBy(list[0].x - touch.x, list[0].y - touch.y, true); touch.x = list[0].x; touch.y = list[0].y; }
     else if (touch.mode === 'pinch' && list.length >= 2) {
       const mx = (list[0].x + list[1].x) / 2, my = (list[0].y + list[1].y) / 2, span = Math.hypot(list[0].x - list[1].x, list[0].y - list[1].y);
       panBy(touch.depth, mx - touch.x, my - touch.y);
@@ -275,6 +281,7 @@ export function createCameraRig(camera, element, {
     const now = (win.performance ?? globalThis.performance).now();
     if (!Number.isFinite(dt)) dt = lastTime === null ? 1 / 60 : (now - lastTime) / 1000;
     lastTime = now;
+    viewHeight = Math.max(1, element.clientHeight || viewHeight);
     if (externallyMoved()) { syncFromCamera(); rig.dispatchEvent({ type: 'change' }); return inputActive(); }
     const before = tmp2.copy(camera.position), beforeYaw = yaw, beforePitch = pitch;
     // Keyboard: smoothed walk velocity on the ground plane plus vertical Q/E; arrows look.
