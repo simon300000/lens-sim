@@ -27,7 +27,7 @@ try {
   const firstRasterWallMs = performance.now() - t; step('first raster');
   t = performance.now();
   // ?mode=split selects the two-kernel (lens batch, then scene) integrator for comparison.
-  const rig = await createLensRig({ renderer, scene, camera, width: W, environment: daylight, engineOptions: q.get('mode') ? { integrationMode: q.get('mode') } : {} });
+  const rig = await createLensRig({ renderer, scene, camera, width: W, environment: daylight, engineOptions: { ...(q.get('mode') ? { integrationMode: q.get('mode') } : {}), splitStageTiming: q.get('stages') === '1' } });
   const rigWallMs = performance.now() - t; step('rig');
   const { interop, engine, lighting, sceneResources } = rig;
   const lens = (await (await fetch('/lenses/canon-fl-50mm-f1-8.json')).json()).configurations[0];
@@ -38,13 +38,15 @@ try {
     await interop.device.queue.onSubmittedWorkDone(); return { cpuSubmitMs: submit, submitToDoneWallMs: performance.now() - a };
   }
   async function batches(options) {
-    engine.reset(); const gpu = [], wall = [];
+    engine.reset(); const gpu = [], wall = [], stages = [];
     for (let i = 0; i < BATCHES; i++) {
       const a = performance.now(); engine.sample({ batchSpp: 4, targetSpp: 0, ...options }); await interop.device.queue.onSubmittedWorkDone(); wall.push(performance.now() - a);
-      await new Promise(r => setTimeout(r, 20)); if (engine.lastTiming) gpu.push(engine.lastTiming.ms);
+      await new Promise(r => setTimeout(r, 20)); if (engine.lastTiming) { gpu.push(engine.lastTiming.ms); stages.push(engine.lastTiming); }
     }
+    // ?stages=1 with a split/staged integrator: per-kernel GPU medians (lensMs, traceMs, sceneMs).
+    const stageMs = Object.fromEntries(['lensMs', 'traceMs', 'sceneMs'].filter(k => stages.some(t => t[k] != null)).map(k => [k, stats(stages.map(t => t[k]).filter(v => v != null)).median]));
     const s = await engine.statistics();
-    return { gpuTimestampMsPerBatch: gpu.length ? stats(gpu) : null, submitToDoneWallMsPerBatch: stats(wall), raw: { gpu, wall }, pathsPerBatch: W * W / 1.5 * 4, attemptedSamples: s.attemptedSamples, spp: engine.spp,
+    return { gpuTimestampMsPerBatch: gpu.length ? stats(gpu) : null, submitToDoneWallMsPerBatch: stats(wall), raw: { gpu, wall }, stageMs, pathsPerBatch: W * W / 1.5 * 4, attemptedSamples: s.attemptedSamples, spp: engine.spp,
       attemptedPerSecondFromGPU: gpu.length ? W * W / 1.5 * 4 / (stats(gpu).median / 1000) : null, rates: { pass: s.opticalPassRate, hit: s.sceneHitOfPassed, background: s.backgroundOfPassed, bvhError: s.bvhErrorRate, unsupported: s.unsupportedRate, transparencyLimit: s.transparencyLimitRate, reflectionOutside: s.reflectionOutsideRate } };
   }
   const refresh = { initial: await refreshTimed(), initialRepeat: await refreshTimed() };

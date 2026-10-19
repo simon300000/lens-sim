@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {stripWorkCounting} from '../src/rendering/shader-source.js';
-import {linearMirrorGroups,splitMirrorSources} from '../src/rendering/split-mirror.js';
+import {splitMirrorSources} from '../src/rendering/split-mirror.js';
 const source=readFileSync(new URL('../src/rendering/optical-integrator.wgsl',import.meta.url),'utf8');
 test('LF, CRLF and EOF diagnostic blocks strip identical bindings and reductions',()=>{
  const original=stripWorkCounting(source);assert.doesNotMatch(original,/workTotals|workgroupWork|workgroupBarrier/);
@@ -13,6 +13,5 @@ test('LF, CRLF and EOF diagnostic blocks strip identical bindings and reductions
 test('split and mirror mapping are identical across checkout line endings, including counted stages',()=>{
  const read=f=>readFileSync(new URL(f,import.meta.url),'utf8');
  const common={optical:read('../src/optics/optical-core.wgsl'),work:read('../src/rendering/work-counters.wgsl'),intersector:'',shading:'',spectral:'',sampling:'',pupil:''};
- assert.equal(linearMirrorGroups(source.replaceAll('\n','\r\n')),linearMirrorGroups(source));
- for(const counting of [false,true])assert.deepEqual(splitMirrorSources({...common,counting,integrator:linearMirrorGroups(source.replaceAll('\n','\r\n'))}),splitMirrorSources({...common,counting,integrator:linearMirrorGroups(source)}));
+ for(const staged of [false,true])for(const counting of [false,true])assert.deepEqual(splitMirrorSources({...common,counting,staged,integrator:source.replaceAll('\n','\r\n')}),splitMirrorSources({...common,counting,staged,integrator:source}));
 });

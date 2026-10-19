@@ -564,6 +564,41 @@ struct SceneSample {
   rgb: vec3f, status: u32, firstT: f32, firstNormal: vec3f, firstMaterial: u32,
   layers: u32, reflectionOutside: bool, bvhError: u32,
 }
+/// sceneRadiance when the nearest surface along the ray is already known: the
+/// staged integrator's traversal kernel supplies layer 0 and this composites
+/// exactly as sceneRadiance does, continuing inline through transparent layers.
+fn sceneRadianceFromHit(origin: vec3f, direction: vec3f, key: u32, first: SceneHit) -> SceneSample {
+  var res: SceneSample;
+  res.firstT = -1.0;
+  var radiance = vec3f(0.0);
+  var transmittance = 1.0;
+  var tMin = 0.0;
+  var hit = first;
+  let layerBound = sceneRuntimeBound(SCENE_MAX_TRANSPARENT_LAYERS + 1u);
+  for (var layer = 0u; layer < layerBound; layer++) {
+    if (layer > 0u) { hit = sceneIntersect(origin, direction, tMin, SCENE_FAR); }
+    if (hit.status == HIT_ERROR) { res.status = BVH_TRAVERSAL_ERROR; res.bvhError = hit.error; res.rgb = vec3f(0.0); return res; }
+    if (hit.status == HIT_NONE) {
+      radiance += transmittance * sceneEnvironmentRadiance(direction);
+      res.rgb = radiance; res.status = select(SCENE_HIT, SCENE_BACKGROUND, layer == 0u); res.layers = layer;
+      return res;
+    }
+    let s = sceneReconstruct(hit, direction, origin);
+    if (layer == 0u) { res.firstT = hit.t; res.firstNormal = s.N; res.firstMaterial = s.material; }
+    if ((s.flags & INSTANCE_UNSUPPORTED) != 0u) { res.status = SCENE_UNSUPPORTED; res.rgb = vec3f(0.0); return res; }
+    let shade = sceneShade(s, -direction, key + layer * 0x9e3779b9u);
+    res.reflectionOutside = res.reflectionOutside || shade.reflectionOutside;
+    if ((s.flags & INSTANCE_TRANSPARENT) == 0u) {
+      res.rgb = radiance + transmittance * shade.rgb; res.status = SCENE_HIT; res.layers = layer;
+      return res;
+    }
+    radiance += transmittance * shade.alpha * shade.rgb;
+    transmittance *= 1.0 - shade.alpha;
+    tMin = hit.t + 1.0e-4 + 2.0e-6 * hit.t;
+  }
+  res.status = TRANSPARENCY_LIMIT; res.rgb = vec3f(0.0); res.layers = SCENE_MAX_TRANSPARENT_LAYERS + 1u;
+  return res;
+}
 /// The fused lens kernel's SceneRadianceProvider: nearest real surface, its
 /// material and lighting, and a BOUNDED front-to-back composite through
 /// alpha-blended layers along the same ray (no refraction is simulated).

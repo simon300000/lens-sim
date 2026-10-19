@@ -19,7 +19,7 @@ import { createComputeTimer,timestampSpanMs } from './three-interop.js';
 import { imagePlan, sampleBudget, PIXEL_BYTES } from './sampling-plan.js';
 import { WORK_COUNTERS } from './work-model.js';
 import { createChunkBudget,chunkDispatch } from './adaptive-chunks.js';
-import {splitMirrorSources,linearMirrorGroups,SPLIT_RAY_BYTES} from './split-mirror.js';
+import {splitMirrorSources,SPLIT_RAY_BYTES,SPLIT_HIT_BYTES} from './split-mirror.js';
 
 export const DIAGNOSTIC_MODES=Object.freeze({beauty:0,'scene-error':1,status:2,'geometry-depth':3,'geometry-normal':4,'geometry-material':5});
 // Modes >= 3 change what is accumulated (debug RGB), so switching resets accumulation.
@@ -30,15 +30,18 @@ const uniformBinding=(binding,buffer)=>({binding,resource:{buffer}});
 export async function createOpticalEngine({interop,sceneResources,lighting,width=480,accumulationBindingBytes=Infinity,integrationMode='fused',splitStageTiming=false,chunkTiming='timestamp',opticalLutReuse=false,splitRayBufferBytes=128*1024**2}) {
   const started=performance.now(),{device}=interop;
   const opticalSource=opticalSourceForLutPolicy(rawOpticalSource,opticalLutReuse);
-  if(!['fused','split'].includes(integrationMode))throw new RangeError('Unknown integration mode');
+  if(!['fused','split','staged'].includes(integrationMode))throw new RangeError('Unknown integration mode');
+  // split: lens batch kernel + fused traversal/shading kernel. staged: lens batch,
+  // lean traversal kernel (first-hit records), then shading. Both share the
+  // mirrored packet scheduling; fused is the single-kernel path.
+  const staged=integrationMode==='staged',splitLike=integrationMode==='split'||staged;
   const statisticsConfig=statisticsConfiguration(device.limits);
-  const integratorSource=integrationMode==='split'?linearMirrorGroups(rawIntegratorSource):rawIntegratorSource;
   // A smaller binding cap is useful for validating paired bands on small
   // images. It can only reduce, never exceed the actual device limits.
   const imageLimits={maxTextureDimension2D:device.limits.maxTextureDimension2D,maxBufferSize:device.limits.maxBufferSize,
     maxStorageBufferBindingSize:Math.min(device.limits.maxStorageBufferBindingSize,accumulationBindingBytes)};
   const initialPlan=imagePlan(width,imageLimits,{paired:true});
-  interop.memoryBudget?.assertAdditional(initialPlan.memoryBytes+(integrationMode==='split'?splitRayBytes(initialPlan):0)+PUPIL_TABLE_BYTES+1024,'镜头初始资源');
+  interop.memoryBudget?.assertAdditional(initialPlan.memoryBytes+(splitLike?splitRayBytes(initialPlan)+splitHitBytes(initialPlan):0)+PUPIL_TABLE_BYTES+1024,'镜头初始资源');
   const optics=interop.uniform(new Uint8Array(64),'Optics runtime parameters');
   const render=interop.uniform(new Uint8Array(192),'Pixel budgets, pose and diagnostic ray mode');
   const resolve=interop.uniform(new Uint8Array(16),'Display resolve parameters');
@@ -49,15 +52,15 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   // The integrator ships in two variants: the normal one strips the work
   // reduction (its private tallies are dead code), the diagnostics one keeps it.
   const sampleSource=WORK_COUNTERS_WGSL+opticalSource+SCENE_INTERSECTOR_WGSL+SCENE_SHADING_WGSL+SPECTRAL_WGSL+SAMPLING_WGSL+pupilSource;
-  const countingSource=sampleSource+integratorSource;
-  const stripped=stripWorkCounting(integratorSource);
+  const countingSource=sampleSource+rawIntegratorSource;
+  const stripped=stripWorkCounting(rawIntegratorSource);
   const entry='if(render.debug.x>=2u){integrateMirrors(id);}else{integratePixel(id);}';
   const independentSource=stripped.replace(entry,'integratePixel(id);');
   const validationSource=stripped.replace(entry,'integrateMirrors(id);');
   // Compile-time specialization lets the driver drop the other large control
   // flow graph and its register lifetimes. Validation is compiled on demand.
   const mirrorSource=validationSource.replaceAll('render.debug.x==4u','false').replaceAll('render.debug.x!=4u','true');
-  const splitSources=integrationMode==='split'?splitMirrorSources({integrator:integratorSource,optical:opticalSource,work:WORK_COUNTERS_WGSL,intersector:SCENE_INTERSECTOR_WGSL,shading:SCENE_SHADING_WGSL,spectral:SPECTRAL_WGSL,sampling:SAMPLING_WGSL,pupil:pupilSource}):null;
+  const splitSources=splitLike?splitMirrorSources({integrator:rawIntegratorSource,optical:opticalSource,work:WORK_COUNTERS_WGSL,intersector:SCENE_INTERSECTOR_WGSL,shading:SCENE_SHADING_WGSL,spectral:SPECTRAL_WGSL,sampling:SAMPLING_WGSL,pupil:pupilSource,staged}):null;
   const jobs=[
     ['sample',sampleSource+independentSource,'Independent real lens + scene integrate'],
     ...(splitSources?Object.entries(splitSources).map(([name,code])=>['split_'+name,code,'Split mirror '+name+' batch']):[['sampleMirror',sampleSource+mirrorSource,'Four-quadrant real lens + scene integrate']]),
@@ -71,12 +74,12 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   const failure=compiled.find(result=>result.status==='rejected');if(failure){for(const b of startupBuffers)interop.release(b);throw failure.reason;}
   const pipelines=Object.fromEntries(jobs.map(([name],i)=>[name,compiled[i].value]));
   const timer=createComputeTimer(interop),pupilPrecomputer=createPupilPrecomputer();
-  const splitPipelines=splitSources?{raygen:pipelines.split_raygen,scene:pipelines.split_scene}:null;let splitRays=null;
+  const splitPipelines=splitSources?{raygen:pipelines.split_raygen,trace:pipelines.split_trace,scene:pipelines.split_scene}:null;let splitRays=null,splitHits=null;
   // 'timestamp': GPU timestamp queries time each chunk (benchmarks). 'queue': the caller reports
   // chunk times from queue completions via completeChunk; no timestamp queries are issued.
   if(!['timestamp','queue'].includes(chunkTiming))throw new RangeError('Unknown chunk timing');
   const useTimestamps=chunkTiming==='timestamp';
-  const stageTimer=splitStageTiming&&useTimestamps?createSplitStageTimer(interop):null;
+  const stageTimer=splitStageTiming&&useTimestamps?createSplitStageTimer(interop,staged?['lens','trace','scene']:['lens','scene']):null;
   let pupilTable;
   let surfaces,lut,tiles=[],tileCursor=0,groupCursor=0,chunkBudget=createChunkBudget(),lastSubmission=null,sampleSerial=0,roundBudget=0,roundTarget=0,roundMirror=0,tileGroups=0,image,packed,lens,groups={},spp=0,disposed=false,computeMs=null,statsPending=null,lastTiming=null;
   let dimensions={width:0,height:0},currentRevision=0,resizeRevision=0;
@@ -102,9 +105,15 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       tile.sampleCounting=countingPipeline?group(countingPipeline,[...lensBindings,uniformBinding(3,render),uniformBinding(4,tile.buffer),{binding:5,resource:image.gpu.createView()},...sceneBindings,uniformBinding(20,pupil),uniformBinding(21,work)]):null;
       if(splitPipelines&&splitRays){
         tile.raygen=group(splitPipelines.raygen,[...lensBindings,uniformBinding(3,render),uniformBinding(4,tile.buffer),uniformBinding(20,pupil),uniformBinding(21,splitRays)]);
-        tile.scene=group(splitPipelines.scene,[uniformBinding(0,optics),uniformBinding(3,render),uniformBinding(4,tile.buffer),{binding:5,resource:image.gpu.createView()},...sceneBindings,uniformBinding(21,splitRays)]);
+        const hitBindings=staged?[uniformBinding(23,splitHits)]:[];
+        tile.scene=group(splitPipelines.scene,[uniformBinding(0,optics),uniformBinding(3,render),uniformBinding(4,tile.buffer),{binding:5,resource:image.gpu.createView()},...sceneBindings,uniformBinding(21,splitRays),...hitBindings]);
         tile.raygenCounting=splitCountingPipelines?group(splitCountingPipelines.raygen,[...lensBindings,uniformBinding(3,render),uniformBinding(4,tile.buffer),uniformBinding(20,pupil),uniformBinding(21,splitRays),uniformBinding(22,work)]):null;
-        tile.sceneCounting=splitCountingPipelines?group(splitCountingPipelines.scene,[uniformBinding(0,optics),uniformBinding(3,render),uniformBinding(4,tile.buffer),{binding:5,resource:image.gpu.createView()},...sceneBindings,uniformBinding(21,splitRays),uniformBinding(22,work)]):null;
+        tile.sceneCounting=splitCountingPipelines?group(splitCountingPipelines.scene,[uniformBinding(0,optics),uniformBinding(3,render),uniformBinding(4,tile.buffer),{binding:5,resource:image.gpu.createView()},...sceneBindings,uniformBinding(21,splitRays),uniformBinding(22,work),...hitBindings]):null;
+        if(staged){
+          const traceBindings=[uniformBinding(3,render),uniformBinding(4,tile.buffer),...sceneResources.bindings(6).slice(0,3),uniformBinding(21,splitRays),uniformBinding(23,splitHits)];
+          tile.trace=group(splitPipelines.trace,traceBindings);
+          tile.traceCounting=splitCountingPipelines?group(splitCountingPipelines.trace,[...traceBindings,uniformBinding(22,work)]):null;
+        }
       }
       tile.resolve=group(pipelines.resolve,[uniformBinding(0,resolve),uniformBinding(1,tile.buffer),{binding:2,resource:image.gpu.createView()}]);
     }
@@ -121,24 +130,31 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   }
   function splitRayBytes(plan){
     const packetBytes=64*4*SPLIT_RAY_BYTES;
-    const groups=Math.max(...plan.tiles.map(t=>Math.ceil(Math.ceil(plan.width/2)*t.halfHeight/64)));
-    const cap=Math.floor(Math.min(Math.max(64*4*SPLIT_RAY_BYTES,splitRayBufferBytes),device.limits.maxBufferSize,device.limits.maxStorageBufferBindingSize)/packetBytes);
+    const groups=Math.max(...plan.tiles.map(t=>Math.ceil(Math.ceil(plan.width/2)/8)*Math.ceil(t.halfHeight/8)));
+    // Staged mode also holds 16 hit records per packet slot (8/3 of the ray bytes), so its
+    // scratch is capped lower: at most 64 MiB of rays + ~171 MiB of hits.
+    const scratch=staged?Math.min(splitRayBufferBytes,64*1024**2):splitRayBufferBytes;
+    const cap=Math.floor(Math.min(Math.max(64*4*SPLIT_RAY_BYTES,scratch),device.limits.maxBufferSize,device.limits.maxStorageBufferBindingSize)/packetBytes);
     return Math.min(groups,cap)*packetBytes;
   }
+  /** Staged mode: 4 quadrant hit records per optical sample (16 records per packet slot). */
+  function splitHitBytes(plan){return staged?splitRayBytes(plan)/(4*SPLIT_RAY_BYTES)*16*SPLIT_HIT_BYTES:0;}
   function allocate(nextWidth){
-    const plan=imagePlan(nextWidth,imageLimits,{paired:true}),buffers=[];let output,rayBuffer;
-    interop.memoryBudget?.assertAdditional(plan.memoryBytes+(integrationMode==='split'?splitRayBytes(plan):0),'新旧图像并存的分配峰值');
+    const plan=imagePlan(nextWidth,imageLimits,{paired:true}),buffers=[];let output,rayBuffer,hitBuffer;
+    interop.memoryBudget?.assertAdditional(plan.memoryBytes+(splitLike?splitRayBytes(plan)+splitHitBytes(plan):0),'新旧图像并存的分配峰值');
     try{
       for(const t of plan.tiles)buffers.push({...t,buffer:interop.storage(t.bytes,'Tiled XYZ and attempted-path counters')});
       output=interop.storageImage(plan.width,plan.height);
-      if(integrationMode==='split')rayBuffer=interop.storage(splitRayBytes(plan),'Split mirror: bounded optical batch packets');
-      return {plan,tiles:buffers,image:output,splitRays:rayBuffer};
-    }catch(error){for(const t of buffers)interop.release(t.buffer);if(rayBuffer)interop.release(rayBuffer);output?.texture.dispose();throw error;}
+      if(splitLike)rayBuffer=interop.storage(splitRayBytes(plan),'Split mirror: bounded optical batch packets');
+      if(staged)hitBuffer=interop.storage(splitHitBytes(plan),'Staged mirror: first-hit records');
+      return {plan,tiles:buffers,image:output,splitRays:rayBuffer,splitHits:hitBuffer};
+    }catch(error){for(const t of buffers)interop.release(t.buffer);if(rayBuffer)interop.release(rayBuffer);if(hitBuffer)interop.release(hitBuffer);output?.texture.dispose();throw error;}
   }
-  function releaseCandidate(candidate){for(const t of candidate.tiles)interop.release(t.buffer);if(candidate.splitRays)interop.release(candidate.splitRays);candidate.image.texture.dispose();}
+  function releaseCandidate(candidate){for(const t of candidate.tiles)interop.release(t.buffer);if(candidate.splitRays)interop.release(candidate.splitRays);if(candidate.splitHits)interop.release(candidate.splitHits);candidate.image.texture.dispose();}
   function install(candidate){
     for(const t of tiles)interop.release(t.buffer);image?.texture.dispose();
     if(splitRays)interop.release(splitRays);splitRays=candidate.splitRays??null;
+    if(splitHits)interop.release(splitHits);splitHits=candidate.splitHits??null;
     dimensions={width:candidate.plan.width,height:candidate.plan.height};tiles=candidate.tiles;image=candidate.image;
     rebuildGroups();reset();return true;
   }
@@ -198,7 +214,10 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
     const lensStamp=stages?.lens??(timestamps?{querySet:timestamps.querySet,beginningOfPassWriteIndex:timestamps.beginningOfPassWriteIndex}:undefined);
     const sceneStamp=stages?.scene??(timestamps?{querySet:timestamps.querySet,endOfPassWriteIndex:timestamps.endOfPassWriteIndex}:undefined);
     const selected=submission.counted?splitCountingPipelines:splitPipelines;
-    for(const [pipeline,bind,grid,label,stamp] of [[selected.raygen,submission.counted?tile.raygenCounting:tile.raygen,dispatch,'Split mirror lens batch',lensStamp],[selected.scene,submission.counted?tile.sceneCounting:tile.scene,sceneDispatch,'Split mirror scene batch',sceneStamp]]){
+    const passes=[[selected.raygen,submission.counted?tile.raygenCounting:tile.raygen,dispatch,'Split mirror lens batch',lensStamp]];
+    if(staged)passes.push([selected.trace,submission.counted?tile.traceCounting:tile.trace,sceneDispatch,'Staged mirror traversal batch',stages?.trace]);
+    passes.push([selected.scene,submission.counted?tile.sceneCounting:tile.scene,sceneDispatch,'Split mirror scene batch',sceneStamp]);
+    for(const [pipeline,bind,grid,label,stamp] of passes){
       const pass=encoder.beginComputePass({label,...(stamp?{timestampWrites:stamp}:{})});pass.setPipeline(pipeline);pass.setBindGroup(0,bind);pass.dispatchWorkgroups(grid.x,grid.y);pass.end();
     }
     const revision=currentRevision,timingDimensions={...dimensions};
@@ -231,7 +250,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       if(!useTimestamps){computeMs=ms;lastTiming={...dimensions,ms,chunkPixels:submission.pixels??null,chunkSpp:submission.spp??null};submission.gpuMs=ms;}
       chunkBudget.observe(submission,ms);
     },
-    get memoryBytes(){return dimensions.width*dimensions.height*(PIXEL_BYTES+8)+[optics,render,resolve,camera,target,surfaces,lut,pupil,work,splitRays].reduce((sum,buffer)=>sum+(buffer?.size??0),0);},
+    get memoryBytes(){return dimensions.width*dimensions.height*(PIXEL_BYTES+8)+[optics,render,resolve,camera,target,surfaces,lut,pupil,work,splitRays,splitHits].reduce((sum,buffer)=>sum+(buffer?.size??0),0);},
     async prepareLens(nextLens,state){
       const next=packLens(nextLens,state);
       return pupilPrecomputer.prepare(nextLens,next,{enabled:state?.pupilSampling!==false,bins:state?.pupilBins,movingCenter:state?.pupilMovingCenter});
@@ -244,16 +263,16 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       validationCompile??=interop.computePipeline(sampleSource+validationSource,'Mirror sampling validation');
       const ready=await validationCompile;if(disposed)throw new Error('Optical engine disposed');pipelines.sampleValidation=ready;rebuildGroups();
     },
-    get workCounting(){return counting&&Boolean(integrationMode==='split'?splitCountingPipelines:countingPipeline);},
+    get workCounting(){return counting&&Boolean(splitLike?splitCountingPipelines:countingPipeline);},
     get workSupported(){return workSupported;},
     /** Resolves to 'counting' | 'off' | 'unsupported'. The counting variant compiles once, on first use. */
     async setWorkCounting(on){
       const epoch=++countEpoch;workWindow=0;closedWorkWindow=-1;counting=Boolean(on)&&workSupported;workUnits=0;workTimings.length=0;
       if(!counting)return workSupported?'off':'unsupported';
-      if(integrationMode==='split'){
+      if(splitLike){
         if(!splitCountingPipelines){
           splitCountingCompile??=(async()=>{
-            const sources=splitMirrorSources({integrator:integratorSource,optical:opticalSource,work:WORK_COUNTERS_WGSL,intersector:SCENE_INTERSECTOR_WGSL,shading:SCENE_SHADING_WGSL,spectral:SPECTRAL_WGSL,sampling:SAMPLING_WGSL,pupil:pupilSource,counting:true});
+            const sources=splitMirrorSources({integrator:rawIntegratorSource,optical:opticalSource,work:WORK_COUNTERS_WGSL,intersector:SCENE_INTERSECTOR_WGSL,shading:SCENE_SHADING_WGSL,spectral:SPECTRAL_WGSL,sampling:SAMPLING_WGSL,pupil:pupilSource,counting:true,staged});
             const results=await Promise.allSettled(Object.entries(sources).map(async([name,code])=>[name,await interop.computePipeline(code,'Split mirror '+name+' + work counters')]));
             const failed=results.find(r=>r.status==='rejected');if(failed)throw failed.reason;
             return Object.fromEntries(results.map(r=>r.value));
@@ -297,23 +316,22 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       roundBudget=budget;const tile=tiles[tileCursor];
       const groupsX=roundMirror?Math.ceil(Math.ceil(dimensions.width/2)/8):Math.ceil(dimensions.width/8);
       const groupsY=roundMirror?Math.ceil(tile.halfHeight/8):Math.ceil(tile.height/8);
-      const totalGroups=roundMirror&&integrationMode==='split'?Math.ceil(Math.ceil(dimensions.width/2)*tile.halfHeight/64):groupsX*groupsY;
-      const useSplit=integrationMode==='split'&&roundMirror===2;
+      const totalGroups=groupsX*groupsY;
+      const useSplit=splitLike&&roundMirror===2;
       const plan=chunkBudget.plan(interactive,budget*(roundMirror?4:1),totalGroups-groupCursor);
       const requested=chunked?plan.groups:totalGroups-groupCursor;
       const scratchGroups=useSplit?Math.floor(splitRays.size/(64*budget*SPLIT_RAY_BYTES)):totalGroups;
       const groups=Math.min(requested,scratchGroups);
-      const dispatch=(chunked||(roundMirror&&integrationMode==='split'))?chunkDispatch(groups,device.limits.maxComputeWorkgroupsPerDimension):{x:groupsX,y:groupsY};
+      const dispatch=(chunked||(roundMirror&&splitLike))?chunkDispatch(groups,device.limits.maxComputeWorkgroupsPerDimension):{x:groupsX,y:groupsY};
       if(roundMirror===4&&!pipelines.sampleValidation)throw new Error('Call prepareSampling before requesting mirror validation modes');
       const counted=counting&&Boolean(useSplit?tile.raygenCounting:tile.sampleCounting)&&!pinhole;
-      const submission={revision:currentRevision,chunked,interactive,groups,work:groups*budget*(roundMirror?4:1),capacity:Math.min(totalGroups,scratchGroups)*budget*(roundMirror?4:1),tail:plan.tail,targetMs:plan.targetMs,gpuMs:null,counted,mirrorMode:roundMirror,integrationMode:useSplit?'split':'fused'};
+      const submission={revision:currentRevision,chunked,interactive,groups,work:groups*budget*(roundMirror?4:1),capacity:Math.min(totalGroups,scratchGroups)*budget*(roundMirror?4:1),tail:plan.tail,targetMs:plan.targetMs,gpuMs:null,counted,mirrorMode:roundMirror,integrationMode:useSplit?integrationMode:'fused'};
       submission.countEpoch=countEpoch;submission.workWindow=workWindow;submission.countedWorkUnits=submission.work;
       // Pixels this chunk writes (mirror reuse covers four per thread), for the HUD.
       submission.spp=budget;submission.pixels=Math.min(dimensions.width*tile.height,groups*64*(roundMirror?4:1));
       if(useSplit){
-        const halfWidth=Math.ceil(dimensions.width/2),begin=groupCursor*64,end=Math.min(begin+groups*64,halfWidth*tile.halfHeight);
-        const central=dimensions.width%2?Math.floor(end/halfWidth)-Math.floor(begin/halfWidth):0;
-        submission.countedWorkUnits=budget*(4*(end-begin)-2*central)/64;submission.pixels=4*(end-begin)-2*central;
+        const pixels=mirrorChunkPixels(groupCursor,groups,Math.ceil(dimensions.width/2),tile.halfHeight,dimensions.width%2===1);
+        submission.countedWorkUnits=budget*pixels/64;submission.pixels=pixels;
       }
       if(counted)workUnits+=submission.countedWorkUnits;
       lastSubmission=submission;
@@ -392,20 +410,35 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       }
       return result.buffer;
     },
-    dispose(){disposed=true;pupilPrecomputer.dispose();timer.dispose();stageTimer?.dispose();for(const b of [optics,render,resolve,camera,target,surfaces,lut,pupil,work,splitRays,...tiles.map(t=>t.buffer)])if(b)interop.release(b);image?.texture.dispose();},
+    dispose(){disposed=true;pupilPrecomputer.dispose();timer.dispose();stageTimer?.dispose();for(const b of [optics,render,resolve,camera,target,surfaces,lut,pupil,work,splitRays,splitHits,...tiles.map(t=>t.buffer)])if(b)interop.release(b);image?.texture.dispose();},
   };
 }
 
-function createSplitStageTimer(interop){
+/** Destination pixels written by mirror packet groups [cursor, cursor+groups): the
+ * 8x8 canonical blocks times four quadrants, minus the two x-mirrors of an odd
+ * image's central column (those lanes skip). */
+function mirrorChunkPixels(cursor,groups,halfWidth,halfHeight,oddWidth){
+  const blocksX=Math.ceil(halfWidth/8);let pixels=0;
+  for(let g=cursor;g<cursor+groups;g++){
+    const bx=g%blocksX,by=Math.floor(g/blocksX),w=Math.min(8,halfWidth-bx*8),h=Math.min(8,halfHeight-by*8);
+    if(w<=0||h<=0)continue;
+    pixels+=4*w*h;if(oddWidth&&bx*8+w===halfWidth)pixels-=2*h;
+  }
+  return pixels;
+}
+
+function createSplitStageTimer(interop,names){
   const {device}=interop;
   if(!device.features.has('timestamp-query'))return null;
-  const queries=device.createQuerySet({type:'timestamp',count:4});
+  const count=names.length*2,bytes=count*8;
+  const queries=device.createQuerySet({type:'timestamp',count});
   let resolve,read;
-  try{resolve=interop.buffer(32,GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC,'Split timestamp resolve');read=interop.buffer(32,GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ,'Split timestamp readback');}
+  try{resolve=interop.buffer(bytes,GPUBufferUsage.QUERY_RESOLVE|GPUBufferUsage.COPY_SRC,'Split timestamp resolve');read=interop.buffer(bytes,GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ,'Split timestamp readback');}
   catch(error){queries.destroy();if(resolve)interop.release(resolve);throw error;}let pending=false;
   return {
-    begin(){if(pending)return undefined;pending=true;return {lens:{querySet:queries,beginningOfPassWriteIndex:0,endOfPassWriteIndex:1},scene:{querySet:queries,beginningOfPassWriteIndex:2,endOfPassWriteIndex:3}};},
-    end(encoder,stamps,callback){encoder.resolveQuerySet(queries,0,4,resolve,0);encoder.copyBufferToBuffer(resolve,0,read,0,32);return ()=>read.mapAsync(GPUMapMode.READ).then(()=>{const t=new BigUint64Array(read.getMappedRange()),ms=timestampSpanMs(t[0],t[3]),lensMs=timestampSpanMs(t[0],t[1]),sceneMs=timestampSpanMs(t[2],t[3]);read.unmap();pending=false;if(ms!==null)callback({ms,lensMs,sceneMs});},()=>{pending=false;});},
+    // One begin/end timestamp pair per named stage, in pass order.
+    begin(){if(pending)return undefined;pending=true;return Object.fromEntries(names.map((name,k)=>[name,{querySet:queries,beginningOfPassWriteIndex:2*k,endOfPassWriteIndex:2*k+1}]));},
+    end(encoder,stamps,callback){encoder.resolveQuerySet(queries,0,count,resolve,0);encoder.copyBufferToBuffer(resolve,0,read,0,bytes);return ()=>read.mapAsync(GPUMapMode.READ).then(()=>{const t=new BigUint64Array(read.getMappedRange()),ms=timestampSpanMs(t[0],t[count-1]),result={ms};names.forEach((name,k)=>{result[name+'Ms']=timestampSpanMs(t[2*k],t[2*k+1]);});read.unmap();pending=false;if(ms!==null)callback(result);},()=>{pending=false;});},
     dispose(){queries.destroy();interop.release(resolve);interop.release(read);},
   };
 }
