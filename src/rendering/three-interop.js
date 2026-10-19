@@ -1,7 +1,73 @@
 import * as THREE from 'three/webgpu';
+import {attribute,instancedBufferAttribute,instancedDynamicBufferAttribute,mat4,normalLocal,positionLocal,positionPrevious,transformNormal,varyingProperty} from 'three/tsl';
+import {hasSharedInstanceAttributes,INSTANCE_MATRIX_ATTRIBUTES,INSTANCE_COLOR_ATTRIBUTE} from '../scene/static-batches.js';
 import {computeConfiguration,createGPUMemoryBudget} from './gpu-policy.js';
 
-/** The ONLY new module touching Three's private backend. Pinned r183 ABI.
+const SHARED_INSTANCE_UUID='shared-instance-attributes';
+
+/** Three builds a separate shader graph (and WGSL program) for every
+ * InstancedMesh in every pass: NodeMaterial wires the mesh's own instance
+ * buffer into the graph, so render-object cache keys include the mesh uuid
+ * and the uniform-buffer variant even embeds the node id and instance count
+ * in the WGSL. With this scene's procedural PBR materials each build costs
+ * ~30 ms, and 176 batches × 6 passes made that the whole startup wait.
+ * Meshes prepared by shareInstanceAttributes() carry their matrices and
+ * colours as geometry attributes, resolved per draw by name, so the graph no
+ * longer depends on the mesh: one build serves every batch of a material.
+ * Any other InstancedMesh keeps Three's own path, except that its matrices
+ * always go through the vertex-attribute variant so at least the compiled
+ * programs are shared. Pinned to r183 (InstanceNode, NodeManager); idempotent. */
+export function installSharedInstancing(renderer){
+  if(THREE.REVISION!=='183')throw new Error(`Shared instancing requires tested Three r183; got ${THREE.REVISION}`);
+  const instance=THREE.InstanceNode.prototype;
+  if(!instance.setup.sharedInstancing){
+    const originalSetup=instance.setup,originalUpdate=instance.update,originalMatrix=instance._createInstanceMatrixNode;
+    function setup(builder){
+      if(!hasSharedInstanceAttributes(builder.object))return originalSetup.call(this,builder);
+      // Per-object updates: this node instance is shared by every batch of the material.
+      this.updateType=THREE.NodeUpdateType.OBJECT;
+      const matrix=mat4(...INSTANCE_MATRIX_ATTRIBUTES.map(name=>attribute(name,'vec4')));
+      positionLocal.assign(matrix.mul(positionLocal).xyz);
+      if(builder.needsPreviousData())positionPrevious.assign(matrix.mul(positionPrevious).xyz);
+      if(builder.hasGeometryAttribute('normal'))normalLocal.assign(transformNormal(normalLocal,matrix));
+      if(builder.object.instanceColor)varyingProperty('vec3','vInstanceColor').assign(attribute(INSTANCE_COLOR_ATTRIBUTE,'vec3'));
+    }
+    function update(frame){
+      const object=frame.object;
+      if(!hasSharedInstanceAttributes(object))return originalUpdate.call(this,frame);
+      // instanceMatrix.needsUpdate on the mesh re-uploads its shared interleaved buffer.
+      const matrices=object.geometry.attributes[INSTANCE_MATRIX_ATTRIBUTES[0]].data;
+      if(matrices.sourceVersion!==object.instanceMatrix.version){matrices.sourceVersion=object.instanceMatrix.version;matrices.needsUpdate=true;}
+    }
+    function createInstanceMatrixNode(assignBuffer,builder){
+      if(this.isStorageMatrix)return originalMatrix.call(this,assignBuffer,builder);
+      const {instanceMatrix}=this;
+      const interleaved=new THREE.InstancedInterleavedBuffer(instanceMatrix.array,16,1);
+      if(assignBuffer===true)this.buffer=interleaved;
+      const column=instanceMatrix.usage===THREE.DynamicDrawUsage?instancedDynamicBufferAttribute:instancedBufferAttribute;
+      return mat4(column(interleaved,'vec4',16,0),column(interleaved,'vec4',16,4),column(interleaved,'vec4',16,8),column(interleaved,'vec4',16,12));
+    }
+    setup.sharedInstancing=true;
+    Object.assign(instance,{setup,update,_createInstanceMatrixNode:createInstanceMatrixNode});
+  }
+  // Node builder states are cached by the render object's cache key, which
+  // includes the mesh uuid for instanced meshes. Prepared meshes share one key.
+  const nodes=renderer._nodes;
+  if(!nodes?.getForRenderCacheKey)throw new Error('Shared instancing requires the renderer node manager (Three r183)');
+  if(!nodes.getForRenderCacheKey.sharedInstancing){
+    const original=nodes.getForRenderCacheKey;
+    function getForRenderCacheKey(renderObject){
+      const {object}=renderObject;
+      if(!hasSharedInstanceAttributes(object))return original.call(this,renderObject);
+      const uuid=object.uuid;object.uuid=SHARED_INSTANCE_UUID;
+      try{return renderObject.getCacheKey();}finally{object.uuid=uuid;}
+    }
+    getForRenderCacheKey.sharedInstancing=true;
+    nodes.getForRenderCacheKey=getForRenderCacheKey;
+  }
+}
+
+/** The ONLY module touching Three's private backend and node internals. Pinned r183 ABI.
  * Raw WGSL is used because the testable fused optical kernel has heterogeneous
  * storage/texture bindings. Textures stay on Three's one device/queue; no copy
  * through CPU and no second rendering device. Public StorageTexture owns output.

@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { lensRole, lensMaterial, PROCEDURAL } from './lens-registry.js';
 import { expandInstances } from './instance-expand.js';
+import { sourceGeometry } from './static-batches.js';
 
 /** Scene → plain typed arrays for the lens BVH. CPU-side preparation only;
  * it never renders or queries pixels. Typed arrays are COPIED from Three's
@@ -75,7 +76,7 @@ function blasSource(geometry, start, count) {
   _box.makeEmpty();
   for (let t = 0; t < indices.length; t++) _box.expandByPoint(_v.fromArray(positions, indices[t] * 3));
   return { positions, normals, uvs, colors, indices, primitiveIds, triangleCount: triCount, hasNormal: !!normal, hasUV: !!uv, hasColor: !!color,
-    bounds: _box.isEmpty() ? null : [..._box.min.toArray(), ..._box.max.toArray()], geometryUuid: geometry.uuid, range: [first, last] };
+    bounds: _box.isEmpty() ? null : [..._box.min.toArray(), ..._box.max.toArray()], geometryUuid: sourceGeometry(geometry).uuid, range: [first, last] };
 }
 
 /** Walk the scene once. Returns the BLAS sources, flat instance arrays and
@@ -115,7 +116,7 @@ export function extractScene(scene, { camera = null, knownBlas = null, deferInst
     for (const range of ranges) {
       const material = range.material;
       if (!material.visible) continue;
-      const key = `${geometry.uuid}:${range.start}:${range.count}:${geometry.index?.version ?? -1}:${geometry.attributes.position.version}:${geometry.attributes.position.count}`;
+      const key = `${sourceGeometry(geometry).uuid}:${range.start}:${range.count}:${geometry.index?.version ?? -1}:${geometry.attributes.position.version}:${geometry.attributes.position.count}`;
       if (!blasKeys.has(key)) {
         blasKeys.set(key, blas.length);
         // A BLAS already held by the worker is referenced by key only; its
@@ -170,7 +171,7 @@ export function extractScene(scene, { camera = null, knownBlas = null, deferInst
 export function objectSignature(entry) {
   const { object } = entry, g = object.geometry;
   const material = Array.isArray(object.material) ? object.material.map(m => m.version).join(',') : object.material.version;
-  return { geometry: `${g.uuid}:${g.index?.version ?? -1}:${g.attributes.position.version}:${g.drawRange.start}:${g.drawRange.count}`,
+  return { geometry: `${sourceGeometry(g).uuid}:${g.index?.version ?? -1}:${g.attributes.position.version}:${g.drawRange.start}:${g.drawRange.count}`,
     transform: object.matrixWorld.elements.join(',') + (object.isInstancedMesh ? `:${object.instanceMatrix.version}:${object.count}` : ''),
     color: object.instanceColor ? object.instanceColor.version : -1, material, visible: object.visible };
 }
