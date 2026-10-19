@@ -202,10 +202,11 @@ export function createLensUI({ store, container, liveStats = null } = {}) {
       // Raster preview quality for slower devices; lens tracing is unaffected.
       group('rasterGroup', '光栅画质', 'rasterValue',
         radios('rasterRatio', '渲染分辨率', [['auto', '自动', '随屏幕像素密度，最高 1.5×'], ['1', '1.0×', '每个 CSS 像素一个采样'], ['0.75', '0.75×', '低分辨率，适合较慢的 GPU']]),
+        radios('rasterMSAA', 'MSAA 抗锯齿', [['0', '关闭', '单采样，降低光栅渲染开销'], ['4', '4×', '四重多重采样抗锯齿']]),
         h('div', { class: 'lu-row lu-row-split' },
           check('rasterAO', '环境光遮蔽', { title: 'GTAO 屏幕空间环境光遮蔽（含法线/深度预通道）' }),
           check('rasterReflection', '水面反射', { title: '每帧从水面镜像视点再绘制一次场景' })),
-        check('rasterAdaptive', '移动时自动降低分辨率', { title: '仅在相机移动且 GPU 来不及时降低像素比例，停止后恢复' }),
+        check('rasterAdaptive', '移动时自动降低分辨率', { title: '仅在相机移动且 GPU 来不及时降低像素比例，停止后立即恢复' }),
         hint('rasterHint', '只影响光栅预览与导航流畅度；镜头追迹的分辨率、阴影与反射不受影响。设置保存在本机浏览器。')),
 
       h('details', { class: 'lu-details' },
@@ -415,6 +416,7 @@ export function createLensUI({ store, container, liveStats = null } = {}) {
   on(refs.evZero, 'click', () => run('setExposureEV', 0));
   on(refs.bloom, 'change', () => run('setBloom', refs.bloom.checked));
   for (const radio of radioInputs('rasterRatio')) on(radio, 'change', () => radio.checked && run('setRasterQuality', { pixelRatio: radio.value }));
+  for (const radio of radioInputs('rasterMSAA')) on(radio, 'change', () => radio.checked && run('setRasterQuality', { msaa: Number(radio.value) }));
   on(refs.rasterAO, 'change', () => run('setRasterQuality', { ambientOcclusion: refs.rasterAO.checked }));
   on(refs.rasterReflection, 'change', () => run('setRasterQuality', { reflection: refs.rasterReflection.checked }));
   on(refs.rasterAdaptive, 'change', () => run('setRasterQuality', { adaptiveResolution: refs.rasterAdaptive.checked }));
@@ -1010,12 +1012,16 @@ export function createLensUI({ store, container, liveStats = null } = {}) {
       radio.checked = radio.value === String(raster.pixelRatio ?? 'auto');
       setDisabled(radio, !rasterEnabled);
     }
+    for (const radio of radioInputs('rasterMSAA')) {
+      radio.checked = radio.value === String(raster.msaa ?? 4);
+      setDisabled(radio, !rasterEnabled);
+    }
     for (const [ref, key] of [['rasterAO', 'ambientOcclusion'], ['rasterReflection', 'reflection'], ['rasterAdaptive', 'adaptiveResolution']]) {
       refs[ref].checked = raster[key] !== false;
       setDisabled(refs[ref], !rasterEnabled);
     }
     const reduced = [raster.pixelRatio && raster.pixelRatio !== 'auto' ? `${raster.pixelRatio}×` : null, raster.ambientOcclusion === false ? '无 AO' : null,
-      raster.reflection === false ? '无反射' : null].filter(Boolean);
+      raster.reflection === false ? '无反射' : null, raster.msaa === 0 ? '无 MSAA' : null].filter(Boolean);
     refs.rasterValue.textContent = reduced.length ? reduced.join(' · ') : '完整';
 
     renderScene();

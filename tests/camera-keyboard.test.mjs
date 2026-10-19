@@ -133,3 +133,13 @@ test('dispose removes listeners and clears held keys', () => {
   key('keydown', 'KeyW');
   assert.equal(rig.active, false);
 });
+
+
+test('pointer activity is separate from keyboard activity for frame scheduling',()=>{
+  const {rig,pointer,key,settle}=setup();
+  key('keydown','KeyW');assert.equal(rig.active,true);assert.equal(rig.pointerActive,false);
+  pointer('pointerdown',{clientX:600,clientY:400});assert.equal(rig.pointerActive,true);
+  pointer('pointermove',{clientX:650,clientY:400});assert.equal(rig.pointerActive,true);
+  pointer('pointercancel',{});assert.equal(rig.pointerActive,false);assert.equal(rig.active,true);
+  key('keyup','KeyW');settle();assert.equal(rig.active,false);
+});

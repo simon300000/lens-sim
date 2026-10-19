@@ -333,6 +333,7 @@ export function createCameraRig(camera, element, {
     enabled: { get: () => enabled, set: (v) => { enabled = Boolean(v); if (!enabled) { drag = null; releaseKeys(); } } },
     enableDamping: { get: () => enableDamping, set: (v) => { enableDamping = Boolean(v); } },
     active: { get: () => busy || inputActive() },
+    pointerActive: { get: () => Boolean(drag || pointers.size) },
   });
   rig.update = update;
   /** Make the current camera/target the rig's pose (used after programmatic moves). */

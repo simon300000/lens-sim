@@ -6,7 +6,7 @@ const memoryStorage=()=>{const map=new Map();return {getItem:k=>map.has(k)?map.g
 
 test('patches merge into validated settings and reject unknown keys or ratios',()=>{
   const next=normalizeRasterQuality({ambientOcclusion:false},RASTER_QUALITY_DEFAULTS);
-  assert.deepEqual(next,{pixelRatio:'auto',ambientOcclusion:false,reflection:true,adaptiveResolution:true});
+  assert.deepEqual(next,{...RASTER_QUALITY_DEFAULTS,ambientOcclusion:false});
   assert.deepEqual(normalizeRasterQuality({pixelRatio:0.75},next).pixelRatio,'0.75','numbers are accepted as the option string');
   assert.throws(()=>normalizeRasterQuality({pixelRatio:'2'}),/渲染分辨率/);
   assert.throws(()=>normalizeRasterQuality({shadows:false}),/未知/);
@@ -23,11 +23,22 @@ test('settings round-trip through storage and fall back to defaults on garbage',
   const storage=memoryStorage();
   assert.deepEqual(loadRasterQuality(storage),RASTER_QUALITY_DEFAULTS);
   assert.equal(saveRasterQuality(storage,{...RASTER_QUALITY_DEFAULTS,pixelRatio:'1',reflection:false}),true);
-  assert.deepEqual(loadRasterQuality(storage),{pixelRatio:'1',ambientOcclusion:true,reflection:false,adaptiveResolution:true});
+  assert.deepEqual(loadRasterQuality(storage),{...RASTER_QUALITY_DEFAULTS,pixelRatio:'1',reflection:false});
   storage.setItem(RASTER_QUALITY_STORAGE_KEY,'{not json');
   assert.deepEqual(loadRasterQuality(storage),RASTER_QUALITY_DEFAULTS);
   storage.setItem(RASTER_QUALITY_STORAGE_KEY,JSON.stringify({pixelRatio:'9'}));
   assert.deepEqual(loadRasterQuality(storage),RASTER_QUALITY_DEFAULTS,'invalid saved values are ignored');
   assert.deepEqual(loadRasterQuality(null),RASTER_QUALITY_DEFAULTS,'no storage at all');
   assert.equal(saveRasterQuality({setItem(){throw new Error('quota');}},RASTER_QUALITY_DEFAULTS),false);
+});
+
+
+test('MSAA is a validated numeric setting and migrate old preferences',()=>{
+  const storage=memoryStorage();
+  storage.setItem(RASTER_QUALITY_STORAGE_KEY,JSON.stringify({pixelRatio:'1',reflection:false}));
+  assert.deepEqual(loadRasterQuality(storage),{...RASTER_QUALITY_DEFAULTS,pixelRatio:'1',reflection:false});
+  const settings=normalizeRasterQuality({msaa:'0'});
+  assert.equal(settings.msaa,0);
+  assert.equal(saveRasterQuality(storage,settings),true);assert.deepEqual(loadRasterQuality(storage),settings);
+  for(const msaa of [2,8,-1,true,null,''])assert.throws(()=>normalizeRasterQuality({msaa}),/MSAA/);
 });

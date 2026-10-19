@@ -5,7 +5,8 @@
  * water reflection (lighting-resources refreshes them regardless). Settings
  * persist per browser in localStorage. */
 export const PIXEL_RATIO_OPTIONS = Object.freeze(['auto', '1', '0.75']);
-export const RASTER_QUALITY_DEFAULTS = Object.freeze({ pixelRatio: 'auto', ambientOcclusion: true, reflection: true, adaptiveResolution: true });
+export const MSAA_OPTIONS = Object.freeze([0, 4]);
+export const RASTER_QUALITY_DEFAULTS = Object.freeze({ pixelRatio: 'auto', msaa: 4, ambientOcclusion: true, reflection: true, adaptiveResolution: true });
 export const RASTER_QUALITY_STORAGE_KEY = 'lens-sim:raster-quality';
 
 /** Merge a (possibly untrusted) patch into current settings; unknown keys and invalid values throw. */
@@ -17,6 +18,9 @@ export function normalizeRasterQuality(patch, current = RASTER_QUALITY_DEFAULTS)
       const option = String(value);
       if (!PIXEL_RATIO_OPTIONS.includes(option)) throw new Error('无效的渲染分辨率');
       next.pixelRatio = option;
+    } else if (key === 'msaa') {
+      if (!MSAA_OPTIONS.some(option => String(option) === String(value))) throw new Error('无效的 MSAA 设置');
+      next[key] = Number(value);
     } else if (key in RASTER_QUALITY_DEFAULTS) next[key] = Boolean(value);
     else throw new Error(`未知的光栅画质设置：${key}`);
   }

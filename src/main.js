@@ -10,6 +10,7 @@ import { probeHDRCanvas,isHDRConfiguration,outputRendererOptions,displayOutputNo
 import { createHybridRuntime } from './rendering/hybrid-runtime.js';
 import { createLensUI } from './ui/lens-ui.js';
 import { installActiveLightNodes } from './rendering/active-lights.js';
+import { installSoftShadowFilter } from './rendering/soft-shadow-filter.js';
 import { createRasterAO } from './rendering/raster-ao.js';
 import { warmRender } from './rendering/startup-warmup.js';
 import { installNormalPassReuse } from './rendering/pass-reuse.js';
@@ -114,29 +115,47 @@ async function createScene(){
   controls.target.set(0,2.7,2.0);camera.lookAt(controls.target);controls.update(0);
 
   let ready=false,framesNeeded=0,rendering=false,pendingTime=null;
+  let frameRequest=null,frameTask=null;
+  const deferPointerFrames=navigator.vendor==='Apple Computer, Inc.';
   let timeRevision=0;
   let completionRevision=-1;
   let pipeline,hybrid;
   const cameraExposure=uniform(1);
-  function wake(){if(!ready)return;framesNeeded=Math.max(framesNeeded,2);if(!rendering){lastFrameTime=performance.now();rendering=true;requestAnimationFrame(frame);}}
+  function queueFrame(){frameRequest=requestAnimationFrame(frame);}
+  function wake(){if(!ready)return;framesNeeded=Math.max(framesNeeded,2);if(!rendering){lastFrameTime=performance.now();rendering=true;queueFrame();}}
   // Daylight refreshes shadows/PMREM itself; the lens bridge only repacks lights.
   function invalidate(){hybrid?.lightingChanged();wake();}
   let lastFrameTime=performance.now();
-  function frame(now){
-    const delta=(now-lastFrameTime)/1000;lastFrameTime=now;
-    // Commit the entire time state before any scene pass can cache this frame.
-    if(pendingTime){const value=pendingTime;pendingTime=null;applyTime(value);}
+  function renderFrame(){
+    if(!ready)return;
     const revision=timeRevision,hour=sceneElement.dataset.hour;
-    const cameraMoving=controls.update(delta);
     if(hybrid){hybrid.frame();if(rasterQuality.adaptiveResolution&&hybrid.store.peekState().mode==='raster')motionQuality.frameSubmitted();}else pipeline.render();
     // Time completion is checked only on a new scene revision, never per optical batch.
     if(completionRevision!==revision&&sceneElement.dataset.renderedHour!==hour){completionRevision=revision;renderer.backend.device.queue.onSubmittedWorkDone().then(()=>{
       if(revision===timeRevision){sceneElement.dataset.renderedHour=hour;document.querySelector('#time-controls').setAttribute('aria-busy','false');}
     });}
-    framesNeeded--;if(framesNeeded>0||cameraMoving||hybrid?.needsFrame())requestAnimationFrame(frame);else rendering=false;
+  }
+  function frame(now){
+    frameRequest=null;
+    if(!ready){rendering=false;return;}
+    const delta=(now-lastFrameTime)/1000;lastFrameTime=now;
+    // Commit the entire time state before any scene pass can cache this frame.
+    if(pendingTime){const value=pendingTime;pendingTime=null;applyTime(value);}
+    const cameraMoving=controls.update(delta);
+    // WebKit can wait for canvas presentation at the end of its rendering
+    // update. Keep camera ticks on rAF, but give native pointer events a task
+    // turn before the raster submission so it uses the freshest camera pose.
+    if(deferPointerFrames&&controls.pointerActive&&hybrid?.store.peekState().mode==='raster'){
+      if(frameTask===null)frameTask=setTimeout(()=>{frameTask=null;renderFrame();},0);
+    }else{
+      if(frameTask!==null){clearTimeout(frameTask);frameTask=null;}
+      renderFrame();
+    }
+    framesNeeded--;if(framesNeeded>0||cameraMoving||hybrid?.needsFrame())queueFrame();else rendering=false;
   }
   await startup.stage(3,'初始化天空、日照与反射');
   const daylight=createDaylight(scene,renderer,{details,invalidate});
+  installSoftShadowFilter(scene,renderer);
   let celestialState;
   const sceneElement=document.querySelector('#scene');
   let timeControls;
@@ -166,7 +185,7 @@ async function createScene(){
   const prePass=pass(scene,camera,{type:THREE.HalfFloatType,samples:0});
   const normalMRT=mrt({output:normalView});prePass.setMRT(normalMRT);
   const normal=prePass.getTextureNode('output'),depth=prePass.getTextureNode('depth');
-  const scenePass=pass(scene,camera,{type:THREE.HalfFloatType,samples:4});
+  const scenePass=pass(scene,camera,{type:THREE.HalfFloatType,samples:rasterQuality.msaa});
   scenePass.renderTarget.texture.colorSpace=THREE.LinearSRGBColorSpace;
   const passReuse=installNormalPassReuse({renderer,normalMRT,beautyTarget:scenePass.renderTarget,camera});
   const beauty=scenePass.getTextureNode('output');
@@ -226,14 +245,25 @@ async function createScene(){
   });
   function applyRasterQuality(settings){
     rasterQuality=settings;
+    scenePass.options.samples=settings.msaa;
+    const samplesChanged=scenePass.renderTarget.samples!==settings.msaa;
+    if(samplesChanged){
+      scenePass.renderTarget.samples=settings.msaa;
+      scenePass.renderTarget.dispose();
+      // Re-record both the new and previously used sample-count contexts.
+      // Their cached bundles must not retain stale material bindings on return.
+      bundles.invalidate();
+    }
     aoAmount.value=settings.ambientOcclusion?1:0;
     if(waterDescriptor?.rasterReflection)waterDescriptor.rasterReflection.value=settings.reflection?1:0;
     const ratio=pixelRatioFor(settings);
-    if(ratio!==basePixelRatio){
+    const ratioChanged=ratio!==basePixelRatio;
+    if(ratioChanged||samplesChanged){
       basePixelRatio=ratio;motionQuality.setBaseRatio(ratio);
       renderer.setPixelRatio(ratio);renderer.setSize(innerWidth,innerHeight);
-      aoTargetDirty=true;
+      if(ratioChanged)aoTargetDirty=true;
     }
+    motionQuality.setInteracting(settings.adaptiveResolution&&controls.active&&(!hybrid||hybrid.store.peekState().mode==='raster'));
     syncAOTarget();
     Object.assign(document.querySelector('#scene').dataset,{rasterPixelRatio:settings.pixelRatio,rasterAo:String(settings.ambientOcclusion),
       rasterReflection:String(settings.reflection),rasterAdaptive:String(settings.adaptiveResolution)});
@@ -260,8 +290,8 @@ async function createScene(){
   // Render on time/date changes and camera movement; never run an idle GPU loop.
   controls.addEventListener('change',()=>{hybrid?.cameraChanged();wake();});
   const activeInputs=new Set();
-  controls.addEventListener('start',event=>{activeInputs.add(event.travelSource||'pointer');hybrid?.setInteracting(true);motionQuality.setInteracting(true);wake();});
-  controls.addEventListener('end',event=>{activeInputs.delete(event.travelSource||'pointer');hybrid?.setInteracting(activeInputs.size>0);motionQuality.setInteracting(activeInputs.size>0);wake();});
+  controls.addEventListener('start',event=>{activeInputs.add(event.travelSource||'pointer');hybrid?.setInteracting(true);motionQuality.setInteracting(rasterQuality.adaptiveResolution&&hybrid?.store.peekState().mode==='raster');wake();});
+  controls.addEventListener('end',event=>{activeInputs.delete(event.travelSource||'pointer');hybrid?.setInteracting(activeInputs.size>0);motionQuality.setInteracting(rasterQuality.adaptiveResolution&&hybrid?.store.peekState().mode==='raster'&&activeInputs.size>0);wake();});
   addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);aoTargetDirty=true;syncAOTarget();hybrid?.resize();wake();});
   // Warm the visible Moon/stars, lamp shadows and unlit predawn variants while
   // the loading curtain is up, instead of compiling them on the first slider move.
@@ -340,7 +370,7 @@ async function createScene(){
   sceneElement.dataset.koi=garden.koi.length;
   console.info('SANTEI scene ready',diagnostics);
   startup.complete();
-  addEventListener('pagehide',()=>{userModel.dispose();urlState.dispose();ready=false;lensUI.dispose();hybrid.dispose();motionQuality.dispose();bundles.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
+  addEventListener('pagehide',()=>{ready=false;if(frameRequest!==null)cancelAnimationFrame(frameRequest);if(frameTask!==null)clearTimeout(frameTask);userModel.dispose();urlState.dispose();lensUI.dispose();hybrid.dispose();motionQuality.dispose();bundles.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
   // Initialization captured the current scene and prepared its first lens
   // sample. Schedule display without throwing away that prepared state.
   wake();
