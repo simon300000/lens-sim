@@ -1,4 +1,4 @@
-import {InstancedMesh} from 'three/webgpu';
+import {InstancedMesh,BufferGeometry,InstancedInterleavedBuffer,InterleavedBufferAttribute} from 'three/webgpu';
 
 /** Batch identical static opaque siblings without baking local geometry. Local
  * procedural wood coordinates, parent transforms and shadow layers stay intact. */
@@ -56,3 +56,49 @@ export function partitionStaticInstances(root,{cellSize=64,minInstances=2048}={}
   });
   return {addedBatches};
 }
+
+export const INSTANCE_MATRIX_ATTRIBUTES=Object.freeze(['instanceMatrix0','instanceMatrix1','instanceMatrix2','instanceMatrix3']);
+export const INSTANCE_COLOR_ATTRIBUTE='instanceColor';
+
+/** Give every InstancedMesh its own thin geometry: the source geometry's index
+ * and vertex attributes by reference, plus its instance matrices (four vec4
+ * columns of one instanced interleaved buffer over the mesh's own array) and
+ * instance colours as ordinary geometry attributes. Three then resolves the
+ * instance data per draw, so batches of one material can share a single shader
+ * build instead of compiling one per batch and pass (see three-interop). */
+export function shareInstanceAttributes(root){
+  let shared=0;
+  root.traverse(mesh=>{
+    if(!mesh.isInstancedMesh||mesh.geometry.userData.instanceSource)return;
+    const source=mesh.geometry,geometry=new BufferGeometry();
+    geometry.name=source.name;
+    if(source.index)geometry.setIndex(source.index);
+    for(const [name,attribute] of Object.entries(source.attributes))geometry.setAttribute(name,attribute);
+    for(const [name,targets] of Object.entries(source.morphAttributes))geometry.morphAttributes[name]=targets;
+    geometry.morphTargetsRelative=source.morphTargetsRelative;
+    for(const group of source.groups)geometry.addGroup(group.start,group.count,group.materialIndex);
+    geometry.setDrawRange(source.drawRange.start,source.drawRange.count);
+    if(!source.boundingSphere)source.computeBoundingSphere();
+    geometry.boundingSphere=source.boundingSphere.clone();
+    if(source.boundingBox)geometry.boundingBox=source.boundingBox.clone();
+    const matrices=new InstancedInterleavedBuffer(mesh.instanceMatrix.array,16,1);
+    matrices.setUsage(mesh.instanceMatrix.usage);matrices.sourceVersion=mesh.instanceMatrix.version;
+    INSTANCE_MATRIX_ATTRIBUTES.forEach((name,column)=>geometry.setAttribute(name,new InterleavedBufferAttribute(matrices,4,column*4)));
+    if(mesh.instanceColor)geometry.setAttribute(INSTANCE_COLOR_ATTRIBUTE,mesh.instanceColor);
+    geometry.userData.instanceSource=source;
+    mesh.geometry=geometry;shared++;
+  });
+  return {shared};
+}
+
+/** True when the object's geometry still carries its own live instance data. */
+export function hasSharedInstanceAttributes(object){
+  const geometry=object?.geometry;
+  if(!object?.isInstancedMesh||!geometry?.userData.instanceSource||Array.isArray(object.morphTargetInfluences))return false;
+  const matrices=geometry.attributes[INSTANCE_MATRIX_ATTRIBUTES[0]];
+  if(matrices?.data?.array!==object.instanceMatrix.array)return false;
+  return !object.instanceColor||geometry.attributes[INSTANCE_COLOR_ATTRIBUTE]===object.instanceColor;
+}
+
+/** Geometry identity for caches keyed on vertex data, seeing through the per-mesh instance wrapper. */
+export function sourceGeometry(geometry){return geometry.userData?.instanceSource??geometry;}

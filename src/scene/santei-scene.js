@@ -7,7 +7,7 @@ import { buildLandscape } from '../landscape.js';
 import { buildDetails } from '../details.js';
 import { buildGardenFeatures } from '../garden-features.js';
 import { applyMeadowVariation, applyWaterSurface } from './procedural-materials.js';
-import { batchStaticSiblings, partitionStaticInstances } from './static-batches.js';
+import { batchStaticSiblings, partitionStaticInstances, shareInstanceAttributes } from './static-batches.js';
 import { LOCAL_LAMP_SHADOW_LAYER } from './render-layers.js';
 
 /** The SANTEI villa scene, shared by the application and GPU benchmarks.
@@ -50,5 +50,6 @@ export function buildSanteiScene() {
   features.group.userData.staticBatches=batchStaticSiblings(features.group);
   landscape.root.userData.spatialBatches=partitionStaticInstances(landscape.root);
   const testTargets=buildTestTargets(scene);
+  scene.userData.sharedInstances=shareInstanceAttributes(scene);
   return { scene, garden, landscape, villa, vegetation, details, features, testTargets };
 }

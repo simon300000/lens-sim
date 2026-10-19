@@ -18,6 +18,7 @@ import { installURLState } from './url-state.js';
 import { createCameraRig, createScenePicker } from './camera-controls.js';
 import { installSceneCard } from './ui/scene-card.js';
 import {requiredGPULimits} from './rendering/gpu-policy.js';
+import { installSharedInstancing } from './rendering/three-interop.js';
 import { installUserModels } from './user-model.js';
 
 const faults=[];
@@ -45,6 +46,8 @@ async function createScene(){
     renderer=new THREE.WebGPURenderer({...rendererOptions,...outputRendererOptions(false)});
     await renderer.init();
   }
+  // One shader build per material for every instanced batch (see three-interop).
+  installSharedInstancing(renderer);
   const disposeActiveLights=installActiveLightNodes(renderer);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio,1.5));
   renderer.setSize(innerWidth,innerHeight);
