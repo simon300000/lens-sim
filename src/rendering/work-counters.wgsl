@@ -1,6 +1,6 @@
 // Work tallies for the diagnostics HUD's arithmetic estimate (src/rendering/work-model.js).
-// Private, per invocation: a plain register add at each primitive. Staged passes
-// reduce into a global buffer only while counting is enabled;
+// Private, per invocation: a plain register add at each primitive. The counting
+// variant of each staged pass adds them to a global buffer at the end of main;
 // other pipelines never read them, so the adds compile away. Prepend this file to
 // every module that includes optical-core.wgsl or scene-intersector.wgsl.
 const WORK_PATH: u32 = 0u;          // destination path (camera transform, accumulation)

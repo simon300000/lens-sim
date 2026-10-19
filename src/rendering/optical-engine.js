@@ -44,6 +44,12 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
   const target=interop.storage(32,'AF actual chief-ray world target');
   const pupil=interop.uniform(new Uint8Array(PUPIL_TABLE_BYTES),'Radial exit pupil proposal table');
   const WORK_BYTES=WORK_COUNTERS.length*8,work=interop.storage(WORK_BYTES,'Work tallies (64-bit lo/hi pairs)');
+  // While the HUD counts, every WORK_SAMPLE_EVERY-th accumulation round runs the
+  // counting variant (about 6% slower than the production passes); the other rounds
+  // run untouched. Whole rounds, not every n-th chunk: a chunk stride would keep
+  // sampling the same image regions of a multi-chunk round. Totals and timings are
+  // kept only for counted chunks, so every per-path figure stays exact.
+  const WORK_SAMPLE_EVERY=4;let workRound=0,roundCounted=false;
   // Independent/pinhole rays and explicit quadrant retracing are diagnostic
   // references; production mirror batches always use the three staged passes.
   const sampleSource=WORK_COUNTERS_WGSL+opticalSource+SCENE_INTERSECTOR_WGSL+SCENE_SHADING_WGSL+SPECTRAL_WGSL+SAMPLING_WGSL+pupilSource;
@@ -293,7 +299,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       // Complete every storage tile before advancing the global spp counter.
       const budget=(tileCursor||groupCursor)?roundBudget:sampleBudget(spp,targetSpp,batchSpp);if(!budget)return false;
       if(tileCursor===0&&groupCursor===0){
-        roundTarget=targetSpp;
+        roundTarget=targetSpp;roundCounted=workRound++%WORK_SAMPLE_EVERY===0;
         // Paired storage bands own all four destinations, even on GPUs whose
         // buffer binding limit requires many tiles. Freeze for a full sweep.
         roundMirror=mirrorReuse&&!pinhole?(mirrorReference?4:2):0;
@@ -309,7 +315,7 @@ export async function createOpticalEngine({interop,sceneResources,lighting,width
       const groups=Math.min(requested,scratchGroups);
       const dispatch=(chunked||roundMirror)?chunkDispatch(groups,device.limits.maxComputeWorkgroupsPerDimension):{x:groupsX,y:groupsY};
       if(roundMirror===4&&!pipelines.sampleValidation)throw new Error('Call prepareSampling before requesting mirror validation modes');
-      const counted=counting&&useStaged&&Boolean(tile.raygenCounting);
+      const counted=counting&&useStaged&&Boolean(tile.raygenCounting)&&roundCounted;
       const submission={revision:currentRevision,chunked,interactive,groups,work:groups*budget*(roundMirror?4:1),capacity:Math.min(totalGroups,scratchGroups)*budget*(roundMirror?4:1),tail:plan.tail,targetMs:plan.targetMs,gpuMs:null,counted,mirrorMode:roundMirror,integrationMode:useStaged?'staged':'reference'};
       submission.countEpoch=countEpoch;submission.workWindow=workWindow;submission.countedWorkUnits=submission.work;
       // Pixels this chunk writes (mirror reuse covers four per thread), for the HUD.

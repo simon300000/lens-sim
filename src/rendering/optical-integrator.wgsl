@@ -44,8 +44,14 @@ struct PixelAccum {
 // WORK-COUNTING-BEGIN  (compiled only into the diagnostics variant; needs a 9th storage buffer)
 // 64-bit work totals as (low, high) u32 pairs.
 @group(0) @binding(21) var<storage,read_write> workTotals: array<atomic<u32>>;
-// Per-lane staging (14 x 64 u32): plain stores, no shared-memory atomics.
-var<workgroup> workgroupWork: array<array<u32, 64>, 16>;
+// One 64-bit add per lane and nonzero counter. A workgroup-memory pre-reduction
+// measured slower on the RTX 4090 (its barrier and serial sums cost more than the
+// L2 atomics) and doubled the lens kernel's time.
+fn workAdd(counter: u32, v: u32) {
+  if (v == 0u) { return; }
+  let old = atomicAdd(&workTotals[counter * 2u], v);
+  if (old > 0xffffffffu - v) { atomicAdd(&workTotals[counter * 2u + 1u], 1u); }
+}
 // WORK-COUNTING-END
 
 const LINEAR_SRGB_TO_XYZ_M = mat3x3<f32>(
@@ -90,36 +96,27 @@ fn recordScene(a: ptr<function, PixelAccum>, scene: SceneSample) {
 }
 
 @compute @workgroup_size(8,8)
-fn main(@builtin(global_invocation_id) id:vec3<u32>,@builtin(local_invocation_index) lane:u32){
+fn main(@builtin(global_invocation_id) id:vec3<u32>){
   if(render.debug.x>=2u){integrateMirrors(id);}else{integratePixel(id);}
   // WORK-COUNTING-BEGIN
-  // Every invocation reaches the barrier: integratePixel returns, never exits main.
   // Constant indices only: a dynamic index would move workCounters out of registers
   // and slow every tally in the traversal loops.
-  workgroupWork[0][lane]=workCounters[0];
-  workgroupWork[1][lane]=workCounters[1];
-  workgroupWork[2][lane]=workCounters[2];
-  workgroupWork[3][lane]=workCounters[3];
-  workgroupWork[4][lane]=workCounters[4];
-  workgroupWork[5][lane]=workCounters[5];
-  workgroupWork[6][lane]=workCounters[6];
-  workgroupWork[7][lane]=workCounters[7];
-  workgroupWork[8][lane]=workCounters[8];
-  workgroupWork[9][lane]=workCounters[9];
-  workgroupWork[10][lane]=workCounters[10];
-  workgroupWork[11][lane]=workCounters[11];
-  workgroupWork[12][lane]=workCounters[12];
-  workgroupWork[13][lane]=workCounters[13];
-  workgroupWork[14][lane]=workCounters[14];
-  workgroupWork[15][lane]=workCounters[15];
-  workgroupBarrier();
-  // One lane per counter sums the 64 lanes, then a single global 64-bit add.
-  if(lane<WORK_COUNTERS){
-    var lo=0u;var hi=0u;
-    for(var i=0u;i<64u;i++){let v=workgroupWork[lane][i];let old=lo;lo+=v;if(old>0xffffffffu-v){hi++;}}
-    if(lo!=0u){let old=atomicAdd(&workTotals[lane*2u],lo);if(old>0xffffffffu-lo){hi++;}}
-    if(hi!=0u){atomicAdd(&workTotals[lane*2u+1u],hi);}
-  }
+  workAdd(0u, workCounters[0]);
+  workAdd(1u, workCounters[1]);
+  workAdd(2u, workCounters[2]);
+  workAdd(3u, workCounters[3]);
+  workAdd(4u, workCounters[4]);
+  workAdd(5u, workCounters[5]);
+  workAdd(6u, workCounters[6]);
+  workAdd(7u, workCounters[7]);
+  workAdd(8u, workCounters[8]);
+  workAdd(9u, workCounters[9]);
+  workAdd(10u, workCounters[10]);
+  workAdd(11u, workCounters[11]);
+  workAdd(12u, workCounters[12]);
+  workAdd(13u, workCounters[13]);
+  workAdd(14u, workCounters[14]);
+  workAdd(15u, workCounters[15]);
   // WORK-COUNTING-END
 }
 fn integratePixel(id:vec3<u32>){

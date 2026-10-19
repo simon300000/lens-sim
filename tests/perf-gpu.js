@@ -39,31 +39,37 @@ try {
     const a = performance.now(); lighting.refresh(); const submit = performance.now() - a;
     await interop.device.queue.onSubmittedWorkDone(); return { cpuSubmitMs: submit, submitToDoneWallMs: performance.now() - a };
   }
-  async function batches(options) {
-    engine.reset(); const gpu = [], wall = [], stages = [];
-    for (let i = 0; i < BATCHES; i++) {
-      const a = performance.now(); engine.sample({ batchSpp: 4, targetSpp: 0, ...options }); await interop.device.queue.onSubmittedWorkDone(); wall.push(performance.now() - a);
-      await new Promise(r => setTimeout(r, 20)); if (engine.lastTiming) { gpu.push(engine.lastTiming.ms); stages.push(engine.lastTiming); }
+  // `until`: no inter-batch pause, run until the promise settles (app-like continuous sampling).
+  async function batches(options, { until = null, sleepMs = 20 } = {}) {
+    // Warm-up: after a few seconds of idle (a pipeline compile, a wait) this GPU sits in a low
+    // power state (P3: 5001 MHz memory, ~600 MHz core) that takes a sustained load to leave;
+    // measured right then, batches read 2-4x slower. Sample continuously first.
+    if (!until) { engine.reset(); const w = performance.now(); while (performance.now() - w < 400) { engine.sample({ batchSpp: 4, targetSpp: 0, ...options }); await interop.device.queue.onSubmittedWorkDone(); } }
+    engine.reset(); const gpu = [], wall = [], stages = [], t = [];
+    let settled = !until; until?.finally(() => { settled = true; });
+    for (let i = 0; (until ? !settled && i < 2000 : i < BATCHES); i++) {
+      const a = performance.now(); t.push(Date.now()); engine.sample({ batchSpp: 4, targetSpp: 0, ...options }); await interop.device.queue.onSubmittedWorkDone(); wall.push(performance.now() - a);
+      if (!until) await new Promise(r => setTimeout(r, sleepMs)); if (engine.lastTiming) { gpu.push(engine.lastTiming.ms); stages.push(engine.lastTiming); }
     }
     // ?stages=1 with the staged integrator: per-kernel GPU medians (lensMs, traceMs, sceneMs).
     const stageMs = Object.fromEntries(['lensMs', 'traceMs', 'sceneMs'].filter(k => stages.some(t => t[k] != null)).map(k => [k, stats(stages.map(t => t[k]).filter(v => v != null)).median]));
     const s = await engine.statistics();
-    return { gpuTimestampMsPerBatch: gpu.length ? stats(gpu) : null, submitToDoneWallMsPerBatch: stats(wall), raw: { gpu, wall }, stageMs, pathsPerBatch: W * W / 1.5 * 4, attemptedSamples: s.attemptedSamples, spp: engine.spp,
+    return { gpuTimestampMsPerBatch: gpu.length ? stats(gpu) : null, submitToDoneWallMsPerBatch: stats(wall), raw: { gpu, wall, t }, stageMs, pathsPerBatch: W * W / 1.5 * 4, attemptedSamples: s.attemptedSamples, spp: engine.spp,
       attemptedPerSecondFromGPU: gpu.length ? W * W / 1.5 * 4 / (stats(gpu).median / 1000) : null, rates: { pass: s.opticalPassRate, hit: s.sceneHitOfPassed, background: s.backgroundOfPassed, bvhError: s.bvhErrorRate, unsupported: s.unsupportedRate, transparencyLimit: s.transparencyLimitRate, reflectionOutside: s.reflectionOutsideRate } };
   }
   const refresh = { initial: await refreshTimed(), initialRepeat: await refreshTimed() };
   step('refresh');
-  // ?work=1: per-path primitive tallies from the diagnostics (counting) kernel variant.
-  // Its timing is not the production kernel's; only the counts are reported.
+  // ?work=1: per-path primitive tallies from the diagnostics (counting) kernel variant,
+  // with the GPU time of those counted batches.
   const countWork = async (force = false) => {
     if (q.get('work') !== '1' && !force) return null;
     const status = await engine.setWorkCounting(true);
     let work = { status };
     if (status === 'counting') {
-      engine.reset();
-      for (let i = 0; i < 4; i++) { engine.sample({ batchSpp: 4, targetSpp: 0 }); await interop.device.queue.onSubmittedWorkDone(); }
+      // Counted batches are timed like production ones: the HUD runs this variant while open.
+      const counted = await batches({});
       const w = await engine.readWork(), paths = Math.max(1, w.counts[0]);
-      work = { status, paths, perPath: Object.fromEntries(WORK_COUNTERS.map(([key], i) => [key, w.counts[i] / paths])) };
+      work = { status, paths, perPath: Object.fromEntries(WORK_COUNTERS.map(([key], i) => [key, w.counts[i] / paths])), gpuTimestampMsPerBatch: counted.gpuTimestampMsPerBatch, stageMs: counted.stageMs, raw: counted.raw };
     }
     await engine.setWorkCounting(false); step('work counted');
     return work;
@@ -89,9 +95,13 @@ try {
     else if (p === 'update') await setHour(hour, named('update'));
     else if (p === 'tables') { sceneResources.writeTables(); step('tables written'); }
     else if (p.startsWith('wait')) { await new Promise(r => setTimeout(r, Number(p.slice(4)) * 1000)); step(p); }
-    // count: per-path primitive tallies (the counting kernel variant). Measure before counting:
-    // on NVIDIA/Windows the production kernel runs several times slower for the rest of the
-    // session once the counting variant has been dispatched.
+    // compilebg: compile the counting variant while sampling continues (as the app does), never dispatch it.
+    else if (p === 'compilebg') { const a = performance.now(); const pending = engine.setWorkCounting(true); const key = named('compileBg'); phases[key] = await batches({}, { until: pending }); const status = await pending; await engine.setWorkCounting(false); work[key] = { status, compileMs: performance.now() - a }; step('compiled in background'); }
+    // compile: build and bind the counting variant without ever dispatching it.
+    else if (p === 'compile') { const a = performance.now(); const status = await engine.setWorkCounting(true); await engine.setWorkCounting(false); work[named('compile')] = { status, compileMs: performance.now() - a }; step('compiled'); }
+    // count: per-path primitive tallies and the timing of counted batches (the HUD runs this
+    // variant on one chunk in four while open). Compiling the variant takes seconds with the GPU
+    // idle; the warm-up in batches() brings the clocks back before anything is timed.
     else if (p === 'count') { work[named('count')] = await countWork(true); }
     else throw new Error('Unknown phase ' + p);
   }

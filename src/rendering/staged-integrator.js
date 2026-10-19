@@ -146,11 +146,11 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   const entry='@compute @workgroup_size(8,8)\nfn main(@builtin(global_invocation_id) id:vec3u)';
   const counted=source=>{
     if(!source.includes(entry))throw new Error('Split stage entry changed');
-    // Early returns leave only integrateStage. All lanes, including padding,
-    // always reach the reduction barrier in main.
+    // Early returns stay inside integrateStage, so every lane, padding included,
+    // reaches the tally adds in main.
     return source.replace(entry,'fn integrateStage(id:vec3u)')+blocks[0].replace('@binding(21)','@binding(22)')+`
 @compute @workgroup_size(8,8)
-fn main(@builtin(global_invocation_id) id:vec3u,@builtin(local_invocation_index) lane:u32){
+fn main(@builtin(global_invocation_id) id:vec3u){
   integrateStage(id);
 ${blocks[1]}
 }

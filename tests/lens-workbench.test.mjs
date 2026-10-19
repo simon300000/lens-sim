@@ -136,8 +136,10 @@ test('every WGSL work counter has a cost-model entry in the same order', async (
   assert.equal(consts.length, WORK_COUNTERS.length);
   consts.forEach(([, , index], i) => assert.equal(Number(index), i));
   assert.match(wgsl, new RegExp(`array<u32, ${WORK_COUNTERS.length}>`));
+  // The counting variant adds every counter, and only those, to the 64-bit totals.
   const integrator = await readFile(new URL('../src/rendering/optical-integrator.wgsl', import.meta.url), 'utf8');
-  assert.match(integrator, new RegExp(`array<array<u32, 64>, ${WORK_COUNTERS.length}>`));
+  WORK_COUNTERS.forEach((_, i) => assert.ok(integrator.includes(`workAdd(${i}u, workCounters[${i}]);`), `counter ${i} reduced`));
+  assert.ok(!integrator.includes(`workCounters[${WORK_COUNTERS.length}]`));
 });
 
 test('mirrored work estimates count shared optical launches once and skip blocked camera transforms',async()=>{
