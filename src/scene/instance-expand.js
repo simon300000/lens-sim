@@ -15,9 +15,16 @@ function rows(m, out, o) {
 }
 const IDENTITY = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 
+/** Meshes with at most this many referenced vertices get exact world bounds from
+ * their transformed vertices instead of the (looser) transformed local box; the
+ * TLAS over vegetation overlaps far less, which saves instance entries. */
+export const TIGHT_BOUNDS_MAX_VERTICES = 64;
+
 /** objects: [{matrixWorld:number[16], instanceMatrices:Float32Array|null, colors:Float32Array|null,
- *   count, blas, material, flags, objectIndex}]; blasBounds: (number[6]|null)[] */
-export function expandInstances(objects, blasBounds) {
+ *   count, blas, material, flags, objectIndex}]; blasBounds: (number[6]|null)[];
+ * blasPoints: (Float32Array|null)[] optional xyz triples of the referenced vertices
+ * for small meshes (exact world bounds), null for the box-corner path. */
+export function expandInstances(objects, blasBounds, blasPoints = null) {
   const n = objects.reduce((s, o) => s + o.count, 0);
   const inst = { count: 0, w2o: new Float32Array(n * 12), frame: new Float32Array(n * 12), blas: new Uint32Array(n), material: new Uint32Array(n),
     flags: new Uint32Array(n), color: new Float32Array(n * 3), object: new Uint32Array(n), instance: new Uint32Array(n), bounds: new Float32Array(n * 6) };
@@ -45,9 +52,17 @@ export function expandInstances(objects, blasBounds) {
       if (o.colors) { inst.color[k * 3] = o.colors[i * 3]; inst.color[k * 3 + 1] = o.colors[i * 3 + 1]; inst.color[k * 3 + 2] = o.colors[i * 3 + 2]; }
       else inst.color.fill(1, k * 3, k * 3 + 3);
       let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-      for (let cI = 0; cI < 8; cI++) {
-        const p = [cI & 1 ? b[3] : b[0], cI & 2 ? b[4] : b[1], cI & 4 ? b[5] : b[2]];
-        for (let r = 0; r < 3; r++) { const v = o2w[r] * p[0] + o2w[4 + r] * p[1] + o2w[8 + r] * p[2] + o2w[12 + r]; lo[r] = Math.min(lo[r], v); hi[r] = Math.max(hi[r], v); }
+      const points = blasPoints?.[o.blas];
+      if (points) {
+        // Exact bounds of the transformed vertices (f64 products, like the matrix inverse).
+        for (let v = 0; v < points.length; v += 3) {
+          for (let r = 0; r < 3; r++) { const x = o2w[r] * points[v] + o2w[4 + r] * points[v + 1] + o2w[8 + r] * points[v + 2] + o2w[12 + r]; lo[r] = Math.min(lo[r], x); hi[r] = Math.max(hi[r], x); }
+        }
+      } else {
+        for (let cI = 0; cI < 8; cI++) {
+          const p = [cI & 1 ? b[3] : b[0], cI & 2 ? b[4] : b[1], cI & 4 ? b[5] : b[2]];
+          for (let r = 0; r < 3; r++) { const v = o2w[r] * p[0] + o2w[4 + r] * p[1] + o2w[8 + r] * p[2] + o2w[12 + r]; lo[r] = Math.min(lo[r], v); hi[r] = Math.max(hi[r], v); }
+        }
       }
       inst.bounds.set([...lo, ...hi], k * 6);
       k++;

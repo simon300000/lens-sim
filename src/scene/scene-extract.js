@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { lensRole, lensMaterial, PROCEDURAL } from './lens-registry.js';
-import { expandInstances } from './instance-expand.js';
+import { expandInstances, TIGHT_BOUNDS_MAX_VERTICES } from './instance-expand.js';
 
 /** Scene → plain typed arrays for the lens BVH. CPU-side preparation only;
  * it never renders or queries pixels. Typed arrays are COPIED from Three's
@@ -73,9 +73,14 @@ function blasSource(geometry, start, count) {
     else colors.fill(1, i * 4, i * 4 + 4);
   }
   _box.makeEmpty();
-  for (let t = 0; t < indices.length; t++) _box.expandByPoint(_v.fromArray(positions, indices[t] * 3));
+  const used = new Set();
+  for (let t = 0; t < indices.length; t++) { _box.expandByPoint(_v.fromArray(positions, indices[t] * 3)); used.add(indices[t]); }
+  // Small meshes (vegetation) also hand their referenced vertices to the instance
+  // expansion for exact world bounds; large meshes keep the box-corner bounds.
+  let points = null;
+  if (used.size <= TIGHT_BOUNDS_MAX_VERTICES) { points = new Float32Array(used.size * 3); let k = 0; for (const i of used) { points[k++] = positions[i * 3]; points[k++] = positions[i * 3 + 1]; points[k++] = positions[i * 3 + 2]; } }
   return { positions, normals, uvs, colors, indices, primitiveIds, triangleCount: triCount, hasNormal: !!normal, hasUV: !!uv, hasColor: !!color,
-    bounds: _box.isEmpty() ? null : [..._box.min.toArray(), ..._box.max.toArray()], geometryUuid: geometry.uuid, range: [first, last] };
+    bounds: _box.isEmpty() ? null : [..._box.min.toArray(), ..._box.max.toArray()], points, geometryUuid: geometry.uuid, range: [first, last] };
 }
 
 /** Walk the scene once. Returns the BLAS sources, flat instance arrays and
@@ -151,10 +156,10 @@ export function extractScene(scene, { camera = null, knownBlas = null, deferInst
       instanceMatrices: object.isInstancedMesh ? object.instanceMatrix.array.slice(0, entry.count * 16) : null,
       colors: object.instanceColor ? object.instanceColor.array.slice(0, entry.count * 3) : null };
   });
-  const blasBounds = blas.map(b => b.bounds);
+  const blasBounds = blas.map(b => b.bounds), blasPoints = blas.map(b => b.points ?? null);
   let instances = null;
   if (!deferInstances) {
-    const expanded = expandInstances(instanceSources, blasBounds);
+    const expanded = expandInstances(instanceSources, blasBounds, blasPoints);
     instances = expanded.instances; report.degenerate = expanded.report.degenerate; report.negativeDeterminant = expanded.report.negativeDeterminant;
   }
   const k = instances ? instances.count : instanceTotal;
@@ -163,7 +168,7 @@ export function extractScene(scene, { camera = null, knownBlas = null, deferInst
   report.uniqueTriangles = blas.reduce((s, b) => s + b.triangleCount, 0);
   report.materials = materials.length;
   report.extractMs = performance.now() - started;
-  return { blas, instances, instanceSources, blasBounds, materials, objects, report };
+  return { blas, instances, instanceSources, blasBounds, blasPoints, materials, objects, report };
 }
 
 /** Cheap per-object signature for change detection without re-extracting. */

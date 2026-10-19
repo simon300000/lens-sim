@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { buildSanteiScene } from '../src/scene/santei-scene.js';
 import { createDaylight } from '../src/lighting.js';
 import { createLensRig,focusTestLens } from './gpu-fixtures.js';
+import { WORK_COUNTERS } from '../src/rendering/work-model.js';
 /** Performance record of the V2 lens path on the full villa scene. GPU times
  * are timestamp-query durations of one compute pass (one tile batch); CPU
  * times are labelled as such. Results describe THIS adapter only. */
@@ -11,7 +12,7 @@ const step = l => console.log('[step] ' + l + ' ' + performance.now().toFixed(0)
 const stats = a => { const s = [...a].sort((x, y) => x - y); return { n: s.length, min: s[0], median: s[Math.floor(s.length / 2)], max: s.at(-1), mean: s.reduce((x, y) => x + y, 0) / s.length }; };
 try {
   const adapter = await navigator.gpu.requestAdapter();
-  const renderer = new THREE.WebGPURenderer({ antialias: false, requiredLimits: { maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize, maxBufferSize: adapter.limits.maxBufferSize } });
+  const renderer = new THREE.WebGPURenderer({ antialias: false, requiredLimits: { maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize, maxBufferSize: adapter.limits.maxBufferSize, maxStorageBuffersPerShaderStage: adapter.limits.maxStorageBuffersPerShaderStage } });
   await renderer.init(); renderer.setSize(W, W / 1.5); renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; renderer.toneMapping = THREE.NoToneMapping;
   const errors = []; renderer.backend.device.addEventListener('uncapturederror', e => { errors.push(e.error.message); step('GPU ERROR ' + e.error.message.split('\n')[0]); });
   let t = performance.now();
@@ -25,7 +26,8 @@ try {
   renderer.setRenderTarget(firstTarget); renderer.render(scene, camera); renderer.setRenderTarget(null); await renderer.backend.device.queue.onSubmittedWorkDone();
   const firstRasterWallMs = performance.now() - t; step('first raster');
   t = performance.now();
-  const rig = await createLensRig({ renderer, scene, camera, width: W, environment: daylight });
+  // ?mode=split selects the two-kernel (lens batch, then scene) integrator for comparison.
+  const rig = await createLensRig({ renderer, scene, camera, width: W, environment: daylight, engineOptions: q.get('mode') ? { integrationMode: q.get('mode') } : {} });
   const rigWallMs = performance.now() - t; step('rig');
   const { interop, engine, lighting, sceneResources } = rig;
   const lens = (await (await fetch('/lenses/canon-fl-50mm-f1-8.json')).json()).configurations[0];
@@ -42,20 +44,59 @@ try {
       await new Promise(r => setTimeout(r, 20)); if (engine.lastTiming) gpu.push(engine.lastTiming.ms);
     }
     const s = await engine.statistics();
-    return { gpuTimestampMsPerBatch: gpu.length ? stats(gpu) : null, submitToDoneWallMsPerBatch: stats(wall), pathsPerBatch: W * W / 1.5 * 4,
+    return { gpuTimestampMsPerBatch: gpu.length ? stats(gpu) : null, submitToDoneWallMsPerBatch: stats(wall), raw: { gpu, wall }, pathsPerBatch: W * W / 1.5 * 4, attemptedSamples: s.attemptedSamples, spp: engine.spp,
       attemptedPerSecondFromGPU: gpu.length ? W * W / 1.5 * 4 / (stats(gpu).median / 1000) : null, rates: { pass: s.opticalPassRate, hit: s.sceneHitOfPassed, background: s.backgroundOfPassed, bvhError: s.bvhErrorRate, unsupported: s.unsupportedRate, transparencyLimit: s.transparencyLimitRate, reflectionOutside: s.reflectionOutsideRate } };
   }
-  const refresh = { day: await refreshTimed(), dayRepeat: await refreshTimed() };
+  const refresh = { initial: await refreshTimed(), initialRepeat: await refreshTimed() };
   step('refresh');
-  const day = await batches({}); step('day batches');
-  const opticsOnly = await batches({ constantEnvironment: [1, 1, 1] }); step('optics-only batches');
-  daylight.update({ hour: 0, date: '2026-09-26' }, true); step('night update'); sceneResources.writeTables(); refresh.night = await refreshTimed(); step('night refreshed');
-  const night = await batches({}); step('night batches');
+  // ?work=1: per-path primitive tallies from the diagnostics (counting) kernel variant.
+  // Its timing is not the production kernel's; only the counts are reported.
+  const countWork = async (force = false) => {
+    if (q.get('work') !== '1' && !force) return null;
+    const status = await engine.setWorkCounting(true);
+    let work = { status };
+    if (status === 'counting') {
+      engine.reset();
+      for (let i = 0; i < 4; i++) { engine.sample({ batchSpp: 4, targetSpp: 0 }); await interop.device.queue.onSubmittedWorkDone(); }
+      const w = await engine.readWork(), paths = Math.max(1, w.counts[0]);
+      work = { status, paths, perPath: Object.fromEntries(WORK_COUNTERS.map(([key], i) => [key, w.counts[i] / paths])) };
+    }
+    await engine.setWorkCounting(false); step('work counted');
+    return work;
+  };
+  // ?phases=: measured phases in order. day/night set the time of day (resource refresh
+  // only when it changes) and measure; optics measures the lens kernel alone; refresh,
+  // update (same hour), tables and waitN are state changes without a measurement.
+  // Day again after night separates scene-dependent cost from drift across the run.
+  const phases = {}, work = {}, named = base => { let n = base, i = 2; while (phases[n] || refresh[n]) n = base + i++; return n; };
+  let hour = 16.5;
+  const setHour = async (next, key) => { daylight.update({ hour: next, date: '2026-09-26' }, true); sceneResources.writeTables(); refresh[key] = await refreshTimed(); hour = next; step(key + ' refreshed'); };
+  for (const p of (q.get('phases') ?? 'day,optics,night,day').split(',')) {
+    if (p === 'day' || p === 'night') {
+      const key = named(p), next = p === 'day' ? 16.5 : 0;
+      if (next !== hour) await setHour(next, key);
+      phases[key] = await batches({}); step(key + ' batches'); work[key] = await countWork();
+    } else if (p === 'optics') { const key = named('opticsOnly'); phases[key] = await batches({ constantEnvironment: [1, 1, 1] }); step(key + ' batches'); }
+    // Coherent pixel-centre rays of the reference camera (independent kernel, no lens): isolates traversal divergence.
+    else if (p === 'pinhole') { const key = named('pinhole'); phases[key] = await batches({ pinhole: { cameraToWorld: camera.matrixWorld.elements, clipToCamera: camera.projectionMatrixInverse.elements } }); step(key + ' batches'); }
+    // Lens rays without mirror reuse (independent kernel): same rays as the mirror kernel, one ray per thread step.
+    else if (p === 'independent') { const key = named('independent'); phases[key] = await batches({ mirrorReuse: false }); step(key + ' batches'); }
+    else if (p === 'refresh') { refresh[named('refreshOnly')] = await refreshTimed(); step('refresh only'); }
+    else if (p === 'update') await setHour(hour, named('update'));
+    else if (p === 'tables') { sceneResources.writeTables(); step('tables written'); }
+    else if (p.startsWith('wait')) { await new Promise(r => setTimeout(r, Number(p.slice(4)) * 1000)); step(p); }
+    // count: per-path primitive tallies (the counting kernel variant). Measure before counting:
+    // on NVIDIA/Windows the production kernel runs several times slower for the rest of the
+    // session once the counting variant has been dispatched.
+    else if (p === 'count') { work[named('count')] = await countWork(true); }
+    else throw new Error('Unknown phase ' + p);
+  }
+  const day = phases.day, night = phases.night, dayRepeat = phases.day2, opticsOnly = phases.opticsOnly;
   // Known, pre-existing Three r183 shadow/reflector issue (reproduced on V1);
   // reported separately, every other GPU error fails.
   const known = errors.filter(e => /Destroyed texture \[Texture "(Point)?ShadowDepthTexture"\] used in a submit/.test(e)), other = errors.filter(e => !known.includes(e));
-  const result = { passed: other.length === 0 && day.rates.bvhError === 0 && night.rates.bvhError === 0, knownThreeShadowErrors: known.length, environment: { userAgent: navigator.userAgent, adapter: adapter.info, timestampQuery: interop.device.features.has('timestamp-query') },
-    image: [W, W / 1.5], batchSpp: 4, sceneBuildMs, firstRasterWallMs, rigWallMs, bvh: sceneResources.stats, refresh, day, night, opticsOnly,
+  const result = { passed: other.length === 0 && Object.values(phases).every(p => p.rates.bvhError === 0), knownThreeShadowErrors: known.length, environment: { userAgent: navigator.userAgent, adapter: adapter.info, timestampQuery: interop.device.features.has('timestamp-query') },
+    image: [W, W / 1.5], batchSpp: 4, sceneBuildMs, firstRasterWallMs, rigWallMs, bvh: sceneResources.stats, refresh, phases, day, night, dayRepeat, opticsOnly, work,
     memory: { bvhAndTablesBytes: sceneResources.stats.gpuBytes, engineBytes: engine.memoryBytes }, lighting: lighting.status, errors };
   out.textContent = JSON.stringify(result, null, 2); document.body.dataset.passed = String(result.passed);
 } catch (error) { out.textContent = error.message+'\n'+(error.stack||String(error)); document.body.dataset.passed = 'false'; console.error(error); }

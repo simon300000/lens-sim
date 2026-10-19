@@ -114,13 +114,13 @@ export function createSceneResources({ interop, scene, camera = null, starAngula
         newSources.push([keys[i], ex.blas[i]]);
       }
       // Instance matrices are expanded (inverted, bounded) in the Worker too.
-      const response = await worker.request({ type: 'build', blasKeys: keys, newSources, instanceSources: ex.instanceSources, blasBounds: ex.blasBounds });
+      const response = await worker.request({ type: 'build', blasKeys: keys, newSources, instanceSources: ex.instanceSources, blasBounds: ex.blasBounds, blasPoints: ex.blasPoints });
       packed = response.packed; workerKeys = new Set(keys);
       ex.instances = response.instances;
       ex.report.degenerate = response.expandReport.degenerate; ex.report.negativeDeterminant = response.expandReport.negativeDeterminant;
       ex.report.instances = response.instances.count;
       knownBlas.clear();
-      for (const b of ex.blas) knownBlas.set(b.key, { key: b.key, bounds: b.bounds, triangleCount: b.triangleCount, hasColor: b.hasColor, hasNormal: b.hasNormal,
+      for (const b of ex.blas) knownBlas.set(b.key, { key: b.key, bounds: b.bounds, points: b.points ?? null, triangleCount: b.triangleCount, hasColor: b.hasColor, hasNormal: b.hasNormal,
         hasUV: b.hasUV, geometryUuid: b.geometryUuid, range: b.range, stub: true });
     } else packed = buildSceneBuffers({ blasSources: ex.blas, blasKeys: keys, instances: ex.instances });
     if (disposed) return null;

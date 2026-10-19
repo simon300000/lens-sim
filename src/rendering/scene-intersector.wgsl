@@ -9,8 +9,8 @@
 struct BvhNode { lo: vec3f, a: u32, hi: vec3f, b: u32 }
 struct SceneInstance {
   w2o0: vec4f, w2o1: vec4f, w2o2: vec4f,       // world -> geometry (row-major 3x4)
-  frame0: vec4f, frame1: vec4f, frame2: vec4f, // geometry -> TSL positionLocal (instanceMatrix or identity)
   info: vec4u,                                 // BLAS root node, material, flags, source record
+  frame0: vec4f, frame1: vec4f, frame2: vec4f, // geometry -> TSL positionLocal (instanceMatrix or identity)
   color: vec4f,                                // instance colour (1 if absent)
 }
 struct SceneTriangle { p0: vec3f, i0: u32, p1: vec3f, i1: u32, p2: vec3f, i2: u32, prim: u32, blas: u32, pad0: u32, pad1: u32 }
@@ -67,12 +67,28 @@ fn sceneSafeInverse(d: vec3f) -> vec3f {
   let tiny = select(vec3f(1e-30), vec3f(-1e-30), d < vec3f(0.0));
   return 1.0 / select(d, tiny, abs(d) < vec3f(1e-30));
 }
-fn sceneBox(n: BvhNode, o: vec3f, d: vec3f, inv: vec3f, tMin: f32, tMax: f32) -> f32 {
+// Slab test for a ray with no exactly-zero direction component: the common
+// case, bit-identical to sceneBoxParallel's result for such rays (that function
+// evaluates the same products once its selects pass the components through).
+// d is unused; both tests share one signature for the traversal template.
+fn sceneBoxFast(n: BvhNode, o: vec3f, d: vec3f, inv: vec3f, tMin: f32, tMax: f32) -> f32 {
   workCounters[WORK_BOX]++;
-  // A ray parallel to an axis occupies that slab for its entire interval if
-  // its origin is inside the CLOSED slab. In particular an origin exactly on
-  // the upper face must not turn the slab exit into zero via 0 * safeInverse.
-  // Test the actual direction: a tiny nonzero direction is not parallel.
+  let t0 = (n.lo - o) * inv;
+  let t1 = (n.hi - o) * inv;
+  let tn = min(t0, t1);
+  let tf = max(t0, t1);
+  let enter = max(max(tn.x, tn.y), max(tn.z, tMin));
+  let exit = min(min(tf.x, tf.y), min(tf.z, tMax)) * 1.0000004;
+  return select(SCENE_NO_HIT, enter, enter <= exit);
+}
+// Slab test for a ray with some exactly-zero direction component (axis-aligned
+// diagnostics such as the chart centre probe). A ray parallel to an axis
+// occupies that slab for its entire interval if its origin is inside the
+// CLOSED slab. In particular an origin exactly on the upper face must not turn
+// the slab exit into zero via 0 * safeInverse. Test the actual direction: a
+// tiny nonzero direction is not parallel.
+fn sceneBoxParallel(n: BvhNode, o: vec3f, d: vec3f, inv: vec3f, tMin: f32, tMax: f32) -> f32 {
+  workCounters[WORK_BOX]++;
   let parallel = d == vec3f(0.0);
   if ((parallel.x && (o.x < n.lo.x || o.x > n.hi.x)) ||
       (parallel.y && (o.y < n.lo.y || o.y > n.hi.y)) ||
@@ -85,7 +101,6 @@ fn sceneBox(n: BvhNode, o: vec3f, d: vec3f, inv: vec3f, tMin: f32, tMax: f32) ->
   let exit = min(min(tf.x, tf.y), min(tf.z, tMax)) * 1.0000004;
   return select(SCENE_NO_HIT, enter, enter <= exit);
 }
-
 struct WatertightRay { o: vec3f, kx: u32, ky: u32, kz: u32, s: vec3f }
 // Compensated difference of products keeps shared-edge tests antisymmetric
 // even when Metal contracts multiply/subtract into FMA. A plain a*b-c*d can
@@ -136,9 +151,17 @@ fn sceneError(hit: SceneHit, code: u32, visits: u32) -> SceneHit {
   var h = hit; h.status = HIT_ERROR; h.error = code; h.visits = visits; return h;
 }
 
+// ---------------------------------------------------------------------------
+// Traversal template. scene-wgsl.js expands it twice: sceneIntersectFast with
+// sceneBoxFast for rays without a zero direction component (lines marked
+// FAST_ONLY kept), and sceneIntersectParallel with sceneBoxParallel (those lines
+// dropped). sceneIntersect below picks the variant per ray, so the hot loop of
+// ordinary rays carries no parallel-slab code. The raw file is not valid WGSL
+// on its own; always include it through SCENE_INTERSECTOR_WGSL.
+// TRAVERSAL-TEMPLATE-BEGIN
 /// Nearest accepted surface with t in (tMin, tMax). Never stops at the first
 /// candidate; all overlapping subtrees are visited until they are farther.
-fn sceneIntersect(originW: vec3f, dirW: vec3f, tMin: f32, tMax: f32) -> SceneHit {
+fn sceneIntersect_VARIANT(originW: vec3f, dirW: vec3f, tMin: f32, tMax: f32) -> SceneHit {
   var hit: SceneHit;
   hit.t = tMax; hit.status = HIT_NONE;
   if (!sceneFinite3(originW) || !sceneFinite3(dirW) || !(dot(dirW, dirW) > 1e-24) || !(tMin >= 0.0) || !(tMax > tMin)) {
@@ -155,7 +178,7 @@ fn sceneIntersect(originW: vec3f, dirW: vec3f, tMin: f32, tMax: f32) -> SceneHit
   var ray = sceneWatertight(originW, dirW);
   var inBlas = false; var blasBase = 0u; var instance = 0u; var flags = 0u;
   var visits = 0u;
-  if (sceneBox(sceneNodes[0], o, d, inv, tMin, hit.t) >= SCENE_NO_HIT) { return hit; }
+  if (sceneBox_VARIANT(sceneNodes[0], o, d, inv, tMin, hit.t) >= SCENE_NO_HIT) { return hit; }
   var node = 0u;
   loop {
     visits++;
@@ -175,7 +198,10 @@ fn sceneIntersect(originW: vec3f, dirW: vec3f, tMin: f32, tMax: f32) -> SceneHit
         let root = I.info.x;
         if (root >= nodeCount) { return sceneError(hit, BVH_ERR_NODE, visits); }
         let linv = sceneSafeInverse(ld);
-        if (sceneBox(sceneNodes[root], lo, ld, linv, tMin, hit.t) < SCENE_NO_HIT) {
+        //FAST_ONLY: // An instance transform can zero a component (axis-aligned rotation of an
+        //FAST_ONLY: // axis-aligned ray); such rays restart in the exact variant.
+        //FAST_ONLY: if (any(ld == vec3f(0.0))) { return sceneIntersectParallel(originW, dirW, tMin, tMax); }
+        if (sceneBox_VARIANT(sceneNodes[root], lo, ld, linv, tMin, hit.t) < SCENE_NO_HIT) {
           inBlas = true; blasBase = sp; instance = n.a; flags = I.info.z;
           o = lo; d = ld; inv = linv; ray = sceneWatertight(lo, ld);
           next = root;
@@ -196,8 +222,8 @@ fn sceneIntersect(originW: vec3f, dirW: vec3f, tMin: f32, tMax: f32) -> SceneHit
       }
     } else {
       if (n.a >= nodeCount || n.b >= nodeCount) { return sceneError(hit, BVH_ERR_NODE, visits); }
-      let tl = sceneBox(sceneNodes[n.a], o, d, inv, tMin, hit.t);
-      let tr = sceneBox(sceneNodes[n.b], o, d, inv, tMin, hit.t);
+      let tl = sceneBox_VARIANT(sceneNodes[n.a], o, d, inv, tMin, hit.t);
+      let tr = sceneBox_VARIANT(sceneNodes[n.b], o, d, inv, tMin, hit.t);
       if (tl < SCENE_NO_HIT && tr < SCENE_NO_HIT) {
         if (sp >= SCENE_STACK_SIZE) { return sceneError(hit, BVH_ERR_STACK, visits); }
         if (tl <= tr) { stackNode[sp] = n.b; stackT[sp] = tr; next = n.a; }
@@ -219,4 +245,11 @@ fn sceneIntersect(originW: vec3f, dirW: vec3f, tMin: f32, tMax: f32) -> SceneHit
   }
   hit.visits = visits;
   return hit;
+}
+// TRAVERSAL-TEMPLATE-END
+
+/// Nearest accepted surface with t in (tMin, tMax); see the template above.
+fn sceneIntersect(originW: vec3f, dirW: vec3f, tMin: f32, tMax: f32) -> SceneHit {
+  if (any(dirW == vec3f(0.0))) { return sceneIntersectParallel(originW, dirW, tMin, tMax); }
+  return sceneIntersectFast(originW, dirW, tMin, tMax);
 }

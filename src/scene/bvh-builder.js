@@ -29,7 +29,10 @@ function nextUp(x) { // smallest f32 >= x
 export { nextDown as f32Down, nextUp as f32Up };
 
 /** Generic binned SAH over primitive boxes (Float64Array n*6) and centroids. */
-export function buildBVH(bounds, { maxLeaf = 4, bins = 16, traversalCost = 1, intersectionCost = 1 } = {}) {
+/** Bins per node: finer binning where it is cheap relative to the node's size and
+ * where the split matters most (the top of a 268k-instance TLAS). */
+export function binsForCount(count, bins) { return count >= 4096 ? Math.max(bins, 32) : bins; }
+export function buildBVH(bounds, { maxLeaf = 4, bins: baseBins = 16, traversalCost = 1, intersectionCost = 1 } = {}) {
   const n = bounds.length / 6;
   if (n === 0) throw new Error('BVH has no primitives');
   const order = new Uint32Array(n);
@@ -39,7 +42,8 @@ export function buildBVH(bounds, { maxLeaf = 4, bins = 16, traversalCost = 1, in
     for (let a = 0; a < 3; a++) centroid[i * 3 + a] = .5 * (bounds[i * 6 + a] + bounds[i * 6 + 3 + a]);
   }
   let capacity = Math.max(1, 2 * n), nodes = new Float64Array(capacity * 8), count = 0, maxDepth = 0, leaves = 0, largestLeaf = 0;
-  const binCount = new Uint32Array(bins), binBox = new Float64Array(bins * 6), leftArea = new Float64Array(bins), leftCount = new Uint32Array(bins);
+  const maxBins = binsForCount(n, baseBins);
+  const binCount = new Uint32Array(maxBins), binBox = new Float64Array(maxBins * 6), leftArea = new Float64Array(maxBins), leftCount = new Uint32Array(maxBins);
   const area = b => { const x = b[3] - b[0], y = b[4] - b[1], z = b[5] - b[2]; return x >= 0 ? 2 * (x * y + y * z + z * x) : 0; };
   const empty = b => { b[0] = b[1] = b[2] = Infinity; b[3] = b[4] = b[5] = -Infinity; return b; };
   const tmp = new Float64Array(6), cb = new Float64Array(6), nb = new Float64Array(6);
@@ -63,7 +67,7 @@ export function buildBVH(bounds, { maxLeaf = 4, bins = 16, traversalCost = 1, in
     if (m <= maxLeaf) { makeLeaf(); continue; }
     // Binned SAH on all three axes.
     let bestAxis = -1, bestSplit = 0, bestCost = Infinity;
-    const parentArea = area(nb);
+    const parentArea = area(nb), bins = binsForCount(m, baseBins);
     for (let axis = 0; axis < 3; axis++) {
       const lo = cb[axis], extent = cb[axis + 3] - lo;
       if (!(extent > 0)) continue;
@@ -193,12 +197,14 @@ function packScene({ blasSources, blasBuilt, tlas, instances }) {
   }
   if (tlas.depth + maxBlasDepth > STACK_SIZE) throw new Error(`BVH depth ${tlas.depth}+${maxBlasDepth} exceeds traversal stack ${STACK_SIZE}`);
   // Instances follow TLAS leaf order, so leaf.a indexes this array directly.
+  // Record (128 bytes): w2o rows + info (root, material, flags, source) in the
+  // first 64 bytes for traversal; frame rows + colour in the second for shading.
   const n = instances.count, inst = new ArrayBuffer(Math.max(1, n) * INSTANCE_BYTES), f = new Float32Array(inst), u = new Uint32Array(inst);
   for (let k = 0; k < n; k++) {
     const i = tlas.order[k], d = k * 32;
     f.set(instances.w2o.subarray(i * 12, i * 12 + 12), d);
-    f.set(instances.frame.subarray(i * 12, i * 12 + 12), d + 12);
-    u[d + 24] = blasRoot[instances.blas[i]]; u[d + 25] = instances.material[i]; u[d + 26] = instances.flags[i]; u[d + 27] = i;
+    u[d + 12] = blasRoot[instances.blas[i]]; u[d + 13] = instances.material[i]; u[d + 14] = instances.flags[i]; u[d + 15] = i;
+    f.set(instances.frame.subarray(i * 12, i * 12 + 12), d + 16);
     f[d + 28] = instances.color[i * 3]; f[d + 29] = instances.color[i * 3 + 1]; f[d + 30] = instances.color[i * 3 + 2];
   }
   return {

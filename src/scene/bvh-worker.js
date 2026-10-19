@@ -20,7 +20,7 @@ self.onmessage = ({ data }) => {
     const live = new Set(data.blasKeys);
     for (const key of [...sourceCache.keys()]) if (!live.has(key)) { sourceCache.delete(key); blasCache.delete(key); }
     const started = Date.now();
-    const expanded = data.instances ? { instances: data.instances, report: null } : expandInstances(data.instanceSources, data.blasBounds);
+    const expanded = data.instances ? { instances: data.instances, report: null } : expandInstances(data.instanceSources, data.blasBounds, data.blasPoints ?? null);
     const expandMs = Date.now() - started;
     const packed = buildSceneBuffers({ blasSources, blasKeys: data.blasKeys, instances: expanded.instances, blasCache });
     packed.stats.timing.expandMs = expandMs;

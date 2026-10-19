@@ -6,6 +6,8 @@ import shadingSource from './scene-shading.wgsl?raw';
 import { TEST_CHART_WGSL } from '../scene/test-chart-patterns.js';
 import { DFG_WGSL } from './dfg-lut.js';
 import { WOOD, MEADOW, WATER, GRAVEL } from '../scene/procedural-params.js';
+import { normalizeShaderEOL } from './shader-source.js';
+export { normalizeShaderEOL };
 
 const f = x => { const s = String(x); return /[.eE]/.test(s) ? s : s + '.0'; };
 const v2 = a => `vec2f(${a.map(f).join(', ')})`, v3 = a => `vec3f(${a.map(f).join(', ')})`;
@@ -50,5 +52,16 @@ const WATER_FRESNEL_SCALE: f32 = ${f(WATER.fresnelScale)};
 const WATER_FRESNEL_BIAS: f32 = ${f(WATER.fresnelBias)};
 const WATER_REFLECTION_GAIN: f32 = ${f(WATER.reflectionGain)};
 `;
-export const SCENE_INTERSECTOR_WGSL = intersectorSource;
+/** Expand the traversal template (see scene-intersector.wgsl): one copy per
+ * slab test. FAST_ONLY lines stay only in the fast variant. */
+export function expandIntersector(source) {
+  const text = normalizeShaderEOL(source);
+  const begin = text.indexOf('// TRAVERSAL-TEMPLATE-BEGIN'), end = text.indexOf('// TRAVERSAL-TEMPLATE-END');
+  if (begin < 0 || end < 0) throw new Error('scene-intersector.wgsl: traversal template markers missing');
+  const template = text.slice(begin, end);
+  const variant = (name, fast) => template.replaceAll('_VARIANT', name)
+    .replace(/^([ \t]*)\/\/FAST_ONLY: ?(.*)$/gm, fast ? '$1$2' : '');
+  return text.slice(0, begin) + variant('Fast', true) + variant('Parallel', false) + text.slice(end);
+}
+export const SCENE_INTERSECTOR_WGSL = expandIntersector(intersectorSource);
 export const SCENE_SHADING_WGSL = DFG_WGSL + PROCEDURAL_WGSL + TEST_CHART_WGSL + shadingSource;

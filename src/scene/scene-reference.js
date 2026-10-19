@@ -58,7 +58,8 @@ export function bruteForceIntersect(extracted, origin, direction, tMin = 0, tMax
 }
 
 /** Emulates the WGSL two-level traversal on the PACKED buffers (f64 math).
- * Checks structure, leaf encoding, stack bound and instance ordering. */
+ * Checks structure, leaf encoding, stack bound and instance ordering.
+ * Instance record (32 u32): w2o rows 0-11, root 12, material 13, flags 14, source 15. */
 export function traversePacked(packed, origin, direction, tMin = 0, tMax = Infinity) {
   const nf = new Float32Array(packed.nodes), nu = new Uint32Array(packed.nodes);
   const tf = new Float32Array(packed.triangles), tu = new Uint32Array(packed.triangles);
@@ -94,14 +95,14 @@ export function traversePacked(packed, origin, direction, tMin = 0, tMax = Infin
       const count = b - LEAF_BIT;
       if (inst < 0) {
         if (count !== 1) throw new Error('TLAS leaf must hold one instance');
-        stack.push({ node: inu[a * 32 + 24], inst: a });
+        stack.push({ node: inu[a * 32 + 12], inst: a });
       } else {
-        const flags = inu[inst * 32 + 26];
+        const flags = inu[inst * 32 + 14];
         for (let t = a; t < a + count; t++) {
           const v = [0, 1, 2].map(j => [tf[t * 16 + j * 4], tf[t * 16 + j * 4 + 1], tf[t * 16 + j * 4 + 2]]);
           const hit = triangle(o, d, ...v);
           if (!hit || !(hit.t > tMin && hit.t < (best ? best.t : tMax)) || !accepts(flags, hit.front)) continue;
-          best = { ...hit, instance: inu[inst * 32 + 27], primitive: tu[t * 16 + 12], material: inu[inst * 32 + 25], bary: [1 - hit.u - hit.v, hit.u, hit.v] };
+          best = { ...hit, instance: inu[inst * 32 + 15], primitive: tu[t * 16 + 12], material: inu[inst * 32 + 13], bary: [1 - hit.u - hit.v, hit.u, hit.v] };
         }
       }
     } else stack.push({ node: b, inst }, { node: a, inst });

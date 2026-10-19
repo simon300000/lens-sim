@@ -82,7 +82,7 @@ try {
       robust++;
       if (g.status !== 1) { missMismatch.push({ i, ref: ref.t }); continue; }
       tMaxErr = Math.max(tMaxErr, Math.abs(g.t - ref.t) / Math.max(1, ref.t));
-      const source = inst[g.instance * 32 + 27], prim = tris[g.triangle * 16 + 12];
+      const source = inst[g.instance * 32 + 15], prim = tris[g.triangle * 16 + 12];
       if (source === ref.instance && prim === ref.primitive && g.front === ref.front) {
         identity++;
         baryMaxErr = Math.max(baryMaxErr, Math.abs(g.b1 - ref.bary[1]), Math.abs(g.b2 - ref.bary[2]));
