@@ -14,6 +14,7 @@ import {
 import { createLensBench, drawLayoutSVG, layoutFor } from './lens-bench.js';
 import { downloadBlob } from '../rendering/image-export.js';
 import { WORK_GROUPS } from '../rendering/work-model.js';
+import { RASTER_QUALITY_DEFAULTS } from '../rendering/raster-quality.js';
 
 const COMMAND_LABELS = {
   setMode: '画面模式', selectLens: '选择镜头', selectConfiguration: '镜头配置', setFNumber: '光圈',
@@ -1017,7 +1018,7 @@ export function createLensUI({ store, container, liveStats = null } = {}) {
       setDisabled(radio, !rasterEnabled);
     }
     for (const [ref, key] of [['rasterAO', 'ambientOcclusion'], ['rasterReflection', 'reflection'], ['rasterAdaptive', 'adaptiveResolution']]) {
-      refs[ref].checked = raster[key] !== false;
+      refs[ref].checked = raster[key] ?? RASTER_QUALITY_DEFAULTS[key];
       setDisabled(refs[ref], !rasterEnabled);
     }
     const reduced = [raster.pixelRatio && raster.pixelRatio !== 'auto' ? `${raster.pixelRatio}×` : null, raster.ambientOcclusion === false ? '无 AO' : null,

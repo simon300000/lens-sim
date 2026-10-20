@@ -44,6 +44,7 @@ export function createCameraRig(camera, element, {
   const lastPose = { position: new Vector3(Infinity, 0, 0), target: new Vector3(Infinity, 0, 0) };
   let yaw = 0, pitch = 0, distance = 10;
   let drag = null, wheelTimer = null, busy = false, enabled = true, disposed = false;
+  const releasedDrags = [];
   const pointers = new Map();
 
   // ------------------------------------------------------------- pose helpers
@@ -54,6 +55,9 @@ export function createCameraRig(camera, element, {
     up.crossVectors(right, fwd).normalize();
   }
   function syncFromCamera() {
+    // A programmatic pose replaces input sampled against the previous view.
+    releasedDrags.length = 0;
+    if (drag) { drag.x = drag.nextX; drag.y = drag.nextY; }
     if (target.distanceToSquared(camera.position) < 1e-10) target.copy(camera.getWorldDirection(tmp)).add(camera.position);
     const dir = tmp.subVectors(target, camera.position);
     distance = Math.max(0.5, dir.length());
@@ -111,18 +115,17 @@ export function createCameraRig(camera, element, {
   }
 
   // ------------------------------------------------------------- gestures
-  /** Turn the view. A pointer or touch drag is applied immediately (1:1 with the
-   * hand, like orbit and pan); the smoothing stays for arrow keys and aiming. */
+  /** Pointer samples retain 1:1 displacement, without keyboard easing. */
   // Viewport height is read once per frame (update), not per pointer event: a layout
   // read inside a 120 Hz pointer stream forces synchronous layout whenever styles are dirty.
   let viewHeight = Math.max(1, element.clientHeight || 1);
-  function lookBy(dx, dy, immediate = false) {
+  function lookBy(dx, dy, immediate = false, commit = true) {
     const k = ((camera.fov ?? 50) * Math.PI / 180) / viewHeight;
     goal.yaw += dx * k;
     goal.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, goal.pitch + dy * k));
-    if (immediate) { yaw = goal.yaw; pitch = goal.pitch; commitImmediate(); }
+    if (immediate) { yaw = goal.yaw; pitch = goal.pitch; if (commit) commitImmediate(); }
   }
-  function orbitBy(pivot, dx, dy) {
+  function orbitBy(pivot, dx, dy, commit = true) {
     const k = 0.006;
     let a = -dx * k, b = -dy * k;
     const nextPitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, goal.pitch + b));
@@ -135,16 +138,16 @@ export function createCameraRig(camera, element, {
     goal.yaw += a; goal.pitch = nextPitch;
     // Orbit is a rigid motion: apply immediately so the pivot stays under the cursor.
     camera.position.copy(goal.position); yaw = goal.yaw; pitch = goal.pitch;
-    commitImmediate();
+    if (commit) commitImmediate();
   }
   function commitImmediate() { apply(); rig.dispatchEvent({ type: 'change' }); }
-  function panBy(depth, dx, dy) {
+  function panBy(depth, dx, dy, commit = true) {
     basis(goal.yaw, goal.pitch);
     const k = (2 * depth * Math.tan(((camera.fov ?? 50) * Math.PI) / 360)) / viewHeight;
     goal.position.addScaledVector(right, -dx * k).addScaledVector(up, dy * k);
     clampPosition(goal.position);
     camera.position.copy(goal.position);
-    commitImmediate();
+    if (commit) commitImmediate();
   }
   function dollyToward(clientX, clientY, amount) {
     const hit = pointAt(clientX, clientY);
@@ -169,7 +172,7 @@ export function createCameraRig(camera, element, {
     event.preventDefault();
     element.setPointerCapture?.(event.pointerId);
     const grabbed = mode === 'look' ? null : pointAt(event.clientX, event.clientY);
-    drag = { mode, id: event.pointerId, x: event.clientX, y: event.clientY, pivot: grabbed?.point ?? null, depth: grabbed?.distance ?? distance };
+    drag = { mode, id: event.pointerId, x: event.clientX, y: event.clientY, nextX: event.clientX, nextY: event.clientY, pivot: grabbed?.point ?? null, depth: grabbed?.distance ?? distance };
     if (mode === 'orbit' && grabbed) distance = grabbed.distance;
     element.style && (element.style.cursor = mode === 'look' ? 'grabbing' : mode === 'pan' ? 'move' : 'all-scroll');
     poke();
@@ -177,20 +180,41 @@ export function createCameraRig(camera, element, {
   function pointerMove(event) {
     if (event.pointerType === 'touch') { if (pointers.has(event.pointerId)) { pointers.set(event.pointerId, { x: event.clientX, y: event.clientY }); touchMove(); } return; }
     if (!drag || event.pointerId !== drag.id) return;
-    const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
-    drag.x = event.clientX; drag.y = event.clientY;
-    if (drag.mode === 'look') lookBy(dx, dy, true);
-    else if (drag.mode === 'orbit') orbitBy(drag.pivot, dx, dy);
-    else panBy(drag.depth, dx, dy);
-    poke();
+    // Events only replace the latest sample. The held gesture keeps update()
+    // running, so no matrix updates, change notifications or wakeups are needed here.
+    const coalesced = event.getCoalescedEvents?.(), last = coalesced?.[coalesced.length - 1];
+    const sample = last && last.timeStamp > event.timeStamp ? last : event;
+    drag.nextX = sample.clientX; drag.nextY = sample.clientY;
   }
   function pointerUp(event) {
     if (event.pointerType === 'touch') { pointers.delete(event.pointerId); touch = null; if (pointers.size) touchStart(); requestFrame(); return; }
     if (!drag || event.pointerId !== drag.id) return;
+    if (event.type === 'pointerup' && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)) {
+      drag.nextX = event.clientX; drag.nextY = event.clientY;
+    }
+    // Release can arrive between frames. Keep the final displacement, including
+    // quick press/move/release gestures that never overlapped an animation frame.
+    releasedDrags.push(drag);
     element.releasePointerCapture?.(event.pointerId);
     drag = null;
     if (element.style) element.style.cursor = '';
     requestFrame();
+  }
+  function consumeMouseSample(sample) {
+    const dx = sample.nextX - sample.x, dy = sample.nextY - sample.y;
+    if (!dx && !dy) return false;
+    sample.x = sample.nextX; sample.y = sample.nextY;
+    if (sample.mode === 'look') lookBy(dx, dy, true, false);
+    else if (sample.mode === 'orbit') orbitBy(sample.pivot, dx, dy, false);
+    else panBy(sample.depth, dx, dy, false);
+    return true;
+  }
+  function consumeMouse() {
+    let changed = false;
+    for (const sample of releasedDrags) changed = consumeMouseSample(sample) || changed;
+    releasedDrags.length = 0;
+    if (drag) changed = consumeMouseSample(drag) || changed;
+    return changed;
   }
 
   // Touch: one finger looks; two fingers pan (midpoint) and pinch-dolly toward the midpoint.
@@ -282,7 +306,12 @@ export function createCameraRig(camera, element, {
     if (!Number.isFinite(dt)) dt = lastTime === null ? 1 / 60 : (now - lastTime) / 1000;
     lastTime = now;
     viewHeight = Math.max(1, element.clientHeight || viewHeight);
-    if (externallyMoved()) { syncFromCamera(); rig.dispatchEvent({ type: 'change' }); return inputActive(); }
+    if (externallyMoved()) {
+      syncFromCamera(); rig.dispatchEvent({ type: 'change' });
+      const active = inputActive(); if (!active) setBusy(false);
+      return active;
+    }
+    const pointerChanged = consumeMouse();
     const before = tmp2.copy(camera.position), beforeYaw = yaw, beforePitch = pitch;
     // Keyboard: smoothed walk velocity on the ground plane plus vertical Q/E; arrows look.
     if (keys.size) {
@@ -309,7 +338,7 @@ export function createCameraRig(camera, element, {
     if (Math.abs(goal.yaw - yaw) < 1e-6) yaw = goal.yaw;
     if (Math.abs(goal.pitch - pitch) < 1e-6) pitch = goal.pitch;
     if (camera.position.distanceToSquared(goal.position) < 1e-10) camera.position.copy(goal.position);
-    const moved = !camera.position.equals(before) || yaw !== beforeYaw || pitch !== beforePitch;
+    const moved = pointerChanged || !camera.position.equals(before) || yaw !== beforeYaw || pitch !== beforePitch;
     apply();
     if (moved) rig.dispatchEvent({ type: 'change' });
     const active = inputActive() || !settled();
@@ -330,17 +359,26 @@ export function createCameraRig(camera, element, {
   Object.defineProperties(rig, {
     object: { value: camera },
     target: { value: target },
-    enabled: { get: () => enabled, set: (v) => { enabled = Boolean(v); if (!enabled) { drag = null; releaseKeys(); } } },
+    enabled: { get: () => enabled, set: (v) => { enabled = Boolean(v); if (!enabled) { drag = null; releasedDrags.length = 0; releaseKeys(); } } },
     enableDamping: { get: () => enableDamping, set: (v) => { enableDamping = Boolean(v); } },
     active: { get: () => busy || inputActive() },
     pointerActive: { get: () => Boolean(drag || pointers.size) },
   });
   rig.update = update;
+  /** Consume input delivered after rAF, immediately before a deferred GPU
+   * submission. Does not integrate time or keyboard velocity a second time. */
+  rig.samplePointer = () => {
+    if (disposed || !enabled || externallyMoved()) return false;
+    const changed = consumeMouse();
+    if (changed) commitImmediate();
+    return changed;
+  };
   /** Make the current camera/target the rig's pose (used after programmatic moves). */
   rig.sync = () => { syncFromCamera(); rig.dispatchEvent({ type: 'change' }); };
   rig.dispose = () => {
     if (disposed) return;
     disposed = true;
+    drag = null; releasedDrags.length = 0;
     element.removeEventListener('pointerdown', pointerDown);
     element.removeEventListener('pointermove', pointerMove);
     element.removeEventListener('pointerup', pointerUp);

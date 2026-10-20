@@ -889,15 +889,16 @@ test('raster quality controls dispatch partial setRasterQuality patches and rend
   assert.equal(radio('rasterRatio', 'auto').checked, true);
   assert.equal($('rasterValue').textContent, '完整');
   assert.equal(radio('rasterMSAA', '4').checked, true);
+  assert.equal($('rasterAdaptive').checked, false);
   // One command type: each patch is dispatched after the previous one settled.
   const settle = async () => { await flush(); calls.at(-1).resolve(); await flush(); };
   toggle($('rasterAO'), false); await settle();
   toggle(radio('rasterRatio', '0.75'), true); await settle();
   toggle($('rasterReflection'), false); await settle();
-  toggle($('rasterAdaptive'), false); await settle();
+  toggle($('rasterAdaptive'), true); await settle();
   toggle(radio('rasterMSAA', '0'), true); await settle();
   assert.deepEqual(types(calls), [['setRasterQuality', { ambientOcclusion: false }], ['setRasterQuality', { pixelRatio: '0.75' }],
-    ['setRasterQuality', { reflection: false }], ['setRasterQuality', { adaptiveResolution: false }], ['setRasterQuality', { msaa: 0 }]]);
+    ['setRasterQuality', { reflection: false }], ['setRasterQuality', { adaptiveResolution: true }], ['setRasterQuality', { msaa: 0 }]]);
   store.update({ raster: { pixelRatio: '0.75', msaa: 0, ambientOcclusion: false, reflection: false, adaptiveResolution: false } });
   assert.equal($('rasterAO').checked, false);
   assert.equal($('rasterReflection').checked, false);

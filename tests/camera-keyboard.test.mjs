@@ -79,15 +79,20 @@ test('left drag looks around in place', () => {
   assert.ok(dir.x < dir0.x, 'grab semantics: dragging right turns the view left');
 });
 
-test('pointer look follows the hand in the same event, without smoothing lag', () => {
+test('pointer events buffer the latest position; a frame consumes it without easing', () => {
   const { camera, pointer, rig } = setup();
   let changes = 0; rig.addEventListener('change', () => changes++);
   const dir0 = camera.getWorldDirection(new Vector3());
   pointer('pointerdown', { clientX: 600, clientY: 400 });
+  pointer('pointermove', { clientX: 640, clientY: 400 });
+  pointer('pointermove', { clientX: 680, clientY: 400 });
   pointer('pointermove', { clientX: 700, clientY: 400 });
+  assert.equal(changes, 0, 'events do not update matrices or notify observers');
+  assert.ok(camera.getWorldDirection(new Vector3()).angleTo(dir0) < 1e-9);
+  rig.update(1 / 60);
   const afterMove = camera.getWorldDirection(new Vector3());
-  assert.ok(afterMove.angleTo(dir0) > 0.05, 'the camera turned before any update()');
-  assert.equal(changes, 1, 'one change event per move');
+  assert.ok(afterMove.angleTo(dir0) > 0.05);
+  assert.equal(changes, 1, 'one change for the entire event burst');
   rig.update(1 / 60);
   assert.ok(camera.getWorldDirection(new Vector3()).angleTo(afterMove) < 1e-9, 'nothing left to smooth');
   // Arrow keys keep the smoothed, rate-limited turn.
@@ -97,6 +102,68 @@ test('pointer look follows the hand in the same event, without smoothing lag', (
   second.rig.update(1 / 60);
   const after = second.camera.getWorldDirection(new Vector3());
   assert.ok(after.angleTo(before) > 0 && after.angleTo(before) < 1.1 / 60, 'arrow turn is rate limited and eased');
+});
+
+test('a deferred render reads newer pointer input without advancing keyboard motion', () => {
+  const { camera, pointer, rig, key } = setup();
+  key('keydown', 'KeyW');
+  pointer('pointerdown', { clientX: 600, clientY: 400 });rig.update(1 / 60);
+  const before = camera.quaternion.clone(), position = camera.position.clone();
+  pointer('pointermove', { clientX: 700, clientY: 400 });
+  assert.equal(rig.samplePointer(), true);
+  assert.ok(camera.quaternion.angleTo(before) > .05);
+  assert.deepEqual(camera.position, position);
+  assert.equal(rig.samplePointer(), false, 'the same sample cannot be applied twice');
+});
+
+test('the newest coalesced pointer position is sampled when it is newer than the event', () => {
+  const a=setup(),b=setup();
+  for(const h of [a,b])h.pointer('pointerdown',{clientX:600,clientY:400});
+  a.pointer('pointermove',{clientX:650,clientY:400,getCoalescedEvents:()=>[{timeStamp:performance.now()+1,clientX:700,clientY:400}]});
+  b.pointer('pointermove',{clientX:700,clientY:400});
+  a.rig.update(1/60);b.rig.update(1/60);
+  assert.ok(a.camera.quaternion.angleTo(b.camera.quaternion)<1e-7);
+});
+
+test('release between frames preserves its final coordinate and ends without a tail', () => {
+  const a = setup(), b = setup();
+  a.pointer('pointerdown', { clientX: 600, clientY: 400 });
+  a.pointer('pointermove', { clientX: 650, clientY: 400 });
+  a.pointer('pointerup', { clientX: 710, clientY: 400 });
+  assert.equal(a.rig.pointerActive, false);
+  a.rig.update(1 / 60);
+  b.pointer('pointerdown', { clientX: 600, clientY: 400 });
+  b.pointer('pointermove', { clientX: 710, clientY: 400 });b.rig.update(1 / 120);
+  assert.ok(a.camera.quaternion.angleTo(b.camera.quaternion) < 1e-7, 'displacement is independent of frame duration');
+  assert.equal(a.rig.active, false);
+});
+
+test('quick consecutive gestures keep separate origins and disabling discards pending input', () => {
+  const a = setup(), b = setup();
+  for (const x of [600,900]) {
+    a.pointer('pointerdown', { clientX: x, clientY: 400 });
+    a.pointer('pointermove', { clientX: x+50, clientY: 400 });
+    a.pointer('pointerup', {});
+  }
+  a.rig.update(1 / 60);
+  b.pointer('pointerdown', { clientX: 600, clientY: 400 });
+  b.pointer('pointermove', { clientX: 700, clientY: 400 });b.rig.update(1 / 60);
+  assert.ok(a.camera.quaternion.angleTo(b.camera.quaternion) < 1e-7);
+  const before = b.camera.quaternion.clone();
+  b.pointer('pointermove', { clientX: 800, clientY: 400 });b.rig.enabled=false;b.rig.update(1 / 60);
+  assert.ok(before.angleTo(b.camera.quaternion) < 1e-7);
+});
+
+test('an external pose replaces pending mouse samples and releases a completed gesture',()=>{
+  const {camera,rig,pointer}=setup();
+  pointer('pointerdown',{clientX:600,clientY:400});
+  pointer('pointermove',{clientX:800,clientY:400});
+  pointer('pointerup',{});
+  camera.position.set(10,4,-3);rig.target.set(2,1,0);
+  rig.update(1/60);
+  const direction=camera.getWorldDirection(new Vector3());
+  assert.ok(direction.distanceTo(new Vector3(2,1,0).sub(camera.position).normalize())<1e-6);
+  assert.equal(rig.active,false);assert.equal(rig.samplePointer(),false);
 });
 
 test('wheel dollies toward the picked surface without passing it', () => {

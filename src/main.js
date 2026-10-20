@@ -22,6 +22,7 @@ import {requiredGPULimits} from './rendering/gpu-policy.js';
 import { installSharedInstancing, installRenderBundleContexts } from './rendering/three-interop.js';
 import { bundleStaticContent } from './scene/render-bundles.js';
 import { createMotionQuality } from './rendering/motion-quality.js';
+import { createRasterSubmission } from './rendering/raster-submission.js';
 import { loadRasterQuality, saveRasterQuality, rasterPixelRatio } from './rendering/raster-quality.js';
 import { lensMaterial } from './scene/lens-registry.js';
 import { installUserModels } from './user-model.js';
@@ -115,7 +116,7 @@ async function createScene(){
   controls.target.set(0,2.7,2.0);camera.lookAt(controls.target);controls.update(0);
 
   let ready=false,framesNeeded=0,rendering=false,pendingTime=null;
-  let frameRequest=null,frameTask=null;
+  let frameRequest=null;
   const deferPointerFrames=navigator.vendor==='Apple Computer, Inc.';
   let timeRevision=0;
   let completionRevision=-1;
@@ -128,6 +129,7 @@ async function createScene(){
   let lastFrameTime=performance.now();
   function renderFrame(){
     if(!ready)return;
+    controls.samplePointer();
     const revision=timeRevision,hour=sceneElement.dataset.hour;
     if(hybrid){hybrid.frame();if(rasterQuality.adaptiveResolution&&hybrid.store.peekState().mode==='raster')motionQuality.frameSubmitted();}else pipeline.render();
     // Time completion is checked only on a new scene revision, never per optical batch.
@@ -135,6 +137,8 @@ async function createScene(){
       if(revision===timeRevision){sceneElement.dataset.renderedHour=hour;document.querySelector('#time-controls').setAttribute('aria-busy','false');}
     });}
   }
+  const pointerRaster=()=>ready&&deferPointerFrames&&controls.pointerActive&&hybrid?.store.peekState().mode==='raster';
+  const pointerSubmissions=createRasterSubmission({queue:renderer.backend.device.queue,render:renderFrame,canSubmit:pointerRaster});
   function frame(now){
     frameRequest=null;
     if(!ready){rendering=false;return;}
@@ -142,13 +146,13 @@ async function createScene(){
     // Commit the entire time state before any scene pass can cache this frame.
     if(pendingTime){const value=pendingTime;pendingTime=null;applyTime(value);}
     const cameraMoving=controls.update(delta);
-    // WebKit can wait for canvas presentation at the end of its rendering
-    // update. Keep camera ticks on rAF, but give native pointer events a task
-    // turn before the raster submission so it uses the freshest camera pose.
-    if(deferPointerFrames&&controls.pointerActive&&hybrid?.store.peekState().mode==='raster'){
-      if(frameTask===null)frameTask=setTimeout(()=>{frameTask=null;renderFrame();},0);
+    // WebKit's canvas backpressure can block pointer delivery when the GPU is
+    // behind. Keep camera ticks on rAF and at most two raster frames in flight;
+    // queued requests coalesce into the freshest pose when capacity returns.
+    if(pointerRaster()){
+      pointerSubmissions.request();
     }else{
-      if(frameTask!==null){clearTimeout(frameTask);frameTask=null;}
+      pointerSubmissions.cancel();
       renderFrame();
     }
     framesNeeded--;if(framesNeeded>0||cameraMoving||hybrid?.needsFrame())queueFrame();else rendering=false;
@@ -243,13 +247,17 @@ async function createScene(){
     if(reflectorBase&&passCamera!==camera&&reflectorBase.virtualCameras?.get(camera)===passCamera)return REFLECTION_RANGE_M;
     return Infinity;
   });
+  function setSceneSamples(samples){
+    scenePass.options.samples=samples;
+    if(scenePass.renderTarget.samples===samples)return false;
+    scenePass.renderTarget.samples=samples;
+    scenePass.renderTarget.dispose();
+    return true;
+  }
   function applyRasterQuality(settings){
     rasterQuality=settings;
-    scenePass.options.samples=settings.msaa;
-    const samplesChanged=scenePass.renderTarget.samples!==settings.msaa;
+    const samplesChanged=setSceneSamples(settings.msaa);
     if(samplesChanged){
-      scenePass.renderTarget.samples=settings.msaa;
-      scenePass.renderTarget.dispose();
       // Re-record both the new and previously used sample-count contexts.
       // Their cached bundles must not retain stale material bindings on return.
       bundles.invalidate();
@@ -297,8 +305,23 @@ async function createScene(){
   // the loading curtain is up, instead of compiling them on the first slider move.
   const initialTime=timeControls.getValue();
   diagnostics.warmup=[];
-  const warm=async()=>{const row=await warmRender({renderer,scene,camera,render:()=>pipeline.render(),
-    onProgress:({variants})=>{document.querySelector('#loading-detail').textContent=`正在准备场景管线 · 已访问 ${variants} 个绘制变体`;}});diagnostics.warmup.push(row);};
+  const warm=async()=>{
+    // Sample count is part of the GPU pipeline key. Warm both choices while
+    // loading, even when saved preferences disable MSAA, and finish on the
+    // user's choice without publishing or persisting temporary settings.
+    const selected=rasterQuality.msaa;
+    try{
+      for(const samples of [selected===4?0:4,selected]){
+        setSceneSamples(samples);
+        const row=await warmRender({renderer,scene,camera,render:()=>pipeline.render(),
+          onProgress:({variants})=>{document.querySelector('#loading-detail').textContent=`正在准备场景管线 · 已访问 ${variants} 个绘制变体`;}});
+        // The final warm-up draw is submitted asynchronously. Finish it before
+        // disposing the attachments for the next sample-count variant.
+        await renderer.backend.device.queue.onSubmittedWorkDone();
+        diagnostics.warmup.push({...row,samples});
+      }
+    }finally{setSceneSamples(selected);}
+  };
   for(const hour of [0,5.5]){
     await startup.stage(hour===0?4:5,hour===0?'预编译夜景、月亮与灯光':'预编译晨光与阴影');
     applyTime({...initialTime,hour},true);
@@ -370,7 +393,7 @@ async function createScene(){
   sceneElement.dataset.koi=garden.koi.length;
   console.info('SANTEI scene ready',diagnostics);
   startup.complete();
-  addEventListener('pagehide',()=>{ready=false;if(frameRequest!==null)cancelAnimationFrame(frameRequest);if(frameTask!==null)clearTimeout(frameTask);userModel.dispose();urlState.dispose();lensUI.dispose();hybrid.dispose();motionQuality.dispose();bundles.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
+  addEventListener('pagehide',()=>{ready=false;if(frameRequest!==null)cancelAnimationFrame(frameRequest);pointerSubmissions.dispose();userModel.dispose();urlState.dispose();lensUI.dispose();hybrid.dispose();motionQuality.dispose();bundles.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
   // Initialization captured the current scene and prepared its first lens
   // sample. Schedule display without throwing away that prepared state.
   wake();
