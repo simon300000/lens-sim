@@ -26,6 +26,7 @@ import { createRasterSubmission } from './rendering/raster-submission.js';
 import { loadRasterQuality, saveRasterQuality, rasterPixelRatio } from './rendering/raster-quality.js';
 import { lensMaterial } from './scene/lens-registry.js';
 import { installUserModels } from './user-model.js';
+import { PRESETS } from './scene/scene-presets.js';
 
 const faults=[];
 window.addEventListener('error',event=>faults.push(event.message));
@@ -89,11 +90,11 @@ async function createScene(){
   updateOutputStatus();displayHDR.addEventListener('change',updateOutputStatus);
 
   await startup.stage(2,'铺设庭园，栽种花木');
-  const {scene,garden,landscape,villa,vegetation,details,features,testTargets}=buildSanteiScene();
+  const {scene,garden,landscape,villa,vegetation,details,features,nightLights,testTargets}=buildSanteiScene();
   const userModels=new THREE.Group();userModels.name='User models';scene.add(userModels);
   // Static content is recorded into render bundles once warm-up has compiled
   // every variant (bundles.enable below). User models stay direct draws.
-  const bundles=bundleStaticContent(scene,[villa.group,garden.garden,landscape.root,details.group,features.group,testTargets.group,
+  const bundles=bundleStaticContent(scene,[villa.group,garden.garden,landscape.root,details.group,features.group,nightLights.group,testTargets.group,
     scene.getObjectByName('Individually modelled garden planting')]);
   // Lower the raster resolution only while moving and only when the GPU is
   // measurably behind; every frame rendered at rest is full quality. The AO
@@ -292,6 +293,29 @@ async function createScene(){
   }
   window.__SANTEI__.showTestTarget=showTestTarget;
   for(const button of document.querySelectorAll('[data-test-target]'))button.addEventListener('click',()=>showTestTarget(button.dataset.testTarget));
+  // A preset sets time, pose, lens, focus, aperture and exposure; the view mode is left as is.
+  let presetRun=0;
+  async function applyScenePreset(key){
+    const preset=PRESETS[key];
+    if(!ready||!preset)return;
+    const run=++presetRun,store=hybrid.store;
+    timeControls.setValue({hour:preset.hour,date:preset.date});
+    camera.position.fromArray(preset.position);controls.target.fromArray(preset.target);camera.lookAt(controls.target);controls.sync();wake();
+    try{
+      if(preset.lens&&store.getState().lensId!==preset.lens)await store.dispatch('selectLens',preset.lens);
+      // Any camera change cancels a focus solve in flight: let the new pose settle first.
+      for(let i=0;i<3;i++)await new Promise(resolve=>requestAnimationFrame(resolve));
+      if(run!==presetRun||store.getState().status!=='ready')return;
+      if(preset.focusM===undefined)await store.dispatch('autofocus');else await store.dispatch('setFocusDistance',preset.focusM);
+      // Focusing can move the stop's f-number limits; set the aperture afterwards.
+      const [widest,smallest]=store.getState().limits.fNumber;
+      const fNumber=Math.min(smallest,Math.max(widest,preset.fNumber??widest));
+      if(run===presetRun&&store.getState().optics.fNumber!==fNumber)await store.dispatch('setFNumber',fNumber);
+      if(run===presetRun&&store.getState().display.exposureEV!==preset.exposureEV)await store.dispatch('setExposureEV',preset.exposureEV);
+    }catch(error){console.warn('场景预设未能完全应用：',error);}
+  }
+  window.__SANTEI__.applyPreset=applyScenePreset;
+  for(const button of document.querySelectorAll('[data-scene-preset]'))button.addEventListener('click',()=>applyScenePreset(button.dataset.scenePreset));
   // Render on time/date changes and camera movement; never run an idle GPU loop.
   controls.addEventListener('change',()=>{hybrid?.cameraChanged();wake();});
   const activeInputs=new Set();
@@ -361,7 +385,7 @@ async function createScene(){
   document.querySelector('#time-controls').setAttribute('aria-busy','false');
   diagnostics.ready=true;
   ready=true;
-  for(const button of document.querySelectorAll('[data-test-target]'))button.disabled=false;
+  for(const button of document.querySelectorAll('[data-test-target],[data-scene-preset]'))button.disabled=false;
   // Models stand on the scene surface (never on each other); new ones go below the view centre.
   const downRay=new THREE.Raycaster(),down=new THREE.Vector3(0,-1,0);
   const groundAt=(x,z,fromY)=>{downRay.set(new THREE.Vector3(x,fromY,z),down);return groundPicker(downRay)?.point.y??null;};

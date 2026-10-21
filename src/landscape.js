@@ -34,7 +34,7 @@ function mountainHeight(range,x,z) {
   return Math.max(-.12,(ridge*profile+crags)*taper-.12);
 }
 
-function landscapeSurface(x,z) {
+export function landscapeSurface(x,z) {
   return Math.max(terrainHeight(x,z), ...ranges.filter(r=>z<=r.near).map(r=>mountainHeight(r,x,z)));
 }
 

@@ -63,6 +63,11 @@ export function createTimeControls({ onChange, initialHour = 16.5, initialDate =
       hour = clampHour(nextHour);
       emitChange();
     },
+    setValue({ hour: nextHour, date: nextDate }) {
+      hour = clampHour(nextHour);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(nextDate ?? '')) date = nextDate;
+      emitChange();
+    },
     update(state = {}) {
       if (Number.isFinite(state.hour)) hour = clampHour(state.hour);
       if (state.date) date = state.date;

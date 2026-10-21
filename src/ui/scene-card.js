@@ -18,6 +18,23 @@ export function installSceneCard(doc = document) {
   const narrow = doc.defaultView.matchMedia?.('(max-width: 700px)').matches;
   setOpen(read() === null ? !narrow : read() === 'true', false);
   const onCollapse = () => setOpen(body.hidden, true);
+  // Everything under time and date folds into one section, open by default.
+  const presets = card.querySelector('#scene-presets-body');
+  const presetsToggle = card.querySelector('.scene-presets-toggle');
+  const presetsKey = 'scene-card:presets-open';
+  const setPresetsOpen = (open, remember) => {
+    presets.hidden = !open;
+    presetsToggle.setAttribute('aria-expanded', String(open));
+    presetsToggle.title = open ? '收起机位与模型' : '展开机位与模型';
+    if (remember) { try { doc.defaultView.localStorage.setItem(presetsKey, String(open)); } catch { /* storage unavailable */ } }
+  };
+  const onPresets = () => setPresetsOpen(presets.hidden, true);
+  if (presets && presetsToggle) {
+    let saved = null;
+    try { saved = doc.defaultView.localStorage.getItem(presetsKey); } catch { /* storage unavailable */ }
+    setPresetsOpen(saved !== 'false', false);
+    presetsToggle.addEventListener('click', onPresets);
+  }
   const onHelp = () => {
     const show = hints.hidden;
     if (show && body.hidden) setOpen(true, false);
@@ -26,5 +43,5 @@ export function installSceneCard(doc = document) {
   };
   collapse.addEventListener('click', onCollapse);
   help.addEventListener('click', onHelp);
-  return () => { collapse.removeEventListener('click', onCollapse); help.removeEventListener('click', onHelp); };
+  return () => { collapse.removeEventListener('click', onCollapse); help.removeEventListener('click', onHelp); presetsToggle?.removeEventListener('click', onPresets); };
 }

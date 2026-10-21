@@ -29,17 +29,30 @@
           <div class="time-marks" aria-hidden="true"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
           <div class="time-bottom"><div class="time-presets" aria-label="时间预设"><button type="button" data-hour="5.5"><i class="time-icon time-icon-dawn" aria-hidden="true"></i>晨光</button><button type="button" data-hour="12"><i class="time-icon time-icon-sun" aria-hidden="true"></i>正午</button><button type="button" data-hour="17.5"><i class="time-icon time-icon-dusk" aria-hidden="true"></i>薄暮</button><button type="button" data-hour="0"><i class="time-icon time-icon-moon" aria-hidden="true"></i>子夜</button></div><span id="time-readout" class="time-readout">太阳与月亮随时光流转</span></div>
         </section>
-        <div class="scene-targets">
-          <span class="scene-targets-label">光学标靶</span>
-          <div class="test-target-links" role="group" aria-label="前往房后光学标靶"><button type="button" data-test-target="siemens" disabled title="西门子星：看分辨率与像散">圆形靶</button><button type="button" data-test-target="iso" disabled title="建议正午光照及高采样。Stephen H. Westin / Cornell University 的 ISO 12233 矢量测试图，非认证标准图">ISO 12233</button><button type="button" data-test-target="focus" disabled title="先对准竖直参考板按 F 对焦，再查看 45° 斜尺的清晰区域；刻度沿尺面，每格 10 mm，数字单位 mm，正对参考板时轴向深度差为刻度 × sin 45°">对焦斜尺</button><button type="button" data-test-target="garden" disabled>回庭院</button></div>
-        </div>
-        <div class="scene-targets scene-model">
-          <span class="scene-targets-label">自定义模型</span>
-          <div class="test-target-links" role="group" aria-label="自定义模型"><button type="button" id="model-open" disabled title="可多选 .glb，或 .gltf 及其 .bin 与纹理文件；也可直接拖入窗口。文件只在本机读取">载入 GLB…</button><button type="button" id="model-clear" hidden>全部移除</button></div>
-          <ul id="model-list" class="model-list" aria-label="已载入的模型" hidden></ul>
-          <input id="model-file" type="file" accept=".glb,.gltf,.bin,.png,.jpg,.jpeg,.webp,model/gltf-binary,model/gltf+json" multiple hidden />
-          <p id="model-status" class="model-status" aria-live="polite">点选模型后：拖动移动 · 滚轮缩放 · Shift + 滚轮旋转 · Delete 移除</p>
-        </div>
+        <section class="scene-presets" aria-label="机位预设与自定义模型">
+          <button type="button" class="scene-presets-toggle" aria-expanded="true" aria-controls="scene-presets-body"><span>机位与模型</span><i aria-hidden="true"></i></button>
+          <div id="scene-presets-body" class="scene-presets-body">
+            <div class="scene-targets">
+              <span class="scene-targets-label">光学标靶</span>
+              <div class="test-target-links" role="group" aria-label="前往房后光学标靶"><button type="button" data-test-target="siemens" disabled title="西门子星：看分辨率与像散">圆形靶</button><button type="button" data-test-target="iso" disabled title="建议正午光照及高采样。Stephen H. Westin / Cornell University 的 ISO 12233 矢量测试图，非认证标准图">ISO 12233</button><button type="button" data-test-target="focus" disabled title="先对准竖直参考板按 F 对焦，再查看 45° 斜尺的清晰区域；刻度沿尺面，每格 10 mm，数字单位 mm，正对参考板时轴向深度差为刻度 × sin 45°">对焦斜尺</button><button type="button" data-test-target="garden" disabled>回庭院</button></div>
+            </div>
+            <div class="scene-targets">
+              <span class="scene-targets-label">光斑场景</span>
+              <div class="test-target-links" role="group" aria-label="预设机位、时间与对焦"><button type="button" data-scene-preset="fireflies" disabled title="满月夜，贴水面望向石灯笼：合焦近处一盏浮灯，萤火、浮灯倒影与远处灯笼都化作光斑">池畔萤火</button><button type="button" data-scene-preset="eave" disabled title="满月初升的蓝调时刻，沿屋檐斜看：串灯中段合焦，近处一侧是前景光斑、远处一侧是背景光斑，可直接比较两者的边缘与色边">檐下串灯</button><button type="button" data-scene-preset="path" disabled title="贴地沿石径望屋：合焦最近一盏庭灯，其后等距庭灯组成光斑阶梯，越远光斑越大，边缘可见球差光晕与色边">石径灯阶</button><button type="button" data-scene-preset="vista" disabled title="退到园外、对无穷远合焦：屋檐串灯、庭灯、萤火与远山钠灯都近乎点光源，铺满画面，边角可见彗差、像散与猫眼形暗角">远望灯火</button></div>
+            </div>
+            <div class="scene-targets">
+              <span class="scene-targets-label">介绍视频</span>
+              <div class="test-target-links" role="group" aria-label="介绍视频中的镜头与机位"><button type="button" data-scene-preset="karesansui" disabled title="ZEISS Otus 55mm f/8 · 12:00 · 俯看枯山水，其后是石灯笼">枯山水</button><button type="button" data-scene-preset="lanternNoct" disabled title="Nikon Z 58mm f/0.95 Noct 全开 · 18:20 · 低机位对焦约 2.8 m 外的石灯笼，檐廊灯光虚化在后">石灯笼</button><button type="button" data-scene-preset="bridgePlena" disabled title="Nikon Z 135mm f/1.8 Plena 全开 · 06:36 · 从庭院东侧望约 11 m 外的朱桥栏杆宝珠">朱桥</button><button type="button" data-scene-preset="fisheyeEave" disabled title="Nikon Fisheye-Nikkor 6mm f/5.6 · 对焦 3 m · 10:00 · 从屋檐下望向庭院">鱼眼檐下</button><button type="button" data-scene-preset="villaSummilux" disabled title="Leica Summilux-M 35mm f/1.4 全开 · 对焦 9 m · 18:27 · 从庭院回望屋内与串灯">回望屋内</button><button type="button" data-scene-preset="chochinCanon" disabled title="Canon 50mm f/0.95 全开 · 18:24 · 仰望约 3 m 外的提灯">提灯</button></div>
+            </div>
+            <div class="scene-targets scene-model">
+              <span class="scene-targets-label">自定义模型</span>
+              <div class="test-target-links" role="group" aria-label="自定义模型"><button type="button" id="model-open" disabled title="可多选 .glb，或 .gltf 及其 .bin 与纹理文件；也可直接拖入窗口。文件只在本机读取">载入 GLB…</button><button type="button" id="model-clear" hidden>全部移除</button></div>
+              <ul id="model-list" class="model-list" aria-label="已载入的模型" hidden></ul>
+              <input id="model-file" type="file" accept=".glb,.gltf,.bin,.png,.jpg,.jpeg,.webp,model/gltf-binary,model/gltf+json" multiple hidden />
+              <p id="model-status" class="model-status" aria-live="polite">点选模型后：拖动移动 · 滚轮缩放 · Shift + 滚轮旋转 · Delete 移除</p>
+            </div>
+          </div>
+        </section>
         <div id="camera-hints" class="camera-hints" hidden>
           <div class="camera-hint-mouse"><span>左键拖动</span><span>原地转头</span><span>右键 / Shift + 拖动</span><span>平移</span><span>W A S D</span><span>前后 · 左右移动</span><span>滚轮</span><span>前进 / 后退</span><span>F</span><span>AF-S 对焦</span><span>L</span><span>镜组工作台</span><span>P</span><span>性能诊断</span></div>
           <div class="camera-hint-touch">单指拖动原地转头 · 双指移动平移 · 双指捏合缩放</div>

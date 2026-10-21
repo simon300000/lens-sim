@@ -315,7 +315,9 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
         if(!['raster','lens'].includes(value))throw new Error('无效视图');
         const moved=rasterCameraDirty;rasterCameraDirty=false;update({mode:value});
         // Raster navigation deferred the camera reset of the accumulated image.
-        if(value==='lens'){lightingDirty=true;if(moved)resetAccumulation('camera');}
+        // Raster drew over the canvas: present the lens image again even when
+        // sampling is finished or paused and no new chunk will be submitted.
+        if(value==='lens'){lightingDirty=true;lastDisplayRevision='';if(moved)resetAccumulation('camera');}
         requestFrame();break;
       }
       // Raster preview quality (mode A). The application owns the raster passes and applies it.

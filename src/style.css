@@ -87,6 +87,14 @@ body[data-night="true"] .time-date{color-scheme:dark}
 .time-icon-moon{border:1px solid currentColor;border-radius:50%;border-top-color:transparent;transform:rotate(-35deg)}
 
 .scene-targets{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding-top:11px;border-top:1px solid var(--ui-line)}
+.scene-presets{margin-top:12px;padding-top:9px;border-top:1px solid var(--ui-line)}
+.scene-presets-toggle{display:flex;align-items:center;gap:6px;width:100%;padding:2px 0;border:0;background:none;color:var(--ui-muted);font:600 10.5px/1.4 var(--ui-font);cursor:pointer;text-align:left}
+.scene-presets-toggle:hover{color:var(--ui-ink)}
+.scene-presets-toggle span{flex:1}
+.scene-presets-toggle i{width:6px;height:6px;margin-right:8px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:translateY(-2px) rotate(45deg)}
+.scene-presets-toggle[aria-expanded="true"] i{transform:translateY(1px) rotate(-135deg)}
+.scene-presets-body[hidden]{display:none}
+.scene-presets-body>.scene-targets:first-child{margin-top:6px;padding-top:0;border-top:0}
 .scene-targets-label{font-size:10.5px;color:var(--ui-muted)}
 .test-target-links{display:flex;flex-wrap:wrap;gap:5px}
 .test-target-links button{font:11px var(--ui-font);border:0;border-radius:7px;padding:5px 9px;color:var(--ui-ink-2);background:var(--ui-fill);cursor:pointer}
@@ -113,6 +121,10 @@ body.model-drop #scene{outline:2px dashed var(--ui-ink-2);outline-offset:-10px}
 @media(max-width:700px){
   .scene-card{top:auto;bottom:12px;right:12px;left:12px;width:auto;max-width:none}
   .scene-card .scene-targets,.scene-card .scene-card-help{display:none}
+  /* Only the model loader shows on narrow screens, so it ignores the collapse. */
+  .scene-card .scene-presets-toggle{display:none}
+  .scene-card .scene-presets-body[hidden]{display:block}
+  .scene-card .scene-presets{margin-top:0;padding-top:0;border-top:0}
   .scene-card .scene-model{display:flex}
 }
 @media(prefers-reduced-motion:reduce){.scene-card{transition:none}}

@@ -6,6 +6,7 @@ import { buildGarden } from '../garden.js';
 import { buildLandscape } from '../landscape.js';
 import { buildDetails } from '../details.js';
 import { buildGardenFeatures } from '../garden-features.js';
+import { buildNightLights } from '../night-lights.js';
 import { applyMeadowVariation, applyWaterSurface } from './procedural-materials.js';
 import { batchStaticSiblings, partitionStaticInstances, shareInstanceAttributes } from './static-batches.js';
 import { LOCAL_LAMP_SHADOW_LAYER } from './render-layers.js';
@@ -26,6 +27,11 @@ export function buildSanteiScene() {
   details.lamps.push(...features.lamps);
   details.emissiveSources.push(...features.emissiveSources);
   details.emissiveMaterials.push(...features.emissiveSources.map(source=>source.material));
+  // Small night point sources (fireflies, candles, path stakes, ridge lamps)
+  // switch on with the lanterns; they are emissive only, with no point lights.
+  const nightLights=buildNightLights(scene);
+  details.emissiveSources.push(...nightLights.emissiveSources);
+  details.emissiveMaterials.push(...nightLights.emissiveSources.map(source=>source.material));
   // Both paper lanterns need wall/roof occlusion. Their shadow cameras see the
   // local joinery layer, keeping the entire remote forest out of six cube faces.
   villa.group.traverse(o=>{if(o.isMesh)o.layers.enable(LOCAL_LAMP_SHADOW_LAYER);});
@@ -51,5 +57,5 @@ export function buildSanteiScene() {
   landscape.root.userData.spatialBatches=partitionStaticInstances(landscape.root);
   const testTargets=buildTestTargets(scene);
   scene.userData.sharedInstances=shareInstanceAttributes(scene);
-  return { scene, garden, landscape, villa, vegetation, details, features, testTargets };
+  return { scene, garden, landscape, villa, vegetation, details, features, nightLights, testTargets };
 }
