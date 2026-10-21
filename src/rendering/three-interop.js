@@ -72,8 +72,10 @@ export function installSharedInstancing(renderer){
  * bundle is only valid for the colour/depth formats and sample count of the
  * pass it was recorded in: the same group and camera are drawn here into the
  * normal/depth prepass, the 4x MSAA beauty target, the lens lighting refresh
- * target and shadow maps. The bundle registry is keyed by the current render
- * context as well. r183 also executes recorded bundles when the pass ends,
+ * target and shadow maps. Both render context and target are part of the key:
+ * r183 shares contexts between targets with matching formats/sample counts,
+ * but a lighting-resource pass deliberately records different draws.
+ * r183 also executes recorded bundles when the pass ends,
  * i.e. after Three's directly drawn transparent objects (water, lantern
  * paper, Moon), which would blend them over an incomplete frame; bundles are
  * executed as soon as they are added instead, before the direct draws, and
@@ -89,11 +91,12 @@ export function installRenderBundleContexts(renderer){
     function get(bundleGroup,camera){
       const context=renderer._currentRenderContext;
       if(!context)throw new Error('Render bundle requested outside of a render context');
-      keys[0]=bundleGroup;keys[1]=camera;keys[2]=context;
+      const renderTarget=renderer.getRenderTarget();
+      keys[0]=bundleGroup;keys[1]=camera;keys[2]=context;keys[3]=renderTarget??renderer;
       let bundle=this.bundles.get(keys);
       // RenderBundle (not exported by three/webgpu) is a plain {bundleGroup, camera} record used as a backend data key.
-      if(bundle===undefined){bundle={bundleGroup,camera,renderContext:context};this.bundles.set(keys,bundle);records.add(bundle);}
-      keys[0]=keys[1]=keys[2]=null;
+      if(bundle===undefined){bundle={bundleGroup,camera,renderContext:context,renderTarget};this.bundles.set(keys,bundle);records.add(bundle);}
+      keys[0]=keys[1]=keys[2]=keys[3]=null;
       return bundle;
     }
     get.bundleContexts=true;get.records=records;
@@ -120,6 +123,28 @@ export function installRenderBundleContexts(renderer){
     },
     get recorded(){return bundles.get.records.size;},
   };
+}
+
+/** Lens reflection targets use the full display density, independently of
+ * raster quality or motion scaling. Scope the pinned r183 sizing hook to the
+ * reflector instances, without resizing the renderer, AO or display targets. */
+export function withReflectionPixelRatio(renderer,reflectors,pixelRatio,render){
+  if(THREE.REVISION!=='183')throw new Error('Reflection sizing requires tested Three r183');
+  const size=renderer.getSize(new THREE.Vector2()).multiplyScalar(pixelRatio).floor();
+  const saved=[];
+  try{
+    for(const reflector of new Set(reflectors)){
+      saved.push({reflector,own:Object.hasOwn(reflector,'_updateResolution'),update:reflector._updateResolution});
+      reflector._updateResolution=function(target){
+        target.setSize(Math.round(size.x*this.resolutionScale),Math.round(size.y*this.resolutionScale));
+      };
+    }
+    return render();
+  }finally{
+    for(const {reflector,own,update} of saved){
+      if(own)reflector._updateResolution=update;else delete reflector._updateResolution;
+    }
+  }
 }
 
 /** The ONLY module touching Three's private backend and node internals. Pinned r183 ABI.
@@ -246,8 +271,4 @@ export function renderVariantKey(renderer,args){
   if(!context)throw new Error('No active render context during warmup');
   return [object.id,geometry.id,material.id,material.version,scene.overrideMaterial?.id,scene.overrideMaterial?.version,
     camera.id,context.id,renderer.contextNode.id,renderer.contextNode.version,lights.getCacheKey(),clipping?.cacheKey,object.receiveShadow].join('/');
-}
-export function renderCacheCounts(renderer){
-  if(THREE.REVISION!=='183')throw new Error('Render warmup requires Three r183');
-  return {nodes:renderer._nodes.nodeBuilderCache.size,pipelines:renderer._pipelines.caches.size};
 }

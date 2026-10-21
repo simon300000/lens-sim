@@ -42,11 +42,11 @@ function catalogueFocalLengthMm(lens){
  *   optics    (lens/stop/focus) -> optics buffer + accumulation; never BVH or shadows
  *   display   (exposure/bloom/output) -> display only
  */
-export async function createHybridRuntime({renderer,scene,camera,adapterInfo,rasterPipeline,rasterBeauty,rasterGlare,refreshContext,cameraExposure,hdr,environment,requestFrame,onOutputState=()=>{},onRasterQuality=()=>{},initialState={},useWorker=true,maxSamplesInFlight=2}) {
+export async function createHybridRuntime({renderer,scene,camera,adapterInfo,rasterPipeline,rasterBeauty,rasterGlare,refreshContext,reflectionPixelRatio,cameraExposure,hdr,environment,requestFrame,onOutputState=()=>{},onRasterQuality=()=>{},initialState={},useWorker=true,maxSamplesInFlight=2}) {
   if(!Number.isInteger(maxSamplesInFlight)||maxSamplesInFlight<1||maxSamplesInFlight>2)throw new RangeError('Samples in flight must be 1 or 2');
   const store=createControlStore(initialState),interop=createGPUInterop(renderer),focusSolver=createFocusSolver();
   const sceneResources=createSceneResources({interop,scene,camera,starAngularRadius:STAR_ANGULAR_RADIUS,useWorker});
-  const lighting=createLightingResources({interop,renderer,scene,camera,environment,refreshContext});
+  const lighting=createLightingResources({interop,renderer,scene,camera,environment,refreshContext,reflectionPixelRatio});
   let lens=null,baseLens=null,baseAsset=null,manifest=null,engine=null,baseExposure=cameraExposure.value,interacting=false,pointerActive=false,releaseTimer;
   let disposed=false,commandRevision=0,lensLoadRevision=0,statisticsRevision=0,lastStatisticsSerial=-1,statisticsBusy=false,lastError=null;
   let displayPipeline=null,imageNode=null,bloomNode=null,lightingDirty=true,sceneBuild=null;

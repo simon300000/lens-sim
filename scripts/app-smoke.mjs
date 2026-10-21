@@ -30,7 +30,7 @@ try {
   await page.goto(`http://127.0.0.1:${port}/`);
   await page.waitForFunction(() => document.querySelector('#scene')?.dataset.ready === 'true' || document.querySelector('#loading')?.classList.contains('error'), null, { timeout: 3600000, polling: 2000 });
   stamp('page ready');
-  result.startup = await page.evaluate(() => ({ dataset: { ...document.querySelector('#scene').dataset }, diagnostics: { initializationWallMs: window.__SANTEI__.diagnostics.initializationWallMs, meshes: window.__SANTEI__.diagnostics.meshes, instances: window.__SANTEI__.diagnostics.instances, triangles: window.__SANTEI__.diagnostics.triangles }, scene: window.__SANTEI__.hybrid.store.getState().scene }));
+  result.startup = await page.evaluate(() => ({ dataset: { ...document.querySelector('#scene').dataset }, diagnostics: { meshes: window.__SANTEI__.diagnostics.meshes, instances: window.__SANTEI__.diagnostics.instances, triangles: window.__SANTEI__.diagnostics.triangles }, scene: window.__SANTEI__.hybrid.store.getState().scene }));
   await page.screenshot({ path: 'artifacts/app-raster.png', timeout: 900000 });
   const store = 'window.__SANTEI__.hybrid.store';
   await page.evaluate(async ({ spp, width, ev, fNumber }) => { const s = window.__SANTEI__.hybrid.store; await s.dispatch('setResolution', width); await s.dispatch('setTargetSpp', spp); if (ev) await s.dispatch('setExposureEV', ev); if (fNumber) await s.dispatch('setFNumber', fNumber); await s.dispatch('setMode', 'lens'); }, { spp, width, ev, fNumber });

@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {uniform as nodeUniform,vec4,context} from 'three/tsl';
 import { lensMaterial, PROCEDURAL } from '../scene/lens-registry.js';
+import { withReflectionPixelRatio } from './three-interop.js';
 
 /** Lighting resource bridge (the only module that reaches into Three's
  * shadow-map, PMREM and reflector render targets). Raster continues to
@@ -28,7 +29,7 @@ function cubeUVSize(height) {
   return { texelWidth: 1 / (3 * Math.max(2 ** maxMip, 7 * 16)), texelHeight: 1 / height, maxMip };
 }
 
-export function createLightingResources({ interop, renderer, scene, camera, environment, refreshContext, refreshSize = [16, 11] }) {
+export function createLightingResources({ interop, renderer, scene, camera, environment, refreshContext, reflectionPixelRatio = () => renderer.getPixelRatio(), refreshSize = [16, 11] }) {
   if (THREE.REVISION !== '183') throw new Error(`Lighting bridge requires tested Three r183; got ${THREE.REVISION}`);
   if (renderer.reversedDepthBuffer || renderer.logarithmicDepthBuffer) throw new Error('镜头光照桥接只支持标准深度缓冲（非反向/对数深度）');
   const { device } = interop;
@@ -212,6 +213,11 @@ export function createLightingResources({ interop, renderer, scene, camera, envi
     const started = performance.now();
     const previous = renderer.getRenderTarget(), previousMRT = renderer.getMRT();
     const previousContext=renderer.contextNode,previousRenderObject=renderer.getRenderObjectFunction();
+    const reflectors=new Set();
+    scene.traverseVisible(object=>{
+      const descriptor=object.isMesh&&!Array.isArray(object.material)?lensMaterial(object.material):null;
+      if(descriptor?.kind===PROCEDURAL.WATER&&descriptor.reflector?.reflector)reflectors.add(descriptor.reflector.reflector);
+    });
     let receiverDrawn=false;
     // Only a receiver and registered water need the outer draw: their updateBefore
     // hooks generate complete shadow maps and the complete reflected scene. Shadow
@@ -229,7 +235,9 @@ export function createLightingResources({ interop, renderer, scene, camera, envi
       const context=refreshContext?.();if(context)renderer.contextNode=context;
       renderer.setRenderObjectFunction(renderResourceObject);
       renderer.setMRT(null); renderer.setRenderTarget(refreshTarget);
-      if(refreshPipeline)refreshPipeline.render();else renderer.render(scene,camera);
+      withReflectionPixelRatio(renderer,reflectors,reflectionPixelRatio(),()=>{
+        if(refreshPipeline)refreshPipeline.render();else renderer.render(scene,camera);
+      });
     }finally {
       renderer.setRenderObjectFunction(previousRenderObject);renderer.contextNode=previousContext;
       renderer.setMRT(previousMRT); renderer.setRenderTarget(previous);

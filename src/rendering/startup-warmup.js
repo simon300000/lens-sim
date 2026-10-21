@@ -1,4 +1,4 @@
-import {renderVariantKey,renderCacheCounts} from './three-interop.js';
+import {renderVariantKey} from './three-interop.js';
 import {lensMaterial,PROCEDURAL} from '../scene/lens-registry.js';
 
 const paint=()=>new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));
@@ -11,7 +11,6 @@ export async function warmRender({renderer,scene,camera,render,budgetMs=48,onPro
   const objects=new Set();scene.traverse(o=>{if(o.isMesh||o.isPoints)objects.add(o);});
   const previous=renderer.getRenderObjectFunction(),known=new Set();
   let deadline=0,pending=false,owner=null,rounds=0;
-  const started=performance.now();
   function draw(...args){
     const [object,,passCamera,,material]=args;
     if(objects.has(object)){
@@ -36,9 +35,5 @@ export async function warmRender({renderer,scene,camera,render,budgetMs=48,onPro
       await paint();
     }while(pending);
   }finally{renderer.setRenderObjectFunction(previous);}
-  const before=renderCacheCounts(renderer),finalStarted=performance.now();
   render();
-  const after=renderCacheCounts(renderer);
-  return {rounds,variants:known.size,wallMs:performance.now()-started,finalSubmitMs:performance.now()-finalStarted,
-    finalStartMs:finalStarted,finalEndMs:performance.now(),finalNodeCacheDelta:after.nodes-before.nodes,finalPipelineCacheDelta:after.pipelines-before.pipelines};
 }

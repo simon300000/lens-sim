@@ -6,7 +6,7 @@ import { buildSanteiScene } from './scene/santei-scene.js';
 import { createDaylight } from './lighting.js';
 import { createTimeControls } from './time-controls.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { probeHDRCanvas,isHDRConfiguration,outputRendererOptions,displayOutputNode,captureCanvasRange } from './hdr-output.js';
+import { probeHDRCanvas,isHDRConfiguration,outputRendererOptions,displayOutputNode } from './hdr-output.js';
 import { createHybridRuntime } from './rendering/hybrid-runtime.js';
 import { createLensUI } from './ui/lens-ui.js';
 import { installActiveLightNodes } from './rendering/active-lights.js';
@@ -32,10 +32,8 @@ window.addEventListener('error',event=>faults.push(event.message));
 window.addEventListener('unhandledrejection',event=>faults.push(String(event.reason)));
 
 async function createScene(){
-  const startupStarted=performance.now();
   installSceneCard();
   await startup.stage(1,'检测 GPU 与 HDR 画布支持');
-  const pixelDiagnostics=new URLSearchParams(location.search).get('gpu-diagnostics')==='1';
   if(!navigator.gpu)throw new Error('此浏览器尚未启用 WebGPU。请用支持 WebGPU 的 Chrome 或 Edge 打开本地地址。');
   const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});
   if(!adapter)throw new Error('未找到可用的 WebGPU 设备。请检查浏览器硬件加速设置。');
@@ -281,8 +279,7 @@ async function createScene(){
 
   const diagnostics={backend:'WebGPU',three:THREE.REVISION,ready:false,errors:faults,groups:{},instances:0,meshes:0,triangles:0,
     hdr:{canvasSupported:hdr.supported,probe:hdr,displayHigh:displayHDR.matches,internalFormat:'rgba16float',
-      canvasConfiguration:renderer.backend.context.getConfiguration?.(),outputTransfer:'sRGB',fallback:'ACESFilmic',
-      fullFrameReadback:pixelDiagnostics?'startup-night-opt-in':'on-demand-only'}};
+      canvasConfiguration:renderer.backend.context.getConfiguration?.(),outputTransfer:'sRGB',fallback:'ACESFilmic'}};
   scene.traverse(o=>{if(o.isMesh){diagnostics.meshes++;if(o.isInstancedMesh)diagnostics.instances+=o.count;diagnostics.triangles+=(o.geometry.index?.count||o.geometry.attributes.position.count)/3*(o.isInstancedMesh?o.count:1);}});
   for(const [name,item]of Object.entries({villa,vegetation,garden,landscape,details,features}))diagnostics.groups[name]=item?.metadata||item?.userData||(name==='vegetation'?item:{});
   window.__SANTEI__={scene,camera,renderer,controls,pipeline,diagnostics,garden,daylight,timeControls,scenePass,testTargets};
@@ -304,7 +301,6 @@ async function createScene(){
   // Warm the visible Moon/stars, lamp shadows and unlit predawn variants while
   // the loading curtain is up, instead of compiling them on the first slider move.
   const initialTime=timeControls.getValue();
-  diagnostics.warmup=[];
   const warm=async()=>{
     // Sample count is part of the GPU pipeline key. Warm both choices while
     // loading, even when saved preferences disable MSAA, and finish on the
@@ -313,12 +309,11 @@ async function createScene(){
     try{
       for(const samples of [selected===4?0:4,selected]){
         setSceneSamples(samples);
-        const row=await warmRender({renderer,scene,camera,render:()=>pipeline.render(),
+        await warmRender({renderer,scene,camera,render:()=>pipeline.render(),
           onProgress:({variants})=>{document.querySelector('#loading-detail').textContent=`正在准备场景管线 · 已访问 ${variants} 个绘制变体`;}});
         // The final warm-up draw is submitted asynchronously. Finish it before
         // disposing the attachments for the next sample-count variant.
         await renderer.backend.device.queue.onSubmittedWorkDone();
-        diagnostics.warmup.push({...row,samples});
       }
     }finally{setSceneSamples(selected);}
   };
@@ -326,13 +321,6 @@ async function createScene(){
     await startup.stage(hour===0?4:5,hour===0?'预编译夜景、月亮与灯光':'预编译晨光与阴影');
     applyTime({...initialTime,hour},true);
     await warm();
-    const canvasRange=hour===0&&pixelDiagnostics?captureCanvasRange(renderer):null;
-    await renderer.backend.device.queue.onSubmittedWorkDone();
-    if(canvasRange){
-      diagnostics.hdr.nightCanvas=await canvasRange;
-      Object.assign(sceneElement.dataset,{canvasPeak:diagnostics.hdr.nightCanvas.peak,
-        canvasAboveWhite:diagnostics.hdr.nightCanvas.aboveWhitePixels,canvasNonFinite:diagnostics.hdr.nightCanvas.nonFinite});
-    }
   }
   await startup.stage(6,'预编译当前时刻的场景');
   applyTime(initialTime,true);
@@ -342,12 +330,12 @@ async function createScene(){
   warmingRasterEffects=false;
   bundles.enable();
   hybrid=await createHybridRuntime({renderer,scene,camera,adapterInfo:adapter.info,rasterPipeline:pipeline,rasterBeauty:beauty,rasterGlare:glare,refreshContext:()=>passReuse.beautyContext,cameraExposure,hdr,environment:daylight,requestFrame:wake,
+    reflectionPixelRatio:()=>rasterPixelRatio('auto',window.devicePixelRatio),
     onOutputState:mode=>{outputStatus.textContent=mode==='hdr'?'HDR':'SDR';sceneElement.dataset.outputMode=mode;},
     onRasterQuality:applyRasterQuality,initialState:{raster:rasterQuality}});
   const lensPanel=document.createElement('aside');lensPanel.id='lens-controls';document.body.appendChild(lensPanel);
   const lensUI=createLensUI({store:hybrid.store,container:lensPanel,liveStats:()=>hybrid.liveStats()});
   window.__SANTEI__.hybrid=hybrid;window.__SANTEI__.lensUI=lensUI;
-  window.__SANTEI__.captureOutputRange=()=>{hybrid.frame();return captureCanvasRange(renderer);};
   hybrid.store.subscribe(state=>{
     Object.assign(sceneElement.dataset,{lensMode:state.mode,lensStatus:state.status,lensId:state.lensId,
       lensSpp:state.sampling.spp,lensTargetSpp:state.sampling.targetSpp,lensRenderModel:state.renderModel.id,
@@ -372,8 +360,6 @@ async function createScene(){
   sceneElement.dataset.gpuErrors=String(faults.length);
   document.querySelector('#time-controls').setAttribute('aria-busy','false');
   diagnostics.ready=true;
-  diagnostics.initializationWallMs=performance.now()-startupStarted;
-  sceneElement.dataset.initializationWallMs=String(diagnostics.initializationWallMs);
   ready=true;
   for(const button of document.querySelectorAll('[data-test-target]'))button.disabled=false;
   // Models stand on the scene surface (never on each other); new ones go below the view centre.
@@ -391,7 +377,6 @@ async function createScene(){
   sceneElement.dataset.instances=diagnostics.instances;
   sceneElement.dataset.triangles=diagnostics.triangles;
   sceneElement.dataset.koi=garden.koi.length;
-  console.info('SANTEI scene ready',diagnostics);
   startup.complete();
   addEventListener('pagehide',()=>{ready=false;if(frameRequest!==null)cancelAnimationFrame(frameRequest);pointerSubmissions.dispose();userModel.dispose();urlState.dispose();lensUI.dispose();hybrid.dispose();motionQuality.dispose();bundles.dispose();passReuse.dispose();rasterAO.dispose();disposeActiveLights();controls.dispose();pipeline.dispose();renderer.dispose();},{once:true});
   // Initialization captured the current scene and prepared its first lens

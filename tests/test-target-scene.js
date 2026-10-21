@@ -6,7 +6,7 @@ try{
  const deadline=performance.now()+180000;while(!window.__SANTEI__?.diagnostics.ready&&performance.now()<deadline)await new Promise(r=>setTimeout(r,200));
  const app=window.__SANTEI__;if(!app?.diagnostics.ready)throw Error('Application did not initialize');
  const {hybrid,camera,renderer,diagnostics,testTargets}=app,store=hybrid.store;
- report.initializationWallMs=diagnostics.initializationWallMs;report.precomputeMs=hybrid.engine.pupilTable?.precomputeMs;
+ report.precomputeMs=hybrid.engine.pupilTable?.precomputeMs;
  for(const key of ['focus','siemens','iso']){
   await store.dispatch('setMode','raster');app.showTestTarget(key);await raf();await raf();
   await store.dispatch('autofocus');const af=store.getState().af;
