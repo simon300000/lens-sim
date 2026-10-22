@@ -19,7 +19,7 @@ export const VIDEO_PRESETS = Object.freeze({
   karesansui: { lens: 'zeiss-otus-55mm-f1-4', fNumber: 8, position: [-8.6, 2.15, 15.2], target: [-4.9, .1, 11.3], hour: 12, date: '2026-09-26', exposureEV: 5.03 },
   lanternNoct: { lens: 'nikon-z-58mm-f0-95-noct-s', position: [-2.95, .33, 14.6], target: [-3.17, .52, 11.8], hour: 18 + 20 / 60, date: '2026-09-26', exposureEV: -.3 },
   bridgePlena: { lens: 'nikon-z-135mm-f1-8-plena', position: [14.2, 1.5, 12.6], target: [5.81, 1.82, 5.53], hour: 6 + 36 / 60, date: '2026-09-26', exposureEV: 0 },
-  fisheyeEave: { lens: 'nikon-fisheye-nikkor-6mm-f5-6', fNumber: 5.6, focusM: 3, position: [-3, 1.55, -.9], target: [-3, 1.75, 8], hour: 10, date: '2026-09-26', exposureEV: 3.3 },
+  fisheyeEave: { lens: 'nikon-fisheye-nikkor-auto-6mm-f2-8', fNumber: 5.6, focusM: 3, position: [-3, 1.55, -.9], target: [-3, 1.75, 8], hour: 10, date: '2026-09-26', exposureEV: 6.27 },
   villaSummilux: { lens: 'leica-summilux-m-35mm-f1-4', focusM: 9, position: [.8, 1.3, 7.8], target: [-3, 2.4, -.3], hour: 18 + 27 / 60, date: '2026-09-26', exposureEV: -.5 },
   chochinCanon: { lens: 'canon-50mm-f0-95', position: [-6, 2.3, 8.2], target: [-8.01, 2.64, 5.74], hour: 18 + 24 / 60, date: '2026-09-26', exposureEV: -2.5 },
 });
