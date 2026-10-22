@@ -335,7 +335,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
       case 'setResolution':finite(240,MAX_IMAGE_WIDTH);await engine.resizeChecked(interacting?240:value);update({sampling:{...state().sampling,resolution:value}});bindImage();resetAccumulation();break;
       case 'setPaused':update({sampling:{...s.sampling,paused:Boolean(value)}});requestFrame();break;
       case 'reset':resetAccumulation();break;
-      case 'setExposureEV':finite(-6,6);update({display:{...s.display,exposureEV:value}});displayChanged();break;
+      case 'setExposureEV':finite(-15,15);update({display:{...s.display,exposureEV:value}});displayChanged();break;
       case 'setBloom':update({display:{...s.display,bloom:Boolean(value)}});displayChanged();break;
       case 'setDiagnostic':{
         if(!(value in DIAGNOSTIC_MODES))throw new Error('无效诊断视图');

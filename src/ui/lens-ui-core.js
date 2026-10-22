@@ -185,7 +185,7 @@ export function createLensUI({ store, container, liveStats = null } = {}) {
 
       group('displayGroup', '显示', 'displayValue',
         h('div', { class: 'lu-row lu-slider-row' }, label('evRange', '曝光'),
-          h('input', { type: 'range', ref: 'evRange', id: id('evRange'), min: -6, max: 6, step: 1 / 3, 'aria-describedby': id('evHint') }),
+          h('input', { type: 'range', ref: 'evRange', id: id('evRange'), min: -15, max: 15, step: 1 / 3, 'aria-describedby': id('evHint') }),
           h('output', { ref: 'evOut', for: id('evRange'), class: 'lu-out' }),
           h('button', { type: 'button', class: 'lu-btn lu-nudge-btn', ref: 'evZero', title: '曝光归零', 'aria-label': '显示曝光归零', text: '0' })),
         hint('evHint', '附加显示曝光，不改变光学参数，也不自动归一亮度。'),

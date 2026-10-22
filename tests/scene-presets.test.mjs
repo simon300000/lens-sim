@@ -17,7 +17,7 @@ test('every preset is a valid shot with its own button',()=>{
   // Same validation as the runtime commands and the date input.
   // A missing focusM means AF-S at the frame centre (video shots only).
   assert.ok(p.focusM===undefined?key in VIDEO_PRESETS:p.focusM===null||(p.focusM>=.1&&p.focusM<=10000),key);
-  assert.ok(p.exposureEV>=-6&&p.exposureEV<=6,key);
+  assert.ok(p.exposureEV>=-15&&p.exposureEV<=15,key);
   assert.ok(p.hour>=0&&p.hour<=24,key);assert.match(p.date,/^\d{4}-\d{2}-\d{2}$/);
  }
 });
