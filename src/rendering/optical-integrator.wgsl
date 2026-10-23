@@ -31,16 +31,7 @@ struct PixelAccum {
 @group(0) @binding(7) var<storage,read> sceneInstances: array<SceneInstance>;
 @group(0) @binding(8) var<storage,read> sceneTriangles: array<SceneTriangle>;
 @group(0) @binding(9) var<storage,read> sceneVertices: array<SceneVertex>;
-@group(0) @binding(10) var<storage,read> sceneTables: array<vec4<u32>>;
-@group(0) @binding(11) var<uniform> sceneLighting: SceneLighting;
-@group(0) @binding(12) var sceneSunShadow: texture_depth_2d;
-@group(0) @binding(13) var sceneMoonShadow: texture_depth_2d;
-@group(0) @binding(14) var scenePointShadow0: texture_depth_cube;
-@group(0) @binding(15) var scenePointShadow1: texture_depth_cube;
-@group(0) @binding(16) var sceneEnvironment: texture_2d<f32>;
-@group(0) @binding(17) var sceneReflection: texture_2d<f32>;
-@group(0) @binding(18) var sceneCompareSampler: sampler_comparison;
-@group(0) @binding(19) var sceneLinearSampler: sampler;
+// Radiance provider resources follow from PROVIDER_BINDING_BASE (24).
 // WORK-COUNTING-BEGIN  (compiled only into the diagnostics variant; needs a 9th storage buffer)
 // 64-bit work totals as (low, high) u32 pairs.
 @group(0) @binding(21) var<storage,read_write> workTotals: array<atomic<u32>>;

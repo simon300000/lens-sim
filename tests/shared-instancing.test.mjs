@@ -1,12 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Group,InstancedMesh,InstancedMeshNode,InstancedInterleavedBuffer,StorageInstancedBufferAttribute,BoxGeometry,MeshStandardNodeMaterial,DynamicDrawUsage,Color,NodeUpdateType} from 'three/webgpu';
-import {installSharedInstancing} from '../src/rendering/three-interop.js';
+import * as THREE from 'three/webgpu';
+import {Group,InstancedMesh,BoxGeometry,MeshStandardNodeMaterial,Color} from 'three/webgpu';
+import {stack,setCurrentStack} from 'three/tsl';
 import {shareInstanceAttributes,hasSharedInstanceAttributes,sourceGeometry,INSTANCE_MATRIX_ATTRIBUTES} from '../src/scene/static-batches.js';
 
+// Observe three's own setupPosition (r186 applies instancing inside it) before
+// the patch wraps it; installation is idempotent and global.
+const seen=[];
+THREE.NodeMaterial.prototype.setupPosition=function(builder){seen.push(builder.object.instanceMatrix);};
+const {installSharedInstancing,updateSharedMatrices}=await import('../src/rendering/three-interop.js');
 const fakeRenderer=()=>({_nodes:{getForRenderCacheKey(renderObject){return renderObject.initialCacheKey;}}});
-// A uniform buffer limit that would make Three keep small batches in uniforms.
-const builder={getUniformBufferLimit:()=>65536};
+installSharedInstancing(fakeRenderer());
 
 test('prepared instanced meshes expose matrices and colours as geometry attributes',()=>{
  const root=new Group(),source=new BoxGeometry(),material=new MeshStandardNodeMaterial();
@@ -21,7 +26,7 @@ test('prepared instanced meshes expose matrices and colours as geometry attribut
   assert.equal(geometry.index,source.index);assert.equal(geometry.attributes.position,source.attributes.position);
   assert.deepEqual(geometry.boundingSphere,source.boundingSphere);
   const columns=INSTANCE_MATRIX_ATTRIBUTES.map(name=>geometry.attributes[name]);
-  assert.ok(columns[0].data instanceof InstancedInterleavedBuffer);
+  assert.ok(columns[0].data instanceof THREE.InstancedInterleavedBuffer);
   assert.equal(columns[0].data.array,mesh.instanceMatrix.array);
   assert.deepEqual(columns.map(c=>[c.data,c.itemSize,c.offset]),[0,4,8,12].map(offset=>[columns[0].data,4,offset]));
   assert.ok(hasSharedInstanceAttributes(mesh));
@@ -48,43 +53,26 @@ test('prepared batches of one material share a node builder cache key',()=>{
  assert.equal(a.uuid.length,36,'uuid is restored');
 });
 
+test('prepared meshes read attribute matrices and skip three\'s per-mesh instancing',()=>{
+ const root=new Group(),material=new MeshStandardNodeMaterial(),prepared=new InstancedMesh(new BoxGeometry(),material,2),plain=new InstancedMesh(new BoxGeometry(),material,2);
+ prepared.setColorAt(0,new Color('#ff0000'));root.add(prepared);shareInstanceAttributes(root);
+ const builder=object=>({object,geometry:object.geometry,needsPreviousData:()=>false,hasGeometryAttribute:()=>true});
+ const run=object=>{const s=stack();setCurrentStack(s);seen.length=0;try{material.setupPosition(builder(object));}finally{setCurrentStack(null);}return s.nodes;};
+ const nodes=run(prepared);
+ assert.deepEqual(seen,[null],'three\'s instancing branch sees no instance matrix');
+ assert.ok(prepared.instanceMatrix?.isInstancedBufferAttribute,'instance matrix restored');
+ // positionLocal, normalLocal and the instance colour varying from attributes, plus the per-object upload hook.
+ assert.equal(nodes.filter(n=>n.isAssignNode).length,3);
+ assert.equal(nodes.filter(n=>n.constructor.name==='EventNode').length,1);
+ assert.equal(run(plain).length,0);assert.equal(seen[0],plain.instanceMatrix,'unprepared meshes keep three\'s path');
+});
+
 test('prepared meshes re-upload their matrices per object when the mesh attribute changes',()=>{
- installSharedInstancing(fakeRenderer());
  const root=new Group(),mesh=new InstancedMesh(new BoxGeometry(),new MeshStandardNodeMaterial(),2);root.add(mesh);shareInstanceAttributes(root);
- const node=new InstancedMeshNode(mesh),matrices=mesh.geometry.attributes.instanceMatrix0.data,version=matrices.version;
- node.update({object:mesh});
+ const matrices=mesh.geometry.attributes.instanceMatrix0.data,version=matrices.version;
+ updateSharedMatrices(mesh);
  assert.equal(matrices.version,version,'unchanged matrices are not re-uploaded');
- mesh.instanceMatrix.needsUpdate=true;node.update({object:mesh});
+ mesh.instanceMatrix.needsUpdate=true;updateSharedMatrices(mesh);
  assert.equal(matrices.version,version+1);
- node.update({object:mesh});assert.equal(matrices.version,version+1);
-});
-
-test('unprepared small batches still use attribute instancing so their shaders are shared',()=>{
- installSharedInstancing(fakeRenderer());
- const mesh=new InstancedMesh(new BoxGeometry(),new MeshStandardNodeMaterial(),3);
- const node=new InstancedMeshNode(mesh);
- const matrix=node._createInstanceMatrixNode(true,builder);
- assert.ok(node.buffer instanceof InstancedInterleavedBuffer,'instance matrices are a vertex attribute buffer');
- assert.equal(node.buffer.array,mesh.instanceMatrix.array);
- assert.deepEqual(matrix.node.nodes.map(c=>[c.bufferStride,c.bufferOffset]),[[16,0],[16,4],[16,8],[16,12]],'four vec4 columns of one interleaved buffer');
- assert.equal(node.updateType,NodeUpdateType.FRAME);
- mesh.instanceMatrix.needsUpdate=true;node.update({object:mesh});
- assert.equal(node.buffer.version,mesh.instanceMatrix.version);
- node._createInstanceMatrixNode(false,builder);
- assert.equal(node.buffer.array,mesh.instanceMatrix.array);
-});
-
-test('dynamic and storage instance matrices keep their own paths',()=>{
- installSharedInstancing(fakeRenderer());
- const dynamic=new InstancedMesh(new BoxGeometry(),new MeshStandardNodeMaterial(),2);
- dynamic.instanceMatrix.setUsage(DynamicDrawUsage);
- const dynamicNode=new InstancedMeshNode(dynamic),columns=dynamicNode._createInstanceMatrixNode(true,builder).node.nodes;
- assert.deepEqual(columns.map(c=>[c.usage,c.bufferStride,c.bufferOffset]),[0,4,8,12].map(offset=>[DynamicDrawUsage,16,offset]));
- const storage=new InstancedMesh(new BoxGeometry(),new MeshStandardNodeMaterial(),2);
- storage.instanceMatrix=new StorageInstancedBufferAttribute(storage.instanceMatrix.array,16);
- const storageNode=new InstancedMeshNode(storage);
- assert.ok(storageNode.isStorageMatrix);
- const matrix=storageNode._createInstanceMatrixNode(true,builder);
- assert.equal(storageNode.buffer,null);
- assert.ok(matrix.isStorageArrayElementNode,'storage matrices still index the storage buffer');
+ updateSharedMatrices(mesh);assert.equal(matrices.version,version+1);
 });

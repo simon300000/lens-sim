@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {opticalSourceForLutPolicy} from '../src/rendering/optical-source.js';
 import {preferredOpticalLutReuse} from '../src/rendering/optical-lut-policy.js';
-const source=readFileSync(new URL('../src/optics/optical-core.wgsl',import.meta.url),'utf8');
+import source from '../src/optics/optical-core.wgsl.js';
 test('LUT reuse is enabled only for validated NVIDIA adapters',()=>{
  for(const vendor of ['nvidia','NVIDIA','0x10de','10de'])assert.equal(preferredOpticalLutReuse({vendor}),true);
  assert.equal(preferredOpticalLutReuse({description:'NVIDIA GeForce RTX 4090'}),true);

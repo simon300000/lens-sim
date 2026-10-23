@@ -47,7 +47,7 @@ try{
   for(const entry of manifest.lenses){
     // Source tags are retained in generated prescription surfaces.
     if(!entry.supported)continue;
-    const asset=await(await fetch(entry.asset)).json();
+    const asset=await(await fetch(new URL(entry.asset,new URL('/lenses/',location.href)))).json();
     const family=asset.configurations.some(l=>l?.surfaces.some(s=>s.xodd))?'xodd':asset.configurations.some(l=>l?.surfaces.some(s=>s.doe))?'doe':null;
     if(!family)continue;
     families[family].lenses++;

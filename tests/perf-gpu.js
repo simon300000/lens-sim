@@ -17,7 +17,7 @@ try {
   const adapter = await navigator.gpu.requestAdapter();
   const device = await adapter.requestDevice({requiredFeatures:[...adapter.features],requiredLimits:requiredGPULimits(adapter.limits)});
   const renderer = new THREE.WebGPURenderer({antialias:false,device});
-  await renderer.init(); renderer.setSize(W, W / 1.5); renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; renderer.toneMapping = THREE.NoToneMapping;
+  await renderer.init(); renderer.setSize(W, W / 1.5); renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap; renderer.toneMapping = THREE.NoToneMapping;
   const errors = []; renderer.backend.device.addEventListener('uncapturederror', e => { errors.push(e.error.message); step('GPU ERROR ' + e.error.message.split('\n')[0]); });
   let t = performance.now();
   const built = buildSanteiScene(), { scene, details } = built; const sceneBuildMs = performance.now() - t; step('scene built');

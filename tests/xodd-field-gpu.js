@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu';
 import opticalCoreRaw from '../src/optics/optical-core.wgsl?raw';
 import workCounters from '../src/rendering/work-counters.wgsl?raw';
 const opticalCore=workCounters+opticalCoreRaw;
-import {createGPUInterop} from '../src/rendering/three-interop.js';
+import {createThreeInterop,cameraPose} from '../src/rendering/three-interop.js';
 import {packLens} from '../src/optics/lens-state.js';
 import {traceLens,unit,add,intersectSurface,refract} from '../src/optics/optical-reference.js';
 import {refractiveIndex} from '../src/optics/glass.js';
@@ -35,12 +35,12 @@ function numericalDetail(lens,origin,direction,nm,stopRadiusMm){
 const save=async()=>fetch('/__xodd_report',{method:'POST',body:JSON.stringify(report,null,2)});
 let renderer,interop;
 try{
- renderer=new THREE.WebGPURenderer();await renderer.init();renderer.setSize(480,320);document.body.appendChild(renderer.domElement);interop=createGPUInterop(renderer);
+ renderer=new THREE.WebGPURenderer();await renderer.init();renderer.setSize(480,320);document.body.appendChild(renderer.domElement);interop=createThreeInterop(renderer);
  interop.device.addEventListener('uncapturederror',e=>report.errors.push(e.error.message));
  const pipeline=await interop.computePipeline(opticalCore+'\n'+kernel,'XODD full-frame same-ray paths'),manifest=await(await fetch(native?'/artifacts/xodd-native-manifest.json':'/lenses/manifest.json')).json();
  for(const entry of manifest.lenses){
   if(!entry.supported||(only&&entry.id!==only))continue;
-  const asset=await(await fetch(entry.asset)).json();if(!asset.configurations.some(l=>l?.surfaces.some(s=>s.xodd)))continue;
+  const asset=await(await fetch(new URL(entry.asset,new URL(native?'/artifacts/':'/lenses/',location.href)))).json();if(!asset.configurations.some(l=>l?.surfaces.some(s=>s.xodd)))continue;
   for(const [index,lens]of asset.configurations.entries()){
    if(!lens)continue;
    out.textContent=`${entry.id} config ${index}… ${report.cases.length} completed`;

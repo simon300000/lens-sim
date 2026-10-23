@@ -11,7 +11,7 @@ const args = process.argv.slice(2);
 const option = (name, fallback) => { const i = args.indexOf(name); return i >= 0 ? args.splice(i, 2)[1] : fallback; };
 const port = Number(option('--port', 5179)), executablePath = option('--chromium', process.env.CHROMIUM_PATH), headed = args.includes('--headed');
 const pages = args.filter(a => !a.startsWith('--'));
-const all = ['scene-bvh-gpu', 'hybrid-chain', 'hybrid-optics', 'runtime-gpu', 'imaging-gpu', 'hidden-surface-gpu', 'shading-gpu', 'sampling-gpu', 'hdr-gpu', 'time-pipelines-gpu', 'pupil-engine', 'pupil-gpu?autorun=1', 'doe-gpu', 'catalog-new-forms-gpu', 'native-gap-gpu'];
+const all = ['scene-bvh-gpu', 'hybrid-chain', 'hybrid-optics', 'runtime-gpu', 'imaging-gpu', 'hidden-surface-gpu', 'shading-gpu', 'sampling-gpu', 'hdr-gpu', 'time-pipelines-gpu', 'pupil-engine', 'pupil-gpu?autorun=1', 'doe-gpu', 'catalog-new-forms-gpu', 'native-gap-gpu', 'lens-tracer-gpu'];
 let playwright;
 try { playwright = await import(process.env.PLAYWRIGHT_MODULE || 'playwright'); }
 catch { console.error('Playwright is required: npm install --no-save playwright && npx playwright install chromium (or set PLAYWRIGHT_MODULE).'); process.exit(2); }

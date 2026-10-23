@@ -12,7 +12,7 @@ function fakeRenderer(){
   const registry={bundles:{get(keys){return chain.get(keyOf(keys));},set(keys,value){chain.set(keyOf(keys),value);}},get(){throw new Error('replaced');},dispose(){chain.clear();}};
   const data=new WeakMap(),executed=[];
   const backend={get(object){let d=data.get(object);if(!d){d={};data.set(object,d);}return d;},addBundle(renderContext,bundle){this.get(renderContext).renderBundles.push(bundle);}};
-  const renderer={_bundles:registry,backend,_currentRenderContext:null,target:null,getRenderTarget(){return this.target;},getClearDepth:()=>1,getClearStencil:()=>0};
+  const renderer={_bundles:registry,backend,_currentRenderContext:null,target:null,getRenderTarget(){return this.target;},getClearDepth:()=>1,getClearStencil:()=>0,_bundleNeedsUpdate:Renderer.prototype._bundleNeedsUpdate};
   return {renderer,registry,backend,executed};
 }
 
@@ -57,7 +57,7 @@ test('single-sample beauty never replays the lighting-refresh subset',()=>{
   const executed=[];
   backend.get(shared).currentPass={executeBundles:items=>executed.push(...items)};
   backend.beginBundle=()=>{renderer.recorded=[];};
-  backend.finishBundle=(context,bundle)=>{backend.get(bundle).bundleGPU=renderer.recorded.slice();};
+  backend.finishBundle=(context,bundle)=>{Object.assign(backend.get(bundle),{bundleGPU:renderer.recorded.slice(),renderObjects:[]});};
   renderer._nodes={needsRefresh:()=>false};renderer.opaque=true;renderer.transparent=false;
   renderer._renderObjects=list=>renderer.recorded.push(...(renderer.target===refresh?['Lighting resource trigger']:list.map(x=>x.name)));
   const bundle={bundleGroup:{version:1},camera:{},renderList:{opaque:[{name:'wall'},{name:'tree'}],transparent:[],transparentDoublePass:[]}};

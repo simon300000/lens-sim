@@ -17,7 +17,7 @@ async function readTarget(interop, target) { return interop.readTexture(interop.
 try {
   const adapter = await navigator.gpu.requestAdapter();
   const renderer = new THREE.WebGPURenderer({ antialias: false }); await renderer.init(); renderer.setSize(W, H);
-  renderer.toneMapping = THREE.NoToneMapping; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.NoToneMapping; renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
   const errors = []; renderer.backend.device.addEventListener('uncapturederror', e => errors.push(e.error.message));
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(40, W / H, .1, 100); camera.position.set(0, 2.2, 6.5); camera.lookAt(0, .6, 0); camera.updateMatrixWorld();

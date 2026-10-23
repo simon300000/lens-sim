@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import {installSoftShadowFilter} from '../src/rendering/soft-shadow-filter.js';
 import {pass,mrt,normalView,vec4,builtinAOContext,Fn,float,convertToTexture,screenUV} from 'three/tsl';
 import {ao} from 'three/addons/tsl/display/GTAONode.js';
 import {denoise} from 'three/addons/tsl/display/DenoiseNode.js';
@@ -6,7 +7,7 @@ import {createRasterAO} from '../src/rendering/raster-ao.js';
 import {woodMat} from '../src/kit.js';
 import {applyWaterSurface} from '../src/scene/procedural-materials.js';
 import {installNormalPassReuse} from '../src/rendering/pass-reuse.js';
-import {createGPUInterop} from '../src/rendering/three-interop.js';
+import {createThreeInterop,cameraPose} from '../src/rendering/three-interop.js';
 import {createLightingResources} from '../src/rendering/lighting-resources.js';
 import {createPupilPrecomputer} from '../src/optics/pupil-precompute.js';
 import {buildPupilTable} from '../src/optics/pupil-sampling.js';
@@ -15,10 +16,10 @@ const report={kind:'startup-reuse-gpu',userAgent:navigator.userAgent,errors:[],p
 let renderer,interop,reuse,lighting,precomputer;const check=(ok,text)=>{if(!ok)throw Error(text);};
 function compare(a,b){check(a.length===b.length,'Image dimensions changed');let max=0,different=0,nonzero=0;for(let i=0;i<a.length;i++){check(Number.isFinite(a[i]+b[i]),'Nonfinite pixel');const d=Math.abs(a[i]-b[i]);max=Math.max(max,d);if(d>0)different++;if(Math.abs(a[i])>.001)nonzero++;}return {max,different,nonzero};}
 try{
- renderer=new THREE.WebGPURenderer({antialias:false});await renderer.init();renderer.setSize(192,128);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
- document.body.append(renderer.domElement);interop=createGPUInterop(renderer);interop.device.addEventListener('uncapturederror',e=>report.errors.push(e.error.message));
+ renderer=new THREE.WebGPURenderer({antialias:false});await renderer.init();renderer.setSize(192,128);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;
+ document.body.append(renderer.domElement);interop=createThreeInterop(renderer);interop.device.addEventListener('uncapturederror',e=>report.errors.push(e.error.message));
  const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(40,1.5,.1,50);camera.position.set(4,3,5);camera.lookAt(0,.5,0);camera.updateMatrixWorld();
- const sun=new THREE.DirectionalLight(0xffffff,3);sun.position.set(3,5,2);sun.castShadow=true;sun.shadow.mapSize.set(256,256);scene.add(sun,new THREE.HemisphereLight(0x8899bb,0x333322,1));
+ const sun=new THREE.DirectionalLight(0xffffff,3);sun.position.set(3,5,2);sun.castShadow=true;sun.shadow.mapSize.set(256,256);scene.add(sun,new THREE.HemisphereLight(0x8899bb,0x333322,1));installSoftShadowFilter(scene,renderer);
  const wood=woodMat(),box=new THREE.Mesh(new THREE.BoxGeometry(1.8,1.2,1.3),wood);box.position.y=.7;box.castShadow=box.receiveShadow=true;scene.add(box);
  const floor=new THREE.Mesh(new THREE.PlaneGeometry(8,8),new THREE.MeshStandardNodeMaterial({color:0x778877,roughness:.9}));floor.rotation.x=-Math.PI/2;floor.receiveShadow=true;scene.add(floor);
  const water=new THREE.Mesh(new THREE.PlaneGeometry(2.8,2.8).rotateX(-Math.PI/2),new THREE.MeshPhysicalNodeMaterial({transparent:true,opacity:.4,side:THREE.DoubleSide,depthWrite:false,clearcoat:1}));water.position.set(1.4,.05,1.3);water.receiveShadow=true;scene.add(water);const mirror=applyWaterSurface(water);

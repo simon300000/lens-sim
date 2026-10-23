@@ -2,15 +2,18 @@ import {preferredOpticalLutReuse} from './optical-lut-policy.js';
 import * as THREE from 'three/webgpu';
 import { texture, screenUV, uniform, vec2, vec4, step, mix } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
-import { createGPUInterop } from './three-interop.js';
-import { createOpticalEngine, DIAGNOSTIC_MODES, ACCUMULATING_DIAGNOSTICS } from './optical-engine.js';
+import { createThreeInterop, cameraPose } from './three-interop.js';
+import { DIAGNOSTIC_MODES, ACCUMULATING_DIAGNOSTICS } from './optical-engine.js';
+import { createLensTracer } from '../lens-tracer.js';
+import { createSceneBVH } from './scene-bvh.js';
+import { createGardenProvider } from './garden-provider.js';
+import { createLensLibrary } from '../optics/lens-library.js';
 import { createSceneResources } from './scene-resources.js';
 import { createLightingResources, STAR_ANGULAR_RADIUS } from './lighting-resources.js';
 import { hasSamplesRemaining, MAX_IMAGE_WIDTH } from './sampling-plan.js';
 import { createControlStore } from './control-store.js';
 import { normalizeRasterQuality } from './raster-quality.js';
 import { apertureLimits, rearSamplingRegion } from '../optics/lens-state.js';
-import { createFocusSolver } from '../optics/focus-solver.js';
 import { displayOutputNode } from '../hdr-output.js';
 import { exportLensTexture, captureCanvas } from './image-export.js';
 import { summarizeWork } from './work-model.js';
@@ -42,12 +45,17 @@ function catalogueFocalLengthMm(lens){
  *   optics    (lens/stop/focus) -> optics buffer + accumulation; never BVH or shadows
  *   display   (exposure/bloom/output) -> display only
  */
-export async function createHybridRuntime({renderer,scene,camera,adapterInfo,rasterPipeline,rasterBeauty,rasterGlare,refreshContext,reflectionPixelRatio,cameraExposure,hdr,environment,requestFrame,onOutputState=()=>{},onRasterQuality=()=>{},initialState={},useWorker=true,maxSamplesInFlight=2}) {
+export async function createHybridRuntime({renderer,scene,camera,adapterInfo,rasterPipeline,rasterBeauty,rasterGlare,refreshContext,reflectionPixelRatio,cameraExposure,hdr,environment,requestFrame,onOutputState=()=>{},onRasterQuality=()=>{},initialState={},useWorker=true,maxSamplesInFlight=2,lensBaseUrl='/lenses/'}) {
   if(!Number.isInteger(maxSamplesInFlight)||maxSamplesInFlight<1||maxSamplesInFlight>2)throw new RangeError('Samples in flight must be 1 or 2');
-  const store=createControlStore(initialState),interop=createGPUInterop(renderer),focusSolver=createFocusSolver();
-  const sceneResources=createSceneResources({interop,scene,camera,starAngularRadius:STAR_ANGULAR_RADIUS,useWorker});
+  // The garden is one host of the embeddable lens tracer (lens-tracer.js): three
+  // supplies the device and lighting resources, the scene producer feeds the
+  // tracer's BVH, and the garden PBR port is its radiance provider.
+  const store=createControlStore(initialState),interop=createThreeInterop(renderer),library=createLensLibrary({baseUrl:lensBaseUrl});
+  const bvh=createSceneBVH({interop,worker:useWorker?undefined:false});
+  const sceneResources=createSceneResources({interop,scene,camera,starAngularRadius:STAR_ANGULAR_RADIUS,bvh});
   const lighting=createLightingResources({interop,renderer,scene,camera,environment,refreshContext,reflectionPixelRatio});
-  let lens=null,baseLens=null,baseAsset=null,manifest=null,engine=null,baseExposure=cameraExposure.value,interacting=false,pointerActive=false,releaseTimer;
+  const garden=createGardenProvider({lighting,materials:sceneResources});
+  let tracer=null,lens=null,baseLens=null,baseAsset=null,manifest=null,engine=null,baseExposure=cameraExposure.value,interacting=false,pointerActive=false,releaseTimer;
   let disposed=false,commandRevision=0,lensLoadRevision=0,statisticsRevision=0,lastStatisticsSerial=-1,statisticsBusy=false,lastError=null;
   let displayPipeline=null,imageNode=null,bloomNode=null,lightingDirty=true,sceneBuild=null;
   const viewportAspect=uniform(innerWidth/innerHeight),rawDisplay=uniform(0);
@@ -145,7 +153,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
   function ensureLighting(){
     if(!lightingDirty)return;
     lightingDirty=false;
-    lighting.refresh();engine?.setPose(camera);
+    lighting.refresh();tracer?.setPose(cameraPose(camera));
     const ls=lighting.status;
     if(!ls.ok)throw new Error('光栅光照资源不可用：'+ls.errors.join('；'));
     publishEngine();
@@ -154,7 +162,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
     const candidate={...state().optics,...patch};
     // Validate and upload before committing the UI snapshot. A rejected change
     // leaves the previous optics and focus state intact.
-    engine.updateOptics({fNumber:candidate.fNumber,sensorZMm:lens.lastVertexZMm+candidate.imageDistanceMm,dispersion:candidate.dispersion});
+    tracer.updateOptics({fNumber:candidate.fNumber,sensorZMm:lens.lastVertexZMm+candidate.imageDistanceMm,dispersion:candidate.dispersion});
     cancelFocus();update({optics:candidate});clearMetrics();statisticsRevision++;lastStatisticsSerial=-1;revision('optics');publishPrescription();publishEngine();requestFrame();
   }
   async function loadLens(id,index=0){
@@ -164,16 +172,15 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
     update({status:'loading',error:null});
     try{
       let nextAsset=custom;
-      if(!nextAsset){const response=await fetch(entry.asset);if(!response.ok)throw new Error('无法加载镜头数据');nextAsset=await response.json();}
+      nextAsset??=await library.asset(id);
       if(token!==lensLoadRevision)return;
       const next=nextAsset.configurations[index];if(!next)throw new Error(nextAsset.configurationStatus[index]?.reason||'配置不可用');
       const limits=apertureLimits(next);
       const focusDistanceM=next.objectDistanceMm===null?null:next.objectDistanceMm/1000;
       const sensorZMm=next.sensorZMm,fNumber=limits.minFNumber;
       const minimumGap=minimumImageDistance(next);
-      const nextState={fNumber,sensorZMm,dispersion:old.optics.dispersion};
-      await engine.prepareLens(next,nextState);if(token!==lensLoadRevision||disposed)return;
-      const packed=engine.setLens(next,nextState);
+      const packed=await tracer.setLens(next,{fNumber,sensorZMm,dispersion:old.optics.dispersion},{stale:()=>token!==lensLoadRevision||disposed});
+      if(!packed)return;
       lens=next;baseLens=next;baseAsset=nextAsset;statisticsRevision++;
       update({status:'ready',error:null,lensId:id,configurationIndex:index,configurations:nextAsset.configurationStatus.map(c=>({...c,available:c.supported})),
         warnings:[...(next.capabilityWarnings??[]),...next.warnings.filter(w=>/^(通光数据不完整|含 nd\/vd|DOE 按|380–780)/.test(w)),
@@ -194,19 +201,17 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
       let hit=null;
       if(autofocus){
         if(!sceneResources.ready)throw new Error('场景 BVH 尚未就绪');
-        engine.setPose(camera);hit=await engine.referenceTarget();distanceM=hit.infinity?null:hit.distanceM;
+        tracer.setPose(cameraPose(camera));hit=await tracer.referenceTarget();distanceM=hit.infinity?null:hit.distanceM;
       }
       if(token!==commandRevision)return;
-      const moved=await focusSolver.solve(baseLens,distanceM,{currentLens:{...lens,sensorZMm:engine.packed.sensorZMm},stopRadiusMm:engine.packed.stopRadiusMm,dispersion:old.optics.dispersion});
       const stale=()=>disposed||token!==commandRevision||revisions.geometry!==state().revisions.geometry||revisions.optics!==state().revisions.optics||revisions.camera!==state().revisions.camera;
-      if(stale())return;
-      const next=moved.lens,limits=apertureLimits(next);
-      const fNumber=Math.max(limits.minFNumber,Math.min(limits.maxFNumber,
-        Math.abs(limits.focalLengthMm*limits.pupilMagnification)/(2*engine.packed.stopRadiusMm)));
-      const minimumGap=minimumImageDistance(next),nextState={fNumber,sensorZMm:next.sensorZMm,dispersion:old.optics.dispersion};
-      // Precompute on the existing pupil Worker; setLens then consumes its cache.
-      await engine.prepareLens(next,nextState);if(stale())return;
-      engine.setLens(next,nextState);lens=next;cancelFocus();
+      // The tracer's focus search keeps the physical stop radius and prepares the
+      // pupil table on its Worker before swapping the lens.
+      const moved=await tracer.focus(distanceM,{stale});
+      if(!moved)return;
+      const next=moved.lens,limits=moved.limits,fNumber=moved.fNumber;
+      const minimumGap=minimumImageDistance(next);
+      lens=next;cancelFocus();
       const label=moved.method==='table'?'对焦表':moved.method==='cam-search'?'镜组 RMS 搜索':'像面 RMS 搜索';
       const rms=v=>Number.isFinite(v)?`${(v*1000).toFixed(2)} µm`:'无有效光斑';
       update({optics:{...state().optics,fNumber,focusDistanceM:moved.focusDistanceM,focusDistanceKnown:true,
@@ -268,7 +273,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
   /** Adapt + preflight an imported/edited lens-bench record in the browser, then load it like bundled data. */
   async function loadCustomLens({record,configurationIndex=0}={}){
     if(!record||typeof record.tx!=='string')throw new Error('缺少镜头处方');
-    const catalog=await loadGlassCatalog();
+    const catalog=await loadGlassCatalog(undefined,library.glassCatalogUrl());
     const asset=inspectRecord(record,catalog);
     const usable=asset.configurationStatus.filter(c=>c.supported);
     if(!usable.length)throw new Error(asset.configurationStatus[0]?.reason||'处方未通过预检');
@@ -360,7 +365,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
     },240);
   }
   const runtime={
-    store,interop,sceneResources,lighting,get engine(){return engine;},
+    store,interop,sceneResources,lighting,garden,library,get engine(){return engine;},get tracer(){return tracer;},
     lightingChanged,sceneChanged,cameraChanged,
     /** Back-compatible full invalidation: lighting + registered scene data. */
     invalidateScene(){lightingChanged();return sceneChanged();},
@@ -436,12 +441,12 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
       update({scene:{status:'building',message:'提取场景几何并在 Worker 中构建 BVH'}});
       const build=sceneResources.build('initial').then(stats=>{update({scene:{...state().scene,status:'ready',message:`BVH 就绪：${stats.instances} 个实例 · ${stats.triangles} 个基础三角形`}});return stats;},
         error=>{update({scene:{...state().scene,status:'error',message:error.message}});throw error;});
-      const response=await fetch('/lenses/manifest.json');if(!response.ok)throw new Error('镜头数据缺失：运行 git submodule update --init --recursive 和 npm run build:lenses');
-      manifest=await response.json();
+      manifest=await library.manifest();
       update({lenses:manifest.lenses.map(l=>({id:l.id,name:l.name,brand:l.brand??null,available:l.supported,reason:l.reason,
         validation:l.validation,surfaceCount:l.surfaceCount,focalLengthMm:catalogueFocalLengthMm(l)})),source:manifest.source});
       await onProgress(8,'编译真实镜组、光谱采样与自动对焦');
-      engine=await createOpticalEngine({interop,sceneResources,lighting,chunkTiming:'queue',opticalLutReuse:preferredOpticalLutReuse(adapterInfo),width:state().sampling.resolution});
+      tracer=await createLensTracer({interop,provider:garden,scene:bvh,chunkTiming:'queue',opticalLutReuse:preferredOpticalLutReuse(adapterInfo),width:state().sampling.resolution});
+      engine=tracer.engine;
       if(workCounting)setWorkCounting(true).catch(error=>console.warn('Work counting unavailable',error));
       await loadLens(manifest.defaultId);displayGraph();displayChanged();
       await build;
@@ -459,7 +464,7 @@ export async function createHybridRuntime({renderer,scene,camera,adapterInfo,ras
       update({status:'ready'});publishEngine();
     },
     get diagnostics(){return {...state(),lastError,initializationMs:engine?.initializationMs,sceneStats:sceneResources.stats,lighting:lighting.status};},
-    dispose(){disposed=true;lensLoadRevision++;clearTimeout(releaseTimer);for(const type of inputEvents)document.removeEventListener(type,noteInput,inputOptions);chunkTasks.port1.close();chunkTasks.port2.close();focusSolver.dispose();engine?.dispose();sceneResources.dispose();lighting.dispose();displayPipeline?.dispose();interop.dispose();store.dispose();},
+    dispose(){disposed=true;lensLoadRevision++;clearTimeout(releaseTimer);for(const type of inputEvents)document.removeEventListener(type,noteInput,inputOptions);chunkTasks.port1.close();chunkTasks.port2.close();tracer?.dispose();sceneResources.dispose();lighting.dispose();displayPipeline?.dispose();interop.dispose();store.dispose();},
   };
   const visibility=()=>{if(!document.hidden)requestFrame();};document.addEventListener('visibilitychange',visibility);
   const originalDispose=runtime.dispose;runtime.dispose=()=>{document.removeEventListener('visibilitychange',visibility);originalDispose();};

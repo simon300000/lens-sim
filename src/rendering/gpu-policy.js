@@ -1,19 +1,29 @@
 import {PUPIL_TABLE_BYTES} from '../optics/pupil-sampling.js';
 import {statisticsConfiguration} from './statistics-plan.js';
+import {PROVIDER_BINDING_BASE} from './radiance-provider.js';
 
-/** Validate effective limits, without choosing vendor-specific workgroups. */
-export function computeConfiguration(limits) {
+/** Per-stage resources of the garden provider (garden-provider.js), the default. */
+export const GARDEN_PROVIDER_RESOURCES=Object.freeze({storageBuffers:1,uniformBuffers:1,sampledTextures:6,samplers:2,storageTextures:0});
+/** Validate effective limits, without choosing vendor-specific workgroups.
+ * resources: the radiance provider's per-stage resources (radiance-provider.js);
+ * the engine itself binds 7 storage buffers (surface kind), 3 uniforms and the
+ * output image in its largest stage, and owns bindings 0..23. */
+export function computeConfiguration(limits,{resources=GARDEN_PROVIDER_RESOURCES}={}) {
   const statistics=statisticsConfiguration(limits);
-  const needs={maxTextureDimension2D:480,maxBindGroups:1,maxBindingsPerBindGroup:22,maxUniformBuffersPerShaderStage:4,
-    maxBufferSize:4096,maxStorageBufferBindingSize:4096,maxStorageBuffersPerShaderStage:8,maxStorageTexturesPerShaderStage:1,
-    maxSampledTexturesPerShaderStage:6,maxSamplersPerShaderStage:2,maxUniformBufferBindingSize:PUPIL_TABLE_BYTES,
+  const r={storageBuffers:0,uniformBuffers:0,sampledTextures:0,samplers:0,storageTextures:0,...resources};
+  const bindings=r.storageBuffers+r.uniformBuffers+r.sampledTextures+r.samplers+r.storageTextures;
+  const needs={maxTextureDimension2D:480,maxBindGroups:1,maxBindingsPerBindGroup:PROVIDER_BINDING_BASE+bindings,maxUniformBuffersPerShaderStage:3+r.uniformBuffers,
+    maxBufferSize:4096,maxStorageBufferBindingSize:4096,maxStorageBuffersPerShaderStage:7+r.storageBuffers,maxStorageTexturesPerShaderStage:1+r.storageTextures,
+    maxSampledTexturesPerShaderStage:r.sampledTextures,maxSamplersPerShaderStage:r.samplers,maxUniformBufferBindingSize:PUPIL_TABLE_BYTES,
     maxComputeInvocationsPerWorkgroup:Math.max(64,statistics.threads),maxComputeWorkgroupSizeX:statistics.threads,
     maxComputeWorkgroupSizeY:8,maxComputeWorkgroupStorageSize:statistics.threads*48,maxComputeWorkgroupsPerDimension:1};
   for(const [name,minimum]of Object.entries(needs))if(!(limits[name]>=minimum))throw new Error(`此 GPU 无法运行镜头管线：${name} 需要 ${minimum}，设备提供 ${limits[name]??'未知'}`);
   return {sampleX:8,sampleY:8,statisticsThreads:statistics.threads,statisticsPixels:statistics.pixels};
 }
-export function requiredGPULimits(limits) {
-  const c=computeConfiguration(limits);
+/** Limits a host requests at requestDevice (adapter maxima where the image and
+ * BVH sizes benefit), checked against the provider's needs. */
+export function requiredGPULimits(limits,options) {
+  const c=computeConfiguration(limits,options);
   return {maxTextureDimension2D:limits.maxTextureDimension2D,maxStorageBufferBindingSize:limits.maxStorageBufferBindingSize,
     maxBufferSize:limits.maxBufferSize,maxStorageBuffersPerShaderStage:limits.maxStorageBuffersPerShaderStage,
     maxUniformBufferBindingSize:Math.max(PUPIL_TABLE_BYTES,Math.min(65536,limits.maxUniformBufferBindingSize)),

@@ -11,7 +11,7 @@ try{
   const adapter=await navigator.gpu.requestAdapter(),hdr=await probeHDRCanvas(adapter);
   const renderer=new THREE.WebGPURenderer({...outputRendererOptions(hdr.supported),antialias:false});
   await renderer.init();renderer.setSize(96,64);renderer.toneMapping=THREE.NoToneMapping;renderer.outputColorSpace=THREE.SRGBColorSpace;
-  renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;document.body.appendChild(renderer.domElement);
+  renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;document.body.appendChild(renderer.domElement);
   const scene=new THREE.Scene();
   const floor=new THREE.Mesh(new THREE.PlaneGeometry(6,6),new THREE.MeshStandardNodeMaterial({color:0xffffff,roughness:1}));floor.rotation.x=-Math.PI/2;floor.receiveShadow=true;scene.add(floor);
   const blocker=new THREE.Mesh(new THREE.BoxGeometry(.6,.6,.6),new THREE.MeshStandardNodeMaterial({color:0x808080}));blocker.position.set(0,.8,0);blocker.castShadow=true;scene.add(blocker);

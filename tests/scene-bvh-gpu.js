@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { createGPUInterop } from '../src/rendering/three-interop.js';
+import {createThreeInterop,cameraPose} from '../src/rendering/three-interop.js';
 import { createSceneResources } from '../src/rendering/scene-resources.js';
 import { SCENE_INTERSECTOR_WGSL, WORK_COUNTERS_WGSL } from '../src/rendering/scene-wgsl.js';
 import { bruteForceIntersect } from '../src/scene/scene-reference.js';
@@ -39,7 +39,7 @@ export async function traceGPU(interop, resources, rays) {
 try {
   const adapter = await navigator.gpu.requestAdapter();
   const renderer = new THREE.WebGPURenderer({ antialias: false }); await renderer.init();
-  const interop = createGPUInterop(renderer), errors = [];
+  const interop = createThreeInterop(renderer), errors = [];
   interop.device.addEventListener('uncapturederror', e => errors.push(e.error.message));
   const scene = diagnosticScene();
   const resources = createSceneResources({ interop, scene, starAngularRadius: 0, useWorker: true });

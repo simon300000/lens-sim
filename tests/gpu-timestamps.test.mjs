@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createComputeTimer, timestampSpanMs } from '../src/rendering/three-interop.js';
+import { createComputeTimer, timestampSpanMs } from '../src/rendering/gpu-interop.js';
 
 globalThis.GPUBufferUsage ??= { QUERY_RESOLVE: 0x200, COPY_SRC: 4, COPY_DST: 8, MAP_READ: 1 };
 globalThis.GPUMapMode ??= { READ: 1 };

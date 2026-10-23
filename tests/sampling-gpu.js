@@ -1,3 +1,4 @@
+import {cameraPose} from '../src/rendering/three-interop.js';
 import * as THREE from 'three/webgpu';
 import { createOpticalEngine } from '../src/rendering/optical-engine.js';
 import { createLensRig, emissivePanel } from './gpu-fixtures.js';
@@ -14,7 +15,7 @@ try{
   device.addEventListener('uncapturederror',e=>errors.push(e.error.message));
   const asset=await(await fetch('/lenses/canon-fl-50mm-f1-8.json')).json(),lens=asset.configurations[0];
   const limitedDevice=new Proxy(device,{get(target,key){if(key==='limits')return {...device.limits,maxTextureDimension2D:device.limits.maxTextureDimension2D,maxStorageBufferBindingSize:96*8*64,maxBufferSize:device.limits.maxBufferSize};const value=target[key];return typeof value==='function'?value.bind(target):value;}});
-  tiled=await createOpticalEngine({interop:{...interop,device:limitedDevice},sceneResources:rig.sceneResources,lighting:rig.lighting,width:96});tiled.setPose(camera);
+  tiled=await createOpticalEngine({interop:{...interop,device:limitedDevice},sceneResources:rig.sceneResources,provider:rig.provider,width:96});tiled.setPose(cameraPose(camera));
   for(const e of [engine,tiled]){e.setLens(lens,{fNumber:2.8,sensorZMm:lens.sensorZMm,dispersion:true});
     do{e.sample({batchSpp:4,targetSpp:4,seed:7});}while(e.spp<4); // real BVH scene, not a constant environment
   }

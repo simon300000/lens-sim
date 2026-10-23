@@ -1,3 +1,4 @@
+import {cameraPose} from '../src/rendering/three-interop.js';
 import * as THREE from 'three/webgpu';
 import {requiredGPULimits} from '../src/rendering/gpu-policy.js';
 import {createLensRig,emissivePanel} from './gpu-fixtures.js';
@@ -30,7 +31,7 @@ try{
   const original=rig.engine;
   async function render(engine,mirrorReuse,seed=77,constantEnvironment=[1,1,1],mirrorReference=false){
     await engine.prepareSampling({mirrorReference});
-    engine.setLens(lens,state);engine.setPose(camera);engine.bindScene();engine.reset();
+    engine.setLens(lens,state);engine.setPose(cameraPose(camera));engine.bindScene();engine.reset();
     let dispatches=0;const begin=performance.now();
     while(engine.spp<spp){engine.sample({batchSpp:4,targetSpp:spp,seed,constantEnvironment,mirrorReuse,mirrorReference,chunked:params.has('chunked')});dispatches++;if(dispatches%16===0)await device.queue.onSubmittedWorkDone();}
     await device.queue.onSubmittedWorkDone();const renderMs=performance.now()-begin;
@@ -48,7 +49,7 @@ try{
   }
   for(const mirror of [false,true]){out.textContent='Single buffer, mirror='+mirror;const r=await render(original,mirror);runs.push(r);}
   // Force multiple storage buffers without a huge image/readback.
-  const tiled=await createOpticalEngine({interop,sceneResources:rig.sceneResources,lighting:rig.lighting,width,...engineOptions,accumulationBindingBytes:width*64*16});
+  const tiled=await createOpticalEngine({interop,sceneResources:rig.sceneResources,provider:rig.provider,width,...engineOptions,accumulationBindingBytes:width*64*16});
   for(const mirror of [false,true]){
     out.textContent='Paired buffers, mirror='+mirror;
     const r=await render(tiled,mirror);check(r.tiles>1,'multi-tile probe did not tile');
@@ -67,7 +68,7 @@ try{
     runs.push({...reused,referenceComparison:{maxRelative,maxAbsolute}});
   }
   // Same low-level kernel, no cross-group phase assumptions or CPU ray transport.
-  const workStatus=await original.setWorkCounting(true);original.reset();original.setPose(camera);
+  const workStatus=await original.setWorkCounting(true);original.reset();original.setPose(cameraPose(camera));
   while(original.spp<4){original.sample({batchSpp:4,targetSpp:4,mirrorReuse:true,constantEnvironment:[1,1,1]});await device.queue.onSubmittedWorkDone();}
   const work=await original.readWork();if(workStatus==='counting')check(work.counts[0]===original.dimensions.width*original.dimensions.height*4,'work path count changed');
   if(workStatus==='counting'){

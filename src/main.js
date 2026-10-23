@@ -19,7 +19,7 @@ import { installURLState } from './url-state.js';
 import { createCameraRig, createScenePicker } from './camera-controls.js';
 import { installSceneCard } from './ui/scene-card.js';
 import {requiredGPULimits} from './rendering/gpu-policy.js';
-import { installSharedInstancing, installRenderBundleContexts } from './rendering/three-interop.js';
+import { installSharedInstancing, installRenderBundleContexts, installShadowMapInit } from './rendering/three-interop.js';
 import { bundleStaticContent } from './scene/render-bundles.js';
 import { createMotionQuality } from './rendering/motion-quality.js';
 import { createRasterSubmission } from './rendering/raster-submission.js';
@@ -55,6 +55,8 @@ async function createScene(){
   installSharedInstancing(renderer);
   // Static scene passes replay recorded render bundles (see scene/render-bundles).
   installRenderBundleContexts(renderer);
+  // Shadow maps are initialized as render targets before any receiver samples them.
+  installShadowMapInit();
   const disposeActiveLights=installActiveLightNodes(renderer);
   // Raster preview quality (lens panel → 光栅画质) persists per browser.
   let rasterQuality=loadRasterQuality(window.localStorage);
@@ -66,7 +68,7 @@ async function createScene(){
   renderer.outputColorSpace=THREE.SRGBColorSpace;
   renderer.toneMappingExposure=1.04;
   renderer.shadowMap.enabled=true;
-  renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type=THREE.PCFShadowMap;
   if(!renderer.backend.isWebGPUBackend)throw new Error('WebGPU 初始化失败，请使用支持 WebGPU 的浏览器。');
   renderer.backend.device.addEventListener('uncapturederror',event=>{
     faults.push(event.error.message);

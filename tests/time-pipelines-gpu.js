@@ -13,14 +13,14 @@ let r,daylight,pipeline;
 try{
  const adapter=await navigator.gpu.requestAdapter();const hdr=await probeHDRCanvas(adapter);
  r=new THREE.WebGPURenderer({antialias:true,...outputRendererOptions(hdr.supported)});await r.init();
- r.setPixelRatio(1);r.setSize(960,640);r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFSoftShadowMap;r.toneMapping=THREE.NoToneMapping;r.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(r.domElement);
+ r.setPixelRatio(1);r.setSize(960,640);r.shadowMap.enabled=true;r.shadowMap.type=THREE.PCFShadowMap;r.toneMapping=THREE.NoToneMapping;r.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(r.domElement);
  const d=r.backend.device;d.addEventListener('uncapturederror',e=>errors.push(e.error.message));
  let created=0;
- for(const name of ['createRenderPipeline','createRenderPipelineAsync']){const original=d[name].bind(d);d[name]=(...args)=>{created++;return original(...args);};}
+ const labels=[];for(const name of ['createRenderPipeline','createRenderPipelineAsync']){const original=d[name].bind(d);d[name]=(...args)=>{created++;labels.push(args[0]?.label);return original(...args);};}
  const sceneParts=buildSanteiScene(),{scene,details}=sceneParts;
  const camera=new THREE.PerspectiveCamera(40,1.5,.15,450);camera.position.set(21,13,27);camera.lookAt(0,2.7,2);
  daylight=createDaylight(scene,r,{details});const exposure=uniform(1);
- const pre=pass(scene,camera,{type:THREE.HalfFloatType});pre.setMRT(mrt({output:normalView}));
+ const pre=pass(scene,camera,{type:THREE.HalfFloatType,samples:0});pre.setMRT(mrt({output:normalView}));
  const normal=pre.getTextureNode('output'),depth=pre.getTextureNode('depth');
  const scenePass=pass(scene,camera,{type:THREE.HalfFloatType});scenePass.renderTarget.texture.colorSpace=THREE.LinearSRGBColorSpace;
  const beauty=scenePass.getTextureNode('output'),ambient=ao(depth,normal,camera);ambient.resolutionScale=.5;ambient.radius.value=.45;ambient.thickness.value=.8;ambient.samples.value=8;
@@ -31,7 +31,10 @@ try{
   const row={hour,hidden:document.hidden,focused:document.hasFocus()};const before=created,start=performance.now();
   daylight.update({hour,date:'2026-09-26'});exposure.value=r.toneMappingExposure;row.daylightMs=performance.now()-start;
   const submit=performance.now();pipeline.render();row.submitMs=performance.now()-submit;
-  await d.queue.onSubmittedWorkDone();row.wallMs=performance.now()-start;row.pipelines=created-before;rows.push(row);report({status:'running',rows,errors});
+  await d.queue.onSubmittedWorkDone();row.wallMs=performance.now()-start;row.pipelines=created-before;if(row.pipelines&&rows.length>=3)row.labels=labels.slice(-row.pipelines);rows.push(row);report({status:'running',rows,errors});
+  // three r186 finishes some pass pipelines (GTAO, its RTT) a few frames after first
+  // use; the startup warm-up likewise renders until no new variants appear.
+  if(rows.length===3)for(let i=0;i<16;i++){const known=created;await raf();pipeline.render();await d.queue.onSubmittedWorkDone();if(created===known)break;}
  }
  const measured=rows.slice(3);
  if(measured.some(row=>row.pipelines!==0))throw new Error('Time changes recreated render pipelines after startup warmup');

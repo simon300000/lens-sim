@@ -2,13 +2,15 @@ import * as THREE from 'three/webgpu';
 import {uniform as nodeUniform,vec4,context} from 'three/tsl';
 import { lensMaterial, PROCEDURAL } from '../scene/lens-registry.js';
 import { withReflectionPixelRatio } from './three-interop.js';
+import { isPCFSoftShadowFilter } from './soft-shadow-filter.js';
 
 /** Lighting resource bridge (the only module that reaches into Three's
  * shadow-map, PMREM and reflector render targets). Raster continues to
  * GENERATE these resources; the lens compute only reads them on the same
  * GPUDevice. Nothing is copied through the CPU.
  *
- * Supported (pinned r183): up to 2 DirectionalLights with PCFSoft shadow maps,
+ * Supported (three r186): up to 2 DirectionalLights with PCFSoft-filtered shadow
+ * maps (soft-shadow-filter.js; three r186 no longer filters PCFSoftShadowMap itself),
  * up to 8 PointLights of which up to 2 have cube shadow maps, 1 HemisphereLight,
  * scene.environment as a PMREM cubeUV texture, FogExp2, and the registered
  * water reflector. Anything else is an explicit error, never a silent drop.
@@ -30,7 +32,6 @@ function cubeUVSize(height) {
 }
 
 export function createLightingResources({ interop, renderer, scene, camera, environment, refreshContext, reflectionPixelRatio = () => renderer.getPixelRatio(), refreshSize = [16, 11] }) {
-  if (THREE.REVISION !== '183') throw new Error(`Lighting bridge requires tested Three r183; got ${THREE.REVISION}`);
   if (renderer.reversedDepthBuffer || renderer.logarithmicDepthBuffer) throw new Error('镜头光照桥接只支持标准深度缓冲（非反向/对数深度）');
   const { device } = interop;
   const uniform = interop.uniform(new Uint8Array(LIGHTING_UNIFORM_BYTES), 'Lens lighting / environment parameters');
@@ -97,7 +98,6 @@ export function createLightingResources({ interop, renderer, scene, camera, envi
     let receivers = false;
     scene.traverseVisible(o => { if (o.isMesh && o.receiveShadow && !o.userData?.lensRole) receivers = true; });
     const shadowsOn = renderer.shadowMap.enabled && receivers;
-    if (shadowsOn && renderer.shadowMap.type !== THREE.PCFSoftShadowMap) errors.push('镜头光照只移植了 PCFSoftShadowMap 过滤');
     const v = new THREE.Vector3(), w = new THREE.Vector3();
     lights.directional.slice(0, 2).forEach((light, slot) => {
       const base = slot === 0 ? F.sunDirection : F.moonDirection, colour = slot === 0 ? F.sunColor : F.moonColor;
@@ -106,6 +106,7 @@ export function createLightingResources({ interop, renderer, scene, camera, envi
       data.set([dir.x, dir.y, dir.z, -1], base);
       data.set([light.color.r * light.intensity, light.color.g * light.intensity, light.color.b * light.intensity, 0], colour);
       if (shadowsOn && light.castShadow && light.intensity > 0) {
+        if (!isPCFSoftShadowFilter(light.shadow.filterNode)) { errors.push(`${light.name || '方向光'}：镜头光照只移植了 PCFSoft 阴影过滤（installSoftShadowFilter）`); return; }
         const depth = light.shadow.map?.depthTexture;
         if (!depth) { errors.push(`${light.name || '方向光'} 的阴影贴图尚未由光栅生成`); return; }
         try {

@@ -184,14 +184,17 @@ function packScene({ blasSources, blasBuilt, tlas, instances }) {
         tf[d + v * 4] = src.positions[vi * 3]; tf[d + v * 4 + 1] = src.positions[vi * 3 + 1]; tf[d + v * 4 + 2] = src.positions[vi * 3 + 2];
         tu[d + v * 4 + 3] = vertexOffset + vi;
       }
-      tu[d + 12] = src.primitiveIds[t]; tu[d + 13] = b;
+      tu[d + 12] = src.primitiveIds ? src.primitiveIds[t] : t; tu[d + 13] = b;
     }
-    const nv = src.positions.length / 3;
+    // Optional attributes default to normal +y, uv 0 and white (scene-source.js).
+    const nv = src.positions.length / 3, { normals, uvs, colors } = src, cs = colors ? colors.length / nv : 0;
     for (let v = 0; v < nv; v++) {
       const d = (vertexOffset + v) * 12;
-      vf[d] = src.normals[v * 3]; vf[d + 1] = src.normals[v * 3 + 1]; vf[d + 2] = src.normals[v * 3 + 2]; vu[d + 3] = vertexFlags;
-      vf[d + 4] = src.uvs[v * 2]; vf[d + 5] = src.uvs[v * 2 + 1];
-      vf[d + 8] = src.colors[v * 4]; vf[d + 9] = src.colors[v * 4 + 1]; vf[d + 10] = src.colors[v * 4 + 2]; vf[d + 11] = src.colors[v * 4 + 3];
+      if (normals) { vf[d] = normals[v * 3]; vf[d + 1] = normals[v * 3 + 1]; vf[d + 2] = normals[v * 3 + 2]; } else vf[d + 1] = 1;
+      vu[d + 3] = vertexFlags;
+      if (uvs) { vf[d + 4] = uvs[v * 2]; vf[d + 5] = uvs[v * 2 + 1]; }
+      if (colors) { vf[d + 8] = colors[v * cs]; vf[d + 9] = colors[v * cs + 1]; vf[d + 10] = colors[v * cs + 2]; vf[d + 11] = cs === 4 ? colors[v * 4 + 3] : 1; }
+      else { vf[d + 8] = vf[d + 9] = vf[d + 10] = vf[d + 11] = 1; }
     }
     nodeOffset += built.nodeCount; triOffset += built.triangles; vertexOffset += nv;
   }

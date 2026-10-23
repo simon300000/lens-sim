@@ -1,6 +1,6 @@
 <!doctype html><html lang="en"><meta charset="UTF-8"><title>DOE production optical GPU regression</title><pre id="result">Running DOE production optical kernel…</pre><script type="module">
 import * as THREE from 'three/webgpu';
-import { createGPUInterop } from '../src/rendering/three-interop.js';
+import { createThreeInterop } from '../src/rendering/three-interop.js';
 import { runOpticalPathProbe } from './optical-path-probe.js';
 const out=document.querySelector('#result');
 if(document.visibilityState!=='visible'||!document.hasFocus()) {
@@ -13,7 +13,7 @@ if(document.visibilityState!=='visible'||!document.hasFocus()) {
 const report={userAgent:navigator.userAgent,startedAt:new Date().toISOString(),visibility:document.visibilityState,focused:document.hasFocus(),errors:[]};
 let renderer,interop;
 try {
-  renderer=new THREE.WebGPURenderer();await renderer.init();interop=createGPUInterop(renderer);
+  renderer=new THREE.WebGPURenderer();await renderer.init();interop=createThreeInterop(renderer);
   interop.device.addEventListener('uncapturederror',e=>report.errors.push(e.error.message));
   Object.assign(report,await runOpticalPathProbe(interop));
   if(report.errors.length)throw new Error('Uncaptured GPU errors');

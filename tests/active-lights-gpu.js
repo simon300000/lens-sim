@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {installActiveLightNodes} from '../src/rendering/active-lights.js';
 const report={label:'active-lights-gpu',userAgent:navigator.userAgent,passed:false,errors:[],comparisons:[]};
-const renderer=new THREE.WebGPURenderer({antialias:false});await renderer.init();renderer.setSize(96,64);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+const renderer=new THREE.WebGPURenderer({antialias:false});await renderer.init();renderer.setSize(96,64);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;
 renderer.backend.device.addEventListener('uncapturederror',e=>report.errors.push(e.error.message));
 const target=new THREE.RenderTarget(96,64,{type:THREE.HalfFloatType}),camera=new THREE.PerspectiveCamera(45,1.5,.1,30);camera.position.set(3,2,4);camera.lookAt(0,.4,0);
 function scene(){const s=new THREE.Scene(),sun=new THREE.DirectionalLight(0xffffff,3),lamp=new THREE.PointLight(0xff9966,10,12);sun.position.set(2,4,3);lamp.position.set(-1,2,1);sun.castShadow=lamp.castShadow=true;sun.shadow.autoUpdate=lamp.shadow.autoUpdate=false;sun.shadow.mapSize.set(128,128);lamp.shadow.mapSize.set(64,64);s.add(sun,lamp);

@@ -1,10 +1,10 @@
 import * as THREE from 'three/webgpu';
 import source from '../src/rendering/scene-intersector.wgsl?raw';
 import workCounters from '../src/rendering/work-counters.wgsl?raw';
-import {createGPUInterop} from '../src/rendering/three-interop.js';
+import {createThreeInterop,cameraPose} from '../src/rendering/three-interop.js';
 const report={kind:'centre-hit',passed:false,errors:[],cases:[]};let renderer,interop;
 try{
- renderer=new THREE.WebGPURenderer();await renderer.init();interop=createGPUInterop(renderer);interop.device.addEventListener('uncapturederror',e=>report.errors.push(e.error.message));
+ renderer=new THREE.WebGPURenderer();await renderer.init();interop=createThreeInterop(renderer);interop.device.addEventListener('uncapturederror',e=>report.errors.push(e.error.message));
  let seed=314159;const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
  const sizes=new Float32Array([.425,.455,1.35,1.5,.5,.37,.3333,123.456,.0001,...Array.from({length:128},()=>10**(-4+7*random()))]);
  const vertices=new Float32Array(sizes.length*28);sizes.forEach((s,i)=>vertices.set([-s,s,0,0,-s,-s,0,0,s,s,0,0,-s,-s,0,0,s,-s,0,0,s,s,0,0,s,0,6,0],i*28));

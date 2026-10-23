@@ -23,8 +23,9 @@ export const TIGHT_BOUNDS_MAX_VERTICES = 64;
 /** objects: [{matrixWorld:number[16], instanceMatrices:Float32Array|null, colors:Float32Array|null,
  *   count, blas, material, flags, objectIndex}]; blasBounds: (number[6]|null)[];
  * blasPoints: (Float32Array|null)[] optional xyz triples of the referenced vertices
- * for small meshes (exact world bounds), null for the box-corner path. */
-export function expandInstances(objects, blasBounds, blasPoints = null) {
+ * for small meshes (exact world bounds), null for the box-corner path.
+ * origin: world point subtracted from every transform in f64 (recentred frame). */
+export function expandInstances(objects, blasBounds, blasPoints = null, origin = null) {
   const n = objects.reduce((s, o) => s + o.count, 0);
   const inst = { count: 0, w2o: new Float32Array(n * 12), frame: new Float32Array(n * 12), blas: new Uint32Array(n), material: new Uint32Array(n),
     flags: new Uint32Array(n), color: new Float32Array(n * 3), object: new Uint32Array(n), instance: new Uint32Array(n), bounds: new Float32Array(n * 6) };
@@ -36,6 +37,7 @@ export function expandInstances(objects, blasBounds, blasPoints = null) {
     for (let i = 0; i < o.count; i++) {
       if (o.instanceMatrices) { for (let j = 0; j < 16; j++) im[j] = o.instanceMatrices[i * 16 + j]; mul(o.matrixWorld, im, o2w); }
       else { im.set(IDENTITY); o2w.set(o.matrixWorld); }
+      if (origin) { o2w[12] -= origin[0]; o2w[13] -= origin[1]; o2w[14] -= origin[2]; }
       const [a, bb, c, d, e, f, g, h, ii] = [o2w[0], o2w[4], o2w[8], o2w[1], o2w[5], o2w[9], o2w[2], o2w[6], o2w[10]];
       const A = e * ii - f * h, B = -(d * ii - f * g), C = d * h - e * g, det = a * A + bb * B + c * C;
       if (!b || !(Math.abs(det) > 1e-30) || !Number.isFinite(det)) { report.degenerate++; continue; }

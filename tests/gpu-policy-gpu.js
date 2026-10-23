@@ -1,8 +1,9 @@
 import * as THREE from 'three/webgpu';
-import {createGPUInterop} from '../src/rendering/three-interop.js';
+import {createThreeInterop,cameraPose} from '../src/rendering/three-interop.js';
 import {createSceneResources} from '../src/rendering/scene-resources.js';
 import {createLightingResources} from '../src/rendering/lighting-resources.js';
 import {createOpticalEngine} from '../src/rendering/optical-engine.js';
+import {createGardenProvider} from '../src/rendering/garden-provider.js';
 import {requiredGPULimits} from '../src/rendering/gpu-policy.js';
 import {exportLensTexture} from '../src/rendering/image-export.js';
 const check=(v,m)=>{if(!v)throw Error(m);},out=document.querySelector('#out');
@@ -10,13 +11,13 @@ document.querySelector('#run').onclick=async()=>{
  document.querySelector('#run').disabled=true;let renderer,interop,sceneResources,lighting,engine;const errors=[];let report;
  try{
   const adapter=await navigator.gpu.requestAdapter();renderer=new THREE.WebGPURenderer({requiredLimits:requiredGPULimits(adapter.limits)});await renderer.init();renderer.setSize(96,64);
-  interop=createGPUInterop(renderer,{memoryBudget:{budgetBytes:128*1024**2,reserveBytes:8*1024**2}});
+  interop=createThreeInterop(renderer,{memoryBudget:{budgetBytes:128*1024**2,reserveBytes:8*1024**2}});
   interop.device.addEventListener('uncapturederror',e=>errors.push(e.error.message));
   const scene=new THREE.Scene(),camera=new THREE.PerspectiveCamera(40,1.5,.1,100);camera.updateMatrixWorld();
   scene.add(new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshStandardNodeMaterial({color:0xffffff})));
   sceneResources=createSceneResources({interop,scene,camera});await sceneResources.build();lighting=createLightingResources({interop,renderer,scene,camera});lighting.refresh();
-  engine=await createOpticalEngine({interop,sceneResources,lighting,width:96});
-  const lens=(await(await fetch('/lenses/canon-fl-50mm-f1-8.json')).json()).configurations[0];engine.setLens(lens,{sensorZMm:lens.sensorZMm,pupilSampling:false});engine.setPose(camera);
+  engine=await createOpticalEngine({interop,sceneResources,provider:createGardenProvider({lighting,materials:sceneResources}),width:96});
+  const lens=(await(await fetch('/lenses/canon-fl-50mm-f1-8.json')).json()).configurations[0];engine.setLens(lens,{sensorZMm:lens.sensorZMm,pupilSampling:false});engine.setPose(cameraPose(camera));
   const budget=interop.memoryBudget,before=interop.liveBuffers,dimensions=engine.dimensions;
   const pressure=()=>budget.reserve(budget.snapshot.availableBytes-32,'Test allocation pressure');
   let token=pressure(),rejected=false;

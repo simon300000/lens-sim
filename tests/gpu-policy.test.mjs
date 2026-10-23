@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {computeConfiguration,requiredGPULimits,createGPUMemoryBudget} from '../src/rendering/gpu-policy.js';
-import {createGPUInterop} from '../src/rendering/three-interop.js';
+import {createGPUInterop} from '../src/rendering/gpu-interop.js';
 import {gpuLimits as limits} from './gpu-limits-fixture.mjs';
 test('effective capabilities keep 8x8 sampling and independently select statistics threads',()=>{
  assert.equal(computeConfiguration(limits).statisticsThreads,256);
@@ -10,6 +10,10 @@ test('effective capabilities keep 8x8 sampling and independently select statisti
  assert.throws(()=>computeConfiguration({...limits,maxStorageBuffersPerShaderStage:7}),/maxStorageBuffersPerShaderStage/);
  assert.throws(()=>computeConfiguration({...limits,maxUniformBufferBindingSize:16384}),/maxUniformBufferBindingSize/);
  assert.equal(requiredGPULimits(limits).maxStorageBuffersPerShaderStage,limits.maxStorageBuffersPerShaderStage);
+ // Provider resources set the per-stage needs: a resource-free ray provider fits a tighter device.
+ assert.throws(()=>computeConfiguration({...limits,maxSampledTexturesPerShaderStage:4}),/maxSampledTexturesPerShaderStage/);
+ assert.equal(computeConfiguration({...limits,maxSampledTexturesPerShaderStage:0,maxSamplersPerShaderStage:0},{resources:{}}).sampleX,8);
+ assert.throws(()=>computeConfiguration({...limits,maxStorageBuffersPerShaderStage:8},{resources:{storageBuffers:2}}),/maxStorageBuffersPerShaderStage/);
 });
 test('default accounting has no fixed 4GiB cap; explicit budgets preserve replacement headroom',()=>{
  const unbounded=createGPUMemoryBudget();const token=unbounded.reserve(8*1024**3,'logical reservation');
@@ -25,8 +29,7 @@ test('interop rolls back allocation, upload and readback failures without retain
  const device={limits,lost:new Promise(()=>{}),queue:{writeBuffer(){if(failUpload)throw Error('upload');}},
   createBuffer({size}){if(failCreate)throw Error('allocation');return {size,mapState:'unmapped',destroy(){destroyed++;}};},
   createCommandEncoder(){throw Error('encoder');}};
- const renderer={backend:{isWebGPUBackend:true,device,get(){}}};
- const interop=createGPUInterop(renderer,{memoryBudget:{budgetBytes:1000,reserveBytes:100}});
+ const interop=createGPUInterop(device,{memoryBudget:{budgetBytes:1000,reserveBytes:100}});
  failCreate=true;assert.throws(()=>interop.storage(16,'failure'),/allocation/);assert.equal(interop.memoryBudget.snapshot.managedBytes,0);
  failCreate=false;failUpload=true;assert.throws(()=>interop.storage(new Uint8Array(16),'upload'),/upload/);assert.equal(interop.liveBuffers,0);
  failUpload=false;const original=interop.storage(16,'valid');await assert.rejects(interop.readBuffer(original,16),/encoder/);

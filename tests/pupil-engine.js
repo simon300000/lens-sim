@@ -1,3 +1,4 @@
+import {cameraPose} from '../src/rendering/three-interop.js';
 // Full production scene/spectrum/HDR path acceptance. The separate pupil-gpu
 // page provides timestamped fixed-ray measurements and independent references.
 import * as THREE from 'three/webgpu';
@@ -17,7 +18,7 @@ try{
   async function render(enabled,spp,env){
     engine.setLens(lens,{...state,pupilSampling:enabled});
     const table=engine.pupilTable,started=performance.now();
-    camera.position.x=.001;engine.setPose(camera);engine.reset();rig.lighting.refresh();engine.bindScene();
+    camera.position.x=.001;engine.setPose(cameraPose(camera));engine.reset();rig.lighting.refresh();engine.bindScene();
     check(engine.pupilTable===table,'Camera/scene operation rebuilt pupil cache');
     for(let i=0;i<spp;i+=4){if(i%8192===0)result.textContent=`${env?'White':'Point'} / ${enabled?'importance':'original'} ${i}/${spp} spp`;engine.sample({batchSpp:4,targetSpp:spp,seed:77,constantEnvironment:env});if(i%64===0)await device.queue.onSubmittedWorkDone();}
     const a=await engine.readAccumulation(),f=new Float32Array(a),u=new Uint32Array(a),rgb=[];

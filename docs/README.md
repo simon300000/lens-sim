@@ -4,6 +4,7 @@
 - [光谱模型与来源](spectral.md)
 - [出瞳重要性采样](pupil-sampling.md)
 - [场景查询与实时光照](scene-query.md)
+- [可嵌入镜头追迹器、辐亮度提供者与光线缓存](lens-tracer.md)
 - [镜头数据、来源与更新](lens-data.md)
 - [能力预检与失败采样审计](lens-capabilities.md)
 - [默认镜头选择](default-lens-recommendation.md)

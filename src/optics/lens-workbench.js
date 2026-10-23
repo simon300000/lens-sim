@@ -17,8 +17,8 @@ export const CUSTOM_BRAND = '导入与编辑';
 
 let catalogPromise = null;
 /** Fetched once, on first use (≈1 MB, compresses well); never needed for bundled lenses. */
-export function loadGlassCatalog(fetchImpl = globalThis.fetch) {
-  catalogPromise ??= Promise.resolve().then(() => fetchImpl('/lenses/glass-catalog.json')).then((response) => {
+export function loadGlassCatalog(fetchImpl = globalThis.fetch, url = '/lenses/glass-catalog.json') {
+  catalogPromise ??= Promise.resolve().then(() => fetchImpl(url)).then((response) => {
     if (!response.ok) throw new Error('玻璃目录缺失：运行 npm run build:lenses');
     return response.json();
   }).catch((error) => { catalogPromise = null; throw error; });

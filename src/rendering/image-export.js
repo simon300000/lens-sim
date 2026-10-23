@@ -1,15 +1,16 @@
+import { HALF_TO_FLOAT as HALF } from './half-float.js';
 /**
  * Save the rendered picture as PNG.
  *  - Lens mode: the accumulated sensor image itself (full capture resolution, no
  *    letterbox), read back from the linear rgba16float output in row chunks and
- *    mapped exactly like the SDR display: exposure → three r183 ACES filmic → sRGB.
+ *    mapped exactly like the SDR display: exposure → three ACES filmic → sRGB.
  *    Bloom is a display-only glare pass and is not baked in.
  *  - Diagnostic views are written clamped and unexposed, as displayed.
  *  - Raster mode: the canvas as displayed (navigation preview, not a lens image).
  */
 const MAX_CHUNK_BYTES = 32 * 1024 * 1024;
 
-/** three's ACESFilmicToneMapping (r183 TSL), scalar JS port; input already multiplied by exposure. */
+/** three's ACESFilmicToneMapping (TSL), scalar JS port; input already multiplied by exposure. */
 export function acesFilmic(r, g, b) {
   r /= 0.6; g /= 0.6; b /= 0.6;
   const x = 0.59719 * r + 0.35458 * g + 0.04823 * b;
@@ -28,16 +29,6 @@ export function encodeSRGB(v) {
   const c = Math.min(1, Math.max(0, v));
   return Math.round((c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055) * 255);
 }
-/** IEEE half → number (lookup built once). */
-const HALF = (() => {
-  const table = new Float32Array(65536);
-  for (let h = 0; h < 65536; h++) {
-    const s = h & 0x8000 ? -1 : 1, e = (h >> 10) & 0x1f, m = h & 0x3ff;
-    table[h] = e === 0 ? s * 2 ** -14 * (m / 1024) : e === 31 ? (m ? NaN : s * Infinity) : s * 2 ** (e - 15) * (1 + m / 1024);
-  }
-  return table;
-})();
-
 /** Linear half-float RGBA rows → 8-bit sRGB RGBA, in place into `out` (Uint8ClampedArray). */
 export function mapRows(halfRows, rowStrideHalves, width, rows, out, outOffset, { exposure = 1, raw = false } = {}) {
   for (let y = 0; y < rows; y++) {

@@ -9,7 +9,7 @@ import { preflightLens } from '../src/optics/capabilities.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const vendor = path.join(root, 'vendor/lens-bench');
-const output = path.join(root, 'public/lenses');
+const defaultOutput = path.join(root, 'public/lenses');
 const upstream = 'https://github.com/anvcor/lens-bench';
 
 /** Limited extraction of known static data literals; rejects executable syntax. */
@@ -52,7 +52,9 @@ export async function loadUpstreamCatalog(base = vendor) {
   return parseGlassCatalog(match[1], { aliases: extractStaticObject(optics, 'GALIAS'), models, formulas });
 }
 
-export async function buildLensData() {
+/** output: target directory (default public/lenses). Asset paths in the manifest are
+ * relative to it, so the data can be served from any base URL. */
+export async function buildLensData({ output = defaultOutput } = {}) {
   const catalog = await loadUpstreamCatalog();
   const license = (await fs.readFile(path.join(vendor, 'LICENSE'), 'utf8')).replace(/\r\n/g, '\n');
   if (!license.includes('GNU GENERAL PUBLIC LICENSE') || !license.includes('Version 3')) throw new Error('Upstream license changed; review licensing before conversion');
@@ -94,7 +96,7 @@ export async function buildLensData() {
     entries.push({ ...inspected, parserSupported: inspected.supported, supported, gpuValidated: false, validation: 'static-preflight-only',
       configurations: configurationStatus.map(({warnings, ...status}) => status),
       reason: supported ? null : configurationStatus.find(cfg => cfg.parserSupported)?.reason ?? configurationStatus[0].reason,
-      asset: `/lenses/${file}`, brand: meta.brand ?? null, origin: meta.origin ?? null, originNote: meta.originNote ?? null, spec: meta.spec ?? null, surfaceCount: configurations.find(Boolean)?.surfaces.length ?? null });
+      asset: file, brand: meta.brand ?? null, origin: meta.origin ?? null, originNote: meta.originNote ?? null, spec: meta.spec ?? null, surfaceCount: configurations.find(Boolean)?.surfaces.length ?? null });
   }
   const defaultId = 'canon-fl-50mm-f1-8';
   if (!entries.find(entry => entry.id === defaultId)?.supported) throw new Error('Reviewed default canon-fl-50mm-f1-8 is unavailable; select a reviewed replacement explicitly');
@@ -112,5 +114,7 @@ export async function buildLensData() {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  buildLensData().catch(error => { console.error(`Lens data build failed: ${error.message}`); process.exitCode = 1; });
+  const at = process.argv.indexOf('--out');
+  const output = at > 0 ? path.resolve(process.argv[at + 1] ?? '') : defaultOutput;
+  buildLensData({ output }).catch(error => { console.error(`Lens data build failed: ${error.message}`); process.exitCode = 1; });
 }

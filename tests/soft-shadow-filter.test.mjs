@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {Scene,DirectionalLight,PointLight,SpotLight,PCFSoftShadowMap,PCFShadowMap} from 'three/webgpu';
-import {installSoftShadowFilter,bilinearPCFSoftShadowFilter} from '../src/rendering/soft-shadow-filter.js';
+import {Scene,DirectionalLight,PointLight,SpotLight,BasicShadowMap,PCFSoftShadowMap,PCFShadowMap} from 'three/webgpu';
+import {installSoftShadowFilter,bilinearPCFSoftShadowFilter,pcfSoftShadowFilter,isPCFSoftShadowFilter} from '../src/rendering/soft-shadow-filter.js';
 
 // Independently expand Three's reference 16-tap separable kernel and evaluate
 // hardware bilinear comparison samples, including clamp-to-edge footprints.
@@ -22,14 +22,20 @@ test('four bilinear comparisons preserve the PCFSoft sixteen-tap kernel',()=>{
   }
 });
 
-test('optimized PCF applies only to supported 2D default soft shadows',()=>{
-  const scene=new Scene(),sun=new DirectionalLight(),spot=new SpotLight(),point=new PointLight(),custom=new DirectionalLight();
-  const customFilter=()=>{};custom.shadow.filterNode=customFilter;scene.add(sun,spot,point,custom);
-  const renderer={shadowMap:{type:PCFSoftShadowMap},hasCompatibility:()=>false};
-  installSoftShadowFilter(scene,renderer);assert.equal(sun.shadow.filterNode,undefined);
-  renderer.hasCompatibility=()=>true;renderer.shadowMap.type=PCFShadowMap;
-  installSoftShadowFilter(scene,renderer);assert.equal(sun.shadow.filterNode,undefined);
-  renderer.shadowMap.type=PCFSoftShadowMap;installSoftShadowFilter(scene,renderer);
-  assert.equal(sun.shadow.filterNode,bilinearPCFSoftShadowFilter);assert.equal(spot.shadow.filterNode,bilinearPCFSoftShadowFilter);
-  assert.equal(point.shadow.filterNode,undefined);assert.equal(custom.shadow.filterNode,customFilter);
+// three r186 dropped its own PCFSoft filter (PCFSoftShadowMap renders as PCF); the
+// lens shading port keeps the PCFSoft kernel, so PCF renderers install it here.
+test('PCFSoft kernel applies to 2D default shadows of PCF renderers only',()=>{
+  const make=()=>{const scene=new Scene(),sun=new DirectionalLight(),spot=new SpotLight(),point=new PointLight(),custom=new DirectionalLight();
+    const customFilter=()=>{};custom.shadow.filterNode=customFilter;scene.add(sun,spot,point,custom);return {scene,sun,spot,point,custom,customFilter};};
+  let f=make();
+  installSoftShadowFilter(f.scene,{shadowMap:{type:BasicShadowMap},hasCompatibility:()=>true});assert.equal(f.sun.shadow.filterNode,undefined);
+  for(const type of [PCFShadowMap,PCFSoftShadowMap]){
+    f=make();installSoftShadowFilter(f.scene,{shadowMap:{type},hasCompatibility:()=>true});
+    assert.equal(f.sun.shadow.filterNode,bilinearPCFSoftShadowFilter);assert.equal(f.spot.shadow.filterNode,bilinearPCFSoftShadowFilter);
+    assert.equal(f.point.shadow.filterNode,undefined);assert.equal(f.custom.shadow.filterNode,f.customFilter);
+  }
+  // Without filtered depth comparison the same kernel runs as point comparisons.
+  f=make();installSoftShadowFilter(f.scene,{shadowMap:{type:PCFShadowMap},hasCompatibility:()=>false});
+  assert.equal(f.sun.shadow.filterNode,pcfSoftShadowFilter);
+  assert.ok(isPCFSoftShadowFilter(pcfSoftShadowFilter)&&isPCFSoftShadowFilter(bilinearPCFSoftShadowFilter)&&!isPCFSoftShadowFilter(f.customFilter));
 });

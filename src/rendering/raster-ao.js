@@ -12,8 +12,9 @@ import {convertToTexture,texture,screenUV,vec4} from 'three/tsl';
  * recreate every scene bind group and force every beauty bundle to re-record.
  * It is sampled with normalized screen coordinates, so its size is free. */
 export function createRasterAO(renderer,denoised,{pixelRatio=1,width=innerWidth,height=innerHeight}={}){
-  const result=convertToTexture(denoised);
-  result.setPixelRatio(pixelRatio);result.setSize(width,height);
+  // A fixed RTT size (three r186: width/height set, so no per-frame drawing-buffer resize).
+  const resize=()=>{const w=Math.max(1,Math.floor(width*pixelRatio)),h=Math.max(1,Math.floor(height*pixelRatio));result.width=w;result.height=h;result.setSize(w,h);};
+  const result=convertToTexture(denoised,1,1);resize();
   const pipeline=new THREE.RenderPipeline(renderer);
   pipeline.outputNode=vec4(result.sample(screenUV).r);
   const target=new THREE.RenderTarget(1,1,{type:THREE.HalfFloatType,depthBuffer:false});
@@ -22,8 +23,8 @@ export function createRasterAO(renderer,denoised,{pixelRatio=1,width=innerWidth,
     texture:result.value,
     sample:texture(result.value,screenUV).r,
     /** Window resize or a new base pixel ratio: callers must also re-record render bundles (bind groups change). */
-    setSize(nextWidth,nextHeight){result.setSize(nextWidth,nextHeight);},
-    setPixelRatio(nextRatio){result.setPixelRatio(nextRatio);},
+    setSize(nextWidth,nextHeight){width=nextWidth;height=nextHeight;resize();},
+    setPixelRatio(nextRatio){pixelRatio=nextRatio;resize();},
     prepare(){
       const previous=renderer.getRenderTarget(),mrt=renderer.getMRT();
       try{renderer.setMRT(null);renderer.setRenderTarget(target);pipeline.render();}

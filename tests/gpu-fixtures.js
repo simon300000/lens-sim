@@ -2,7 +2,9 @@
  * of registered MeshStandardNodeMaterial meshes, and the BVH + lighting +
  * optical-engine wiring the application uses. */
 import * as THREE from 'three/webgpu';
-import { createGPUInterop } from '../src/rendering/three-interop.js';
+import { createThreeInterop, cameraPose } from '../src/rendering/three-interop.js';
+import { createGardenProvider } from '../src/rendering/garden-provider.js';
+import { installSoftShadowFilter } from '../src/rendering/soft-shadow-filter.js';
 import { createSceneResources } from '../src/rendering/scene-resources.js';
 import { createLightingResources } from '../src/rendering/lighting-resources.js';
 import {searchFocus} from '../src/optics/focus-search.js';
@@ -27,16 +29,20 @@ export function stripedPanel(scene, { x = 0, y = 0, z = -5, w = 1, h = 1, color 
     scene.add(mesh);
   }
 }
+/** The application's wiring: three interop, scene producer -> BVH, raster lighting
+ * bridge and the garden radiance provider (PCFSoft shadow filters installed as in main.js). */
 export async function createLensRig({ renderer, scene, camera, width = 96, environment = null, refreshSize, engineOptions = {} }) {
-  const interop = createGPUInterop(renderer);
+  installSoftShadowFilter(scene, renderer);
+  const interop = createThreeInterop(renderer);
   const sceneResources = createSceneResources({ interop, scene, camera, starAngularRadius: 0, useWorker: true });
   const lighting = createLightingResources({ interop, renderer, scene, camera, environment, refreshSize });
-  const engine = await createOpticalEngine({ interop, sceneResources, lighting, width, ...engineOptions });
+  const provider = createGardenProvider({ lighting, materials: sceneResources });
+  const engine = await createOpticalEngine({ interop, sceneResources, provider, width, ...engineOptions });
   const sceneStats = await sceneResources.build();
   lighting.refresh();
   if (!lighting.status.ok) throw new Error('lighting bridge: ' + lighting.status.errors.join('; '));
-  engine.setPose(camera);
-  return { interop, sceneResources, lighting, engine, sceneStats };
+  engine.setPose(cameraPose(camera));
+  return { interop, sceneResources, lighting, provider, engine, sceneStats };
 }
 
 /** Exercise the same lens-bench focus search used by the production Worker. */

@@ -3,7 +3,7 @@
 <pre id="result">Running production optical kernel…</pre>
 <script type="module">
 import * as THREE from 'three/webgpu';
-import { createGPUInterop } from '../src/rendering/three-interop.js';
+import { createThreeInterop } from '../src/rendering/three-interop.js';
 import { runOpticalPathProbe } from './optical-path-probe.js';
 let report;const errors=[];
 const out=document.querySelector('#result');
@@ -11,7 +11,7 @@ let renderer,interop;
 try {
   renderer=new THREE.WebGPURenderer();
   await renderer.init();
-  interop=createGPUInterop(renderer);
+  interop=createThreeInterop(renderer);
   interop.device.addEventListener('uncapturederror',e=>errors.push(e.error.message));
   const result=await runOpticalPathProbe(interop);
   if(errors.length)throw new Error(errors.join('\n'));

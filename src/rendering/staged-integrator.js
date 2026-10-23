@@ -1,5 +1,6 @@
 import {normalizeShaderEOL,stripWorkCounting} from './shader-source.js';
 import {ROUND_SPP_LIMIT,roundSppWGSL} from './sampling-plan.js';
+import {rayCacheSources} from './ray-cache.js';
 /** Three-stage mirrored integration.
  * One GPU-only lens-space packet per canonical pixel/sample; scene workgroups
  * interleave q0/q1/q2/q3 for each canonical 8x8 block. No CPU ray readback. */
@@ -11,11 +12,17 @@ export const STAGED_HIT_BYTES=32;
  * 256 MiB of packets + ~683 MiB of hits at most). Images whose 4 spp round is smaller
  * allocate only what the round needs (a 1920-wide frame: 118 + 315 MiB). */
 export const STAGED_SCRATCH_BYTES=256*1024**2;
-/** A lean traversal kernel runs between the lens batch and shading:
+/** mode 'surface': a lean traversal kernel runs between the lens batch and shading:
  * it writes the nearest hit of every optical sample's four quadrant rays, and the
  * scene kernel composites from that record (transparent layers continue inline).
- * The traversal then runs without the shading/optics register footprint. */
-export function stagedIntegratorSources({integrator,optical,work,intersector,shading,spectral,sampling,pupil,counting=false,roundSppLimit=ROUND_SPP_LIMIT}){
+ * The traversal then runs without the shading/optics register footprint.
+ * mode 'ray': no traversal kernel and no BVH bindings; the scene kernel hands each
+ * world ray to the ray provider (shading = SCENE_RAY_WGSL + provider WGSL).
+ * mode 'cached': raygen into the ray cache plus the binning, per-cell resolve and
+ * accumulate kernels of ray-cache.js (sample: scene-sample.wgsl). */
+export function stagedIntegratorSources({integrator,optical,work,intersector,shading,spectral,sampling,pupil,sample,counting=false,roundSppLimit=ROUND_SPP_LIMIT,mode='surface'}){
+  const surface=mode==='surface';
+  if(!surface&&mode!=='ray'&&mode!=='cached')throw new RangeError('Unknown staged integration mode '+mode);
   work=roundSppWGSL(roundSppLimit)+work;
   integrator=normalizeShaderEOL(integrator);
   const source=stripWorkCounting(integrator);
@@ -29,13 +36,14 @@ export function stagedIntegratorSources({integrator,optical,work,intersector,sha
   // Same accumulation, but layer 0 comes from the traversal kernel's record.
   const signature='fn accumulateOptical(a:ptr<function,PixelAccum>,optical:OpticalSample,sign:vec2<f32>,key:u32){',call='let scene=sceneRadiance(worldOrigin,worldDirection,key);';
   if(!accumulate.includes(signature)||!accumulate.includes(call))throw new Error('Staged accumulation anchors changed');
-  accumulate=accumulate.replace(signature,'fn accumulateOptical(a:ptr<function,PixelAccum>,optical:OpticalSample,sign:vec2<f32>,key:u32,hit:SceneHit){').replace(call,'let scene=sceneRadianceFromHit(worldOrigin,worldDirection,key,hit);');
+  accumulate=surface?accumulate.replace(signature,'fn accumulateOptical(a:ptr<function,PixelAccum>,optical:OpticalSample,sign:vec2<f32>,key:u32,hit:SceneHit){').replace(call,'let scene=sceneRadianceFromHit(worldOrigin,worldDirection,key,hit);')
+    :accumulate.replace(call,'let scene=sceneRadianceFromRay(worldOrigin,worldDirection,lambda,weight,key);');
   const hitRecord=`
 struct SceneHitRecord { t:f32, b1:f32, b2:f32, instance:u32, triangle:u32, status:u32, error:u32, front:u32 }
 fn packHit(h:SceneHit)->SceneHitRecord { return SceneHitRecord(h.t,h.b1,h.b2,h.instance,h.triangle,h.status,h.error,select(0u,1u,h.front)); }
 fn unpackHit(r:SceneHitRecord)->SceneHit { var h:SceneHit; h.t=r.t; h.b1=r.b1; h.b2=r.b2; h.instance=r.instance; h.triangle=r.triangle; h.status=r.status; h.error=r.error; h.front=r.front!=0u; h.visits=0u; return h; }
 `;
-  const sceneResources=between(source,'@group(0) @binding(6)','const LINEAR_SRGB_TO_XYZ_M');
+  const sceneResources=surface?between(source,'@group(0) @binding(6)','const LINEAR_SRGB_TO_XYZ_M'):'';
   const index=`
 // Packet slots enumerate 8x8 blocks of the canonical quadrant: a warp then covers a compact 8x4 pixel footprint.
 fn mirrorPixel(group:u32,lane:u32,halfWidth:u32)->vec2u {
@@ -75,11 +83,11 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   }
 }
 `;
-  let scene=work+intersector+shading+spectral+sampling+opticsType+types+rayType+common+`
+  let scene=work+(surface?intersector:'')+shading+spectral+sampling+opticsType+types+rayType+common+`
 @group(0) @binding(4) var<storage,read_write> accumulation:array<PixelAccum>;
 @group(0) @binding(5) var lensImage:texture_storage_2d<rgba16float,write>;
 @group(0) @binding(21) var<storage,read> stagedRays:array<OpticalSample>;
-`+'@group(0) @binding(23) var<storage,read> stagedHits:array<SceneHitRecord>;'+hitRecord+sceneResources+helpers+accumulate+index+`
+`+(surface?'@group(0) @binding(23) var<storage,read> stagedHits:array<SceneHitRecord>;'+hitRecord:'')+sceneResources+helpers+accumulate+index+`
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
   let sceneWidth=bitcast<u32>(render.pinholeClipToCamera[0].x);
@@ -103,7 +111,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
     let ray=stagedRays[j*capacity+packet];
     let key=spectralHash32(globalPixel^spectralHash32(a.attempts+render.settings.x*0x632be5abu));
     a.attempts++;workCounters[WORK_PATH]++;
-    accumulateOptical(&a,ray,sign,key,unpackHit(stagedHits[(j*4u+quadrant)*capacity+packet]));
+    accumulateOptical(&a,ray,sign,key${surface?',unpackHit(stagedHits[(j*4u+quadrant)*capacity+packet])':''});
   }
   accumulation[pixel]=a;textureStore(lensImage,vec2i(image),resolvePixel(a));
 }
@@ -147,7 +155,9 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   }
 }
 `;
-  if(!counting)return {raygen,trace,scene};
+  if(mode==='cached')return {raygen,...rayCacheSources({work,types,opticsType,rayType,helpers,index,shading,sample,spectral,sampling})};
+  const stages=surface?{raygen,trace,scene}:{raygen,scene};
+  if(!counting)return stages;
   const blocks=[...integrator.matchAll(/\/\/ WORK-COUNTING-BEGIN[^\n]*\n([\s\S]*?)\/\/ WORK-COUNTING-END/g)].map(m=>m[1]);
   if(blocks.length!==2)throw new Error('Work counter reduction changed');
   const entry='@compute @workgroup_size(8,8)\nfn main(@builtin(global_invocation_id) id:vec3u)';
@@ -163,5 +173,5 @@ ${blocks[1]}
 }
 `;
   };
-  return {raygen:counted(raygen),trace:counted(trace),scene:counted(scene)};
+  return Object.fromEntries(Object.entries(stages).map(([name,code])=>[name,counted(code)]));
 }

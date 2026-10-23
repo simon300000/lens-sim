@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import {installSoftShadowFilter} from '../src/rendering/soft-shadow-filter.js';
 import {uniform,vec4} from 'three/tsl';
 import {createHybridRuntime} from '../src/rendering/hybrid-runtime.js';
 import {probeHDRCanvas,outputRendererOptions} from '../src/hdr-output.js';
@@ -13,12 +14,12 @@ try{
   const adapter=await navigator.gpu.requestAdapter(),hdr=await probeHDRCanvas(adapter);
   const renderer=new THREE.WebGPURenderer({antialias:false,...outputRendererOptions(hdr.supported)});await renderer.init();renderer.setSize(300,200);
   renderer.toneMapping=THREE.NoToneMapping;renderer.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(renderer.domElement);
-  renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;
   const scene=new THREE.Scene();
   const plane=new THREE.Mesh(new THREE.PlaneGeometry(8,8),emitter([8,2,.5]));plane.position.z=-10;scene.add(plane);
   const blocker=new THREE.InstancedMesh(new THREE.BoxGeometry(.3,.3,.3),new THREE.MeshStandardNodeMaterial({color:0x777777}),2);
   const o=new THREE.Object3D();o.position.set(-1,0,-6);o.updateMatrix();blocker.setMatrixAt(0,o.matrix);o.position.set(1,0,-6);o.updateMatrix();blocker.setMatrixAt(1,o.matrix);scene.add(blocker);
-  const sun=new THREE.DirectionalLight(0xffffff,2);sun.position.set(2,5,3);sun.castShadow=true;scene.add(sun,sun.target);
+  const sun=new THREE.DirectionalLight(0xffffff,2);sun.position.set(2,5,3);sun.castShadow=true;scene.add(sun,sun.target);installSoftShadowFilter(scene,renderer);
   const camera=new THREE.PerspectiveCamera(40,1.5,.02,450);camera.updateMatrixWorld();
   const raster=new THREE.RenderPipeline(renderer);raster.outputNode=vec4(.1,.1,.1,1);
   let wakes=0;

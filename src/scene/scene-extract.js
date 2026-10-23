@@ -2,15 +2,14 @@ import * as THREE from 'three/webgpu';
 import { lensRole, lensMaterial, PROCEDURAL } from './lens-registry.js';
 import { expandInstances, TIGHT_BOUNDS_MAX_VERTICES } from './instance-expand.js';
 import { sourceGeometry } from './static-batches.js';
+import { SIDE, INSTANCE_FLAGS } from './scene-source.js';
+export { SIDE, INSTANCE_FLAGS };
 
-/** Scene → plain typed arrays for the lens BVH. CPU-side preparation only;
- * it never renders or queries pixels. Typed arrays are COPIED from Three's
- * attributes, so transferring them to a Worker cannot detach live geometry.
- */
-export const SIDE = Object.freeze({ FRONT: 0, BACK: 1, DOUBLE: 2 });
-export const INSTANCE_FLAGS = Object.freeze({
-  SIDE_MASK: 3, RECEIVE_SHADOW: 4, TRANSPARENT: 8, UNSUPPORTED: 16, VERTEX_COLOR: 32, INSTANCE_COLOR: 64,
-});
+/** Three.js scene → scene source (scene-source.js) for the lens BVH, plus the
+ * registered materials and a report. CPU-side preparation only; it never
+ * renders or queries pixels. Typed arrays are COPIED from Three's attributes,
+ * so transferring them to a Worker cannot detach live geometry.
+ * The result's { blas, instanceSources } is the tracer's scene source. */
 export const MATERIAL_FLAGS = Object.freeze({ VERTEX_COLORS: 1, TRANSPARENT: 2, FOG: 4, LIGHTS: 8, UNSUPPORTED: 16, CLEARCOAT: 32 });
 // Reasons are numeric on GPU and named in the report.
 export const UNSUPPORTED_REASONS = Object.freeze([
@@ -169,7 +168,7 @@ export function extractScene(scene, { camera = null, knownBlas = null, deferInst
   report.uniqueTriangles = blas.reduce((s, b) => s + b.triangleCount, 0);
   report.materials = materials.length;
   report.extractMs = performance.now() - started;
-  return { blas, instances, instanceSources, blasBounds, blasPoints, materials, objects, report };
+  return { blas, instances, instanceSources, blasBounds, blasPoints, materials, objects, report, source: { blas, instances: instanceSources } };
 }
 
 /** Cheap per-object signature for change detection without re-extracting. */

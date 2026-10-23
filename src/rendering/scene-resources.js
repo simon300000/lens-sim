@@ -1,30 +1,9 @@
 import * as THREE from 'three/webgpu';
 import { extractScene, objectSignature, MATERIAL_FLAGS, UNSUPPORTED_REASONS } from '../scene/scene-extract.js';
-import { buildSceneBuffers } from '../scene/bvh-builder.js';
+import { createSceneBVH } from './scene-bvh.js';
 import { lensRole } from '../scene/lens-registry.js';
 
-/** GPU-resident lens scene data: BVH nodes, instances, triangles, vertex
- * attributes and a material/star table. Built off the main thread when a
- * Worker is available; samples never return to JavaScript for intersection.
- *
- * Change handling (refresh):
- *   geometry/topology -> rebuild that BLAS (+ TLAS); other BLASes are reused
- *   object/instance transform, instance colour, visibility -> TLAS only
- *   material parameters only -> rewrite the table; no BVH work
- */
 const STAR_AZ = 64, STAR_EL = 16;
-
-function createWorkerClient() {
-  if (typeof Worker === 'undefined') return null;
-  const worker = new Worker(new URL('../scene/bvh-worker.js', import.meta.url), { type: 'module', name: 'lens-bvh' });
-  let nextId = 0; const pending = new Map();
-  worker.onmessage = ({ data }) => { const p = pending.get(data.id); if (!p) return; pending.delete(data.id); data.ok ? p.resolve(data) : p.reject(new Error(data.error)); };
-  worker.onerror = event => { for (const p of pending.values()) p.reject(new Error(event.message || 'BVH worker failed')); pending.clear(); };
-  return {
-    request(message, transfer = []) { const id = ++nextId; return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); worker.postMessage({ ...message, id }, transfer); }); },
-    terminate() { worker.terminate(); for (const p of pending.values()) p.reject(new Error('BVH worker terminated')); pending.clear(); },
-  };
-}
 
 export function packMaterialTable(materials, stars = null) {
   const materialVec4 = materials.length * 5;
@@ -91,64 +70,40 @@ function starData(scene, angularRadius) {
   return stars;
 }
 
-export function createSceneResources({ interop, scene, camera = null, starAngularRadius, useWorker = true }) {
+/** The lens-sim (three.js) scene producer: extracts the registered scene into a
+ * scene source for the tracer's BVH (scene-bvh.js) and packs the garden
+ * provider's material/star table. Diffing and change handling (refresh):
+ *   geometry/topology -> new BLAS sources for changed keys (+ TLAS); others are reused
+ *   object/instance transform, instance colour, visibility -> TLAS only
+ *   material parameters only -> rewrite the table; no BVH work
+ * bvh: the tracer's scene BVH (tracer.scene); a private one when omitted. */
+export function createSceneResources({ interop, scene, camera = null, starAngularRadius, useWorker = true, bvh = createSceneBVH({ interop, worker: useWorker ? undefined : false }) }) {
   const { device } = interop;
-  const worker = useWorker ? createWorkerClient() : null;
-  let buffers = null, tables = null, extracted = null, signatures = [], workerKeys = new Set(), stats = null, revision = 0, materialRevision = 0;
+  let tables = null, extracted = null, signatures = [], stats = null, materialRevision = 0;
   let building = null, disposed = false;
-  const counters = { fullBuilds: 0, tlasRebuilds: 0, blasBuilt: 0, blasReused: 0, materialUploads: 0 };
-  const limit = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize);
-
+  const counters = { materialUploads: 0 };
   const knownBlas = new Map();
   async function build(reason = 'initial') {
     const started = performance.now();
-    const ex = extractScene(scene, { camera, knownBlas: worker ? knownBlas : null, deferInstances: !!worker });
+    const ex = extractScene(scene, { camera, knownBlas, deferInstances: true });
     // Signatures describe what was extracted; edits during the async build must still read as changes.
     const extractedSignatures = ex.objects.map(objectSignature);
-    const keys = ex.blas.map(b => b.key);
-    let packed;
-    if (worker) {
-      const newSources = [];
-      for (let i = 0; i < keys.length; i++) if (!workerKeys.has(keys[i])) {
-        if (ex.blas[i].stub) throw new Error('BVH worker lost a cached BLAS source');
-        newSources.push([keys[i], ex.blas[i]]);
-      }
-      // Instance matrices are expanded (inverted, bounded) in the Worker too.
-      const response = await worker.request({ type: 'build', blasKeys: keys, newSources, instanceSources: ex.instanceSources, blasBounds: ex.blasBounds, blasPoints: ex.blasPoints });
-      packed = response.packed; workerKeys = new Set(keys);
-      ex.instances = response.instances;
-      ex.report.degenerate = response.expandReport.degenerate; ex.report.negativeDeterminant = response.expandReport.negativeDeterminant;
-      ex.report.instances = response.instances.count;
-      knownBlas.clear();
-      for (const b of ex.blas) knownBlas.set(b.key, { key: b.key, bounds: b.bounds, points: b.points ?? null, triangleCount: b.triangleCount, hasColor: b.hasColor, hasNormal: b.hasNormal,
-        hasUV: b.hasUV, geometryUuid: b.geometryUuid, range: b.range, stub: true });
-    } else packed = buildSceneBuffers({ blasSources: ex.blas, blasKeys: keys, instances: ex.instances });
-    if (disposed) return null;
-    const uploadStarted = performance.now();
-    for (const [name, data] of Object.entries({ nodes: packed.nodes, instances: packed.instances, triangles: packed.triangles, vertices: packed.vertices })) {
-      if (data.byteLength > limit) throw new Error(`场景 ${name} 缓冲 ${data.byteLength} 字节超出此 GPU 的存储绑定上限 ${limit}`);
-    }
-    const materialData=packMaterialTable(ex.materials,starData(scene,starAngularRadius));
-    const data={nodes:packed.nodes,instances:packed.instances,triangles:packed.triangles,vertices:packed.vertices};
-    interop.memoryBudget?.assertAdditional(Object.values(data).reduce((n,a)=>n+a.byteLength,materialData.byteLength),'新旧 BVH 与材质表并存的分配峰值');
-    device.pushErrorScope('out-of-memory');
-    const next={};let nextTables,allocationError;
-    try{
-      for(const [name,values] of Object.entries(data))next[name]=interop.storage(values,`Lens BVH ${name}`);
-      nextTables=interop.storage(materialData,'Lens material / star tables');
-    }catch(error){allocationError=error;}
-    const oom=await device.popErrorScope();
-    if(allocationError||oom){for(const b of Object.values(next))interop.release(b);if(nextTables)interop.release(nextTables);throw allocationError||new Error('场景 BVH 显存分配失败：'+oom.message);}
-    if (buffers) for (const b of Object.values(buffers)) interop.release(b);
-    if(tables)interop.release(tables);tables=nextTables;counters.materialUploads++;materialRevision++;
-    buffers = next; extracted = ex; signatures = extractedSignatures;
-    const t = packed.stats.timing;
-    counters.blasBuilt += t.blasRebuilt; counters.blasReused += t.blasReused;
-    if (reason === 'tlas') counters.tlasRebuilds++; else counters.fullBuilds++;
-    revision++;
-    stats = { ...packed.stats, report: { ...ex.report, unsupported: ex.report.unsupported.map(u => `${u.material}: ${u.reason}`) },
-      reason, worker: !!worker, extractMs: ex.report.extractMs, buildWallMs: uploadStarted - started, uploadSubmitMs: performance.now() - uploadStarted,
-      gpuBytes: Object.values(buffers).reduce((s, b) => s + b.size, 0) + (tables?.size ?? 0), counters: { ...counters } };
+    const materialData = packMaterialTable(ex.materials, starData(scene, starAngularRadius));
+    interop.memoryBudget?.assertAdditional(materialData.byteLength, '新旧材质表并存的分配峰值');
+    const built = await bvh.setScene(ex.source, { reason });
+    if (!built || disposed) return null;
+    ex.instances = built.instances;
+    const report = built.stats.expandReport;
+    ex.report.degenerate = report.degenerate; ex.report.negativeDeterminant = report.negativeDeterminant; ex.report.instances = built.instances.count;
+    const nextTables = interop.storage(materialData, 'Lens material / star tables');
+    if (tables) interop.release(tables);
+    tables = nextTables; counters.materialUploads++; materialRevision++;
+    knownBlas.clear();
+    for (const b of ex.blas) knownBlas.set(b.key, { key: b.key, bounds: b.bounds, points: b.points ?? null, triangleCount: b.triangleCount, hasColor: b.hasColor, hasNormal: b.hasNormal,
+      hasUV: b.hasUV, geometryUuid: b.geometryUuid, range: b.range, stub: true });
+    extracted = ex; signatures = extractedSignatures;
+    stats = { ...built.stats, report: { ...ex.report, unsupported: ex.report.unsupported.map(u => `${u.material}: ${u.reason}`) },
+      extractMs: ex.report.extractMs, buildWallMs: performance.now() - started, gpuBytes: built.stats.gpuBytes + tables.size, counters: { ...built.stats.counters, ...counters } };
     return stats;
   }
   function writeTables() {
@@ -181,17 +136,14 @@ export function createSceneResources({ interop, scene, camera = null, starAngula
     return null;
   }
   return {
-    get buffers() { return buffers; }, get tables() { return tables; }, get stats() { return stats; }, get revision() { return revision; },
-    get materialRevision() { return materialRevision; }, get extracted() { return extracted; }, get ready() { return !!buffers; }, get counters() { return { ...counters }; },
+    bvh, get buffers() { return bvh.buffers; }, get tables() { return tables; }, get stats() { return stats; }, get revision() { return bvh.revision; },
+    get materialRevision() { return materialRevision; }, get extracted() { return extracted; }, get ready() { return bvh.ready && !!tables; },
+    get counters() { return { ...bvh.counters, ...counters }; },
     unsupported: () => extracted?.report.unsupported ?? [],
     build(reason) { building = build(reason).finally(() => { building = null; }); return building; },
     refresh, writeTables,
-    bindings(base) {
-      return [{ binding: base, resource: { buffer: buffers.nodes } }, { binding: base + 1, resource: { buffer: buffers.instances } },
-        { binding: base + 2, resource: { buffer: buffers.triangles } }, { binding: base + 3, resource: { buffer: buffers.vertices } },
-        { binding: base + 4, resource: { buffer: tables } }];
-    },
-    dispose() { disposed = true; worker?.terminate(); if (buffers) for (const b of Object.values(buffers)) interop.release(b); if (tables) interop.release(tables); },
+    bindings: base => bvh.bindings(base),
+    dispose() { disposed = true; bvh.dispose(); if (tables) interop.release(tables); tables = null; },
     reasons: UNSUPPORTED_REASONS,
   };
 }

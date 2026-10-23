@@ -1,10 +1,10 @@
 import * as THREE from 'three/webgpu';
 import {uv,vec2,vec4,uniform,wgslFn} from 'three/tsl';
 import {TEST_CHART_WGSL} from '../src/scene/test-chart-patterns.js';
-import {createGPUInterop} from '../src/rendering/three-interop.js';
+import {createThreeInterop,cameraPose} from '../src/rendering/three-interop.js';
 const report={kind:'pattern',passed:false,errors:[],charts:[],userAgent:navigator.userAgent};
 const renderer=new THREE.WebGPURenderer({antialias:false});await renderer.init();renderer.setSize(192,128);renderer.outputColorSpace=THREE.LinearSRGBColorSpace;renderer.toneMapping=THREE.NoToneMapping;document.body.append(renderer.domElement);
-const interop=createGPUInterop(renderer),{device}=interop;device.addEventListener('uncapturederror',e=>report.errors.push(e.error.message));
+const interop=createThreeInterop(renderer),{device}=interop;device.addEventListener('uncapturederror',e=>report.errors.push(e.error.message));
 try{
  const W=192,H=128,kind=uniform(0,'uint'),pattern=wgslFn(TEST_CHART_WGSL),pipeline=new THREE.RenderPipeline(renderer);
  // Off-grid coordinates avoid testing undefined ownership exactly on black/white edges.

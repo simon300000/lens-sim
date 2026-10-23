@@ -13,3 +13,5 @@ artifacts/
 .claude/
 .codex/
 docs/benchmarks/
+# Generated WGSL string modules (scripts/build-wgsl.mjs)
+*.wgsl.js

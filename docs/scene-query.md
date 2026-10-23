@@ -25,9 +25,11 @@
 | `src/scene/bvh-worker.js` | 在 Worker 中构建，按 key 缓存 BLAS 与源数据，实例变化只重建 TLAS。 |
 | `src/scene/scene-reference.js` | 仅测试用的 f64 暴力求交和打包 BVH 的 JS 遍历仿真。不是运行时后备。 |
 | `src/rendering/scene-intersector.wgsl` | 可移植 compute 两级遍历（不假定硬件 rayQuery / RT Core）。 |
-| `src/rendering/scene-shading.wgsl` | 材质、灯光、阴影、PMREM、天空/月亮/星空、雾、水面、透明合成。 |
-| `src/rendering/scene-resources.js` | BVH/材质表 GPU 生命周期、限额检查、变化检测。 |
-| `src/rendering/lighting-resources.js` | 唯一接触 Three 阴影/PMREM/反射渲染目标的桥接模块；版本与格式检查；灯光 uniform。 |
+| `src/rendering/scene-surface.wgsl` | 交点表面重建与沿同一射线的透明合成（引擎侧，与提供者无关）。 |
+| `src/rendering/garden-shading.wgsl`、`garden-provider.js` | 庭院辐亮度提供者：材质、灯光、阴影、PMREM、天空/月亮/星空、雾、水面（见 [lens-tracer.md](lens-tracer.md)）。 |
+| `src/rendering/scene-bvh.js` | 场景源 → BVH 的 GPU 生命周期、限额检查、按 key 复用 BLAS（框架无关）。 |
+| `src/rendering/scene-resources.js` | three 场景生产者：提取、变化检测、材质/星表。 |
+| `src/rendering/lighting-resources.js` | 唯一接触 Three 阴影/PMREM/反射渲染目标的桥接模块；格式检查；灯光 uniform。 |
 
 ## BVH 组织与数值
 
@@ -89,8 +91,8 @@ MaterialX 噪声逐行移植（哈希、梯度、fade、trilerp、0.982 缩放�
 
 ## 光照
 
-* **直接光**：方向光（太阳、月亮）与点光源，Three r183 `PhysicalLightingModel` 的 Lambert + GGX（Smith 相关可见性、Schlick Fresnel、多重散射补偿、DFG LUT 逐值复制）；点光距离衰减与截止同 `getDistanceAttenuation`。默认不发场景阴影射线。
-* **阴影**：读取 Three 生成的阴影贴图。方向光：`light.shadow.matrix`（WebGPU z∈[0,1]），`normalBias` 沿着色法线偏移，`y → 1−y`，`z + bias`，视锥外为 1；PCFSoft 9 项公式在 compute 中写成等价的 4×4 可分离加权和（权重 1−f,1,1,f），同一比较采样器（less-equal，线性）。点光：立方体深度纹理（`CubeDepthTexture`，6 层），WebGPU 下方向 y 取反，`viewZToPerspectiveDepth + bias`，5 点 Vogel 盘；光栅用屏幕交错梯度噪声旋转，镜头路径用每样本无状态哈希旋转。启用阴影但有接收体时贴图缺失 → 显式错误，不静默变成无阴影。灯光 layers：点光阴影相机只渲染第 1 层（别墅、细节），由光栅决定，compute 只读结果。
+* **直接光**：方向光（太阳、月亮）与点光源，Three r186 `PhysicalLightingModel` 的 Lambert + GGX（Smith 相关可见性、Schlick Fresnel；漫反射乘 1−F，镜面乘 Turquin 多重散射补偿 1+F0(1/Ess−1)，半球/环境漫反射扣除镜面单次+多次散射能量；DFG LUT 逐值复制）；点光距离衰减与截止同 `getDistanceAttenuation`。默认不发场景阴影射线。
+* **阴影**：读取 Three 生成的阴影贴图。方向光：`light.shadow.matrix`（WebGPU z∈[0,1]），`normalBias` 沿着色法线偏移，`y → 1−y`，`z + bias`，视锥外为 1；PCFSoft 9 项公式（three r186 已移除自身的 PCFSoft，`soft-shadow-filter.js` 为 PCF 渲染器的方向光/聚光灯安装同一核：有比较采样时 4 次硬件双线性比较，否则 9 项点比较）在 compute 中写成等价的 4×4 可分离加权和（权重 1−f,1,1,f），同一比较采样器（less-equal，线性）。点光：立方体深度纹理（`CubeDepthTexture`，6 层），WebGPU 下方向 y 取反，`viewZToPerspectiveDepth + bias`，5 点 Vogel 盘；光栅用屏幕交错梯度噪声旋转，镜头路径用每样本无状态哈希旋转。启用阴影但有接收体时贴图缺失 → 显式错误，不静默变成无阴影。灯光 layers：点光阴影相机只渲染第 1 层（别墅、细节），由光栅决定，compute 只读结果。
 * **环境**：半球光 irradiance + PMREM（cubeUV 布局逐行移植，非普通 cubemap）的镜面 radiance 与 `π×` irradiance，漫反射/镜面分别按 Three 的公式拆分，不重复叠加。方向相关项用真实交点法线和实际 wo。
 * **AO**：GTAO 只用于光栅导航。镜头模式没有等价 AO，环境项不乘屏幕 AO（差异：凹角与接触处镜头图像的间接光比光栅亮）。不为此增加射线。
 * **几何粗糙度**：Three 用屏幕空间法线导数增加粗糙度（`getGeometryRoughness`），compute 路径没有像素导数，不实现；弯曲金属面的高光与光栅存在差异（对照测试：曲面金属球中位误差 6%，平面金属板 < 2%）。
@@ -126,7 +128,7 @@ MaterialX 噪声逐行移植（哈希、梯度、fade、trilerp、0.982 缩放�
 ## 光栅导航
 
 - 静态不透明网格使用 `BundleGroup`，按组包围球剔除，并按相机距离排序。AO 预通道与水面反射分别使用 90 m、120 m 的组距离上限，主画面保持完整范围。
-- `three-interop.js` 为 Three r183 的渲染束缓存补充渲染上下文与目标身份键（同格式的主画面和光照刷新目标不能共用绘制内容），并在透明物体之前执行束。启动预编译完成后才启用；绑定纹理重建后须重新录制。 启动预编译始终初始化 AO 与反射通道，即使保存的画质设置将它们关闭，避免稍后首次启用时替换占位纹理而使已录制的绑定失效。
+- `three-interop.js` 为 Three r186 的渲染束缓存（已按渲染上下文区分）补充目标身份键（同格式的主画面和光照刷新目标不能共用绘制内容），并在透明物体之前执行束。启动预编译完成后才启用；绑定纹理重建后须重新录制。 启动预编译始终初始化 AO 与反射通道，即使保存的画质设置将它们关闭，避免稍后首次启用时替换占位纹理而使已录制的绑定失效。
 - 光栅模式的相机变化不发布 store 快照，镜头累积重置推迟到再次进入镜头模式。鼠标事件只保存最新坐标（必要时取更新的合并事件），在相机帧更新时消费；延后提交 GPU 前再消费期间到达的新坐标，不重复推进键盘速度。松手前的最后一段位移保留到下一次采样，位移保持 1:1 且不套用键盘缓动；触摸仍直接跟随输入。Safari 中，相机帧更新仍在 rAF；鼠标／触摸拖动的光栅提交由 `raster-submission.js` 合并到随后一个任务，最多保留两帧未完成的 GPU 提交。达到上限时只保留一个重绘请求，GPU 完成后在任务中绘制最新视角，避免画布背压阻塞输入，也避免单帧串行等待牺牲 CPU/GPU 重叠。静止、键盘和镜头模式维持原来的提交路径；停止拖动、切换模式或离页时取消待提交的鼠标帧。
 - URL 写回等待控制器 `end`（输入释放且缓动结束）后 1 秒；新的操作会取消等待。拖动中的短暂停顿不触发 `replaceState`，页面卸载时也不强制写回。
 - 光栅画质设置包括分辨率、MSAA（关闭／4×，默认 4×）、AO、水面反射和移动时自适应分辨率（默认关闭），并保存在 localStorage。自适应使用队列完成回调延迟作为压力信号，该值包含主线程调度时间，不等同于 GPU 执行耗时。移动比例按 1 → 0.85 → 0.7 → 0.5 降档，但实际像素比例不低于 0.75×（基准本身更低时保留基准）。到达下限后停止无意义的队列完成探测。镜头停止移动后立即恢复基准分辨率，同时记住最近的移动档位供下一次操作使用；用户更改基准画质时重新学习。

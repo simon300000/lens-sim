@@ -1,17 +1,17 @@
 // SurfaceRadianceEvaluator: scene-linear HDR radiance leaving a REAL scene
 // intersection towards the lens (wo = -ray direction). Re-implements the
-// pinned Three.js r183 MeshStandard/MeshPhysical node lighting for the light
-// and material features registered by src/scene/scene-extract.js.
-// Ported math (MIT, three.js authors): PhysicalLightingModel, BRDF_GGX,
-// BRDF_GGX_Multiscatter, F_Schlick, D_GGX, V_GGX_SmithCorrelated, DFG LUT,
-// getDistanceAttenuation, PCFSoftShadowFilter, PointShadowFilter,
+// Three.js r186 MeshStandard/MeshPhysical node lighting for the light and
+// material features registered by src/scene/scene-extract.js.
+// Ported math (MIT, three.js authors): PhysicalLightingModel (r186 Fresnel-
+// weighted diffuse and multi-scattering energy compensation), BRDF_GGX,
+// F_Schlick, D_GGX, V_GGX_SmithCorrelated, DFG LUT, getDistanceAttenuation,
+// r183 PCFSoftShadowFilter (kept by soft-shadow-filter.js), PointShadowFilter,
 // PMREMUtils.textureCubeUV, MaterialX mx_perlin_noise_float (Apache-2.0 origin).
 // Not ported: screen-space geometryRoughness (dFdx of normals) and GTAO,
 // because a compute path sample has no raster pixel footprint; see docs.
-// Host declares: sceneVertices, sceneTables, sceneLighting, sceneSunShadow,
-// sceneMoonShadow, scenePointShadow0/1, sceneEnvironment, sceneReflection,
-// sceneCompareSampler, sceneLinearSampler.
-struct SceneVertex { normal: vec3f, flags: u32, uv: vec2f, pad: vec2f, color: vec4f }
+// Radiance provider #1 (garden-provider.js). The provider declares sceneTables,
+// sceneLighting, sceneSunShadow, sceneMoonShadow, scenePointShadow0/1,
+// sceneEnvironment, sceneReflection, sceneCompareSampler and sceneLinearSampler.
 struct SceneLighting {
   sunDirection: vec4f,     // xyz towards light; w shadow slot (0) or -1
   sunColor: vec4f,         // rgb = colour * intensity
@@ -119,7 +119,7 @@ fn mxNoise3WithGradient(p: vec3f, gradient: bool) -> vec4f {
   return vec4f(v[0], (v[1] - v[2]) / (2.0 * h), (v[3] - v[4]) / (2.0 * h), (v[5] - v[6]) / (2.0 * h));
 }
 
-// ---------------------------------------------------------------- BRDF (three r183)
+// ---------------------------------------------------------------- BRDF (three r186)
 fn sceneFSchlick(f0: vec3f, f90: f32, dotVH: f32) -> vec3f {
   let fresnel = exp2((-5.55473 * dotVH - 6.98316) * dotVH);
   return f0 * (1.0 - fresnel) + f90 * fresnel;
@@ -141,16 +141,6 @@ fn sceneBRDFGGX(L: vec3f, V: vec3f, N: vec3f, f0: vec3f, f90: f32, roughness: f3
   let dotNL = clamp(dot(N, L), 0.0, 1.0); let dotNV = clamp(dot(N, V), 0.0, 1.0);
   let dotNH = clamp(dot(N, H), 0.0, 1.0); let dotVH = clamp(dot(V, H), 0.0, 1.0);
   return sceneFSchlick(f0, f90, dotVH) * sceneVSmith(alpha, dotNL, dotNV) * sceneDGGX(alpha, dotNH);
-}
-fn sceneBRDFGGXMulti(L: vec3f, V: vec3f, N: vec3f, f0: vec3f, f90: f32, roughness: f32) -> vec3f {
-  let single = sceneBRDFGGX(L, V, N, f0, f90, roughness);
-  let dotNL = clamp(dot(N, L), 0.0, 1.0); let dotNV = clamp(dot(N, V), 0.0, 1.0);
-  let dfgV = sceneDFG(roughness, dotNV); let dfgL = sceneDFG(roughness, dotNL);
-  let fssEssV = f0 * dfgV.x + f90 * dfgV.y; let fssEssL = f0 * dfgL.x + f90 * dfgL.y;
-  let emsV = 1.0 - (dfgV.x + dfgV.y); let emsL = 1.0 - (dfgL.x + dfgL.y);
-  let favg = f0 + (1.0 - f0) * 0.047619;
-  let fms = fssEssV * fssEssL * favg / (1.0 - emsV * emsL * favg * favg + 1e-6);
-  return single + fms * (emsV * emsL);
 }
 fn sceneDistanceAttenuation(d: f32, cutoff: f32, decay: f32) -> f32 {
   let falloff = 1.0 / max(pow(d, decay), 0.01);
@@ -351,35 +341,6 @@ fn sceneEnvironmentRadiance(d: vec3f) -> vec3f {
   return moon.rgb * moon.a + c * (1.0 - moon.a);
 }
 
-// ---------------------------------------------------------------- surface
-struct SceneSurface {
-  P: vec3f, N: vec3f, Ng: vec3f, local: vec3f, uv: vec2f, color: vec3f,
-  material: u32, flags: u32, instance: u32, t: f32,
-}
-fn sceneReconstruct(hit: SceneHit, rayDir: vec3f, rayOrigin: vec3f) -> SceneSurface {
-  var s: SceneSurface;
-  let I = sceneInstances[hit.instance];
-  let tri = sceneTriangles[hit.triangle];
-  let b0 = 1.0 - hit.b1 - hit.b2;
-  let v0 = sceneVertices[tri.i0]; let v1 = sceneVertices[tri.i1]; let v2 = sceneVertices[tri.i2];
-  s.t = hit.t;
-  s.P = rayOrigin + rayDir * hit.t;
-  let geomLocal = tri.p0 * b0 + tri.p1 * hit.b1 + tri.p2 * hit.b2;
-  s.local = vec3f(dot(I.frame0.xyz, geomLocal) + I.frame0.w, dot(I.frame1.xyz, geomLocal) + I.frame1.w, dot(I.frame2.xyz, geomLocal) + I.frame2.w);
-  let nLocal = v0.normal * b0 + v1.normal * hit.b1 + v2.normal * hit.b2;
-  var n = normalize(sceneWorldNormal(I, nLocal));
-  var ng = normalize(sceneWorldNormal(I, cross(tri.p1 - tri.p0, tri.p2 - tri.p0)));
-  // three directionToFaceDirection: BackSide always flips, DoubleSide flips on back faces.
-  let side = I.info.z & INSTANCE_SIDE_MASK;
-  if (side == SIDE_BACK || (side == SIDE_DOUBLE && !hit.front)) { n = -n; ng = -ng; }
-  s.N = n; s.Ng = ng;
-  s.uv = v0.uv * b0 + v1.uv * hit.b1 + v2.uv * hit.b2;
-  var color = I.color.rgb;
-  if ((I.info.z & INSTANCE_VERTEX_COLOR) != 0u) { color *= (v0.color * b0 + v1.color * hit.b1 + v2.color * hit.b2).rgb; }
-  s.color = color;
-  s.material = I.info.y; s.flags = I.info.z; s.instance = hit.instance;
-  return s;
-}
 // Raked gravel coordinate u (x) and its world xz gradient (yz): signed
 // distance outside the nearest rock inside the ring band, else world z.
 fn sceneGravelRake(P: vec3f) -> vec3f {
@@ -396,7 +357,6 @@ fn sceneGravelRake(P: vec3f) -> vec3f {
 fn sceneWaterRipple(P: vec3f) -> f32 {
   return sin(dot(P.xz, WATER_RIPPLE_A)) * WATER_RIPPLE_AMP0 + cos(dot(P.xz, WATER_RIPPLE_B)) * WATER_RIPPLE_AMP1;
 }
-struct SceneShade { rgb: vec3f, alpha: f32, reflectionOutside: bool }
 /// Outgoing radiance at a real hit, plus alpha and fog, matching three's
 /// fragment output before blending. key decorrelates stochastic filters.
 fn sceneShade(s: SceneSurface, wo: vec3f, key: u32) -> SceneShade {
@@ -466,6 +426,14 @@ fn sceneShade(s: SceneSurface, wo: vec3f, key: u32) -> SceneShade {
   let specularColorBlended = mix(m.f0, diffuseColor, metal);
   let V = wo;
   let dotNV = clamp(dot(N, V), 0.0, 1.0);
+  // The DFG lookup shared by direct multi-scattering compensation and IBL (r186).
+  let fab = sceneDFG(roughness, dotNV);
+  let multiScatteringCompensation = specularColorBlended * (1.0 / (fab.x + fab.y) - 1.0) + 1.0;
+  // Dielectric single + multiple scattering: energy the specular lobe takes from diffuse.
+  let ems = 1.0 - (fab.x + fab.y);
+  let ssD = m.f0 * fab.x + m.f90 * fab.y;
+  let favgD = m.f0 + (1.0 - m.f0) * 0.047619;
+  let msD = ssD * favgD / (1.0 - ems * favgD) * ems;
   var directDiffuse = vec3f(0.0); var directSpecular = vec3f(0.0);
   var ccDirect = vec3f(0.0);
   let clearcoat = (m.flags & MAT_CLEARCOAT) != 0u;
@@ -494,14 +462,15 @@ fn sceneShade(s: SceneSurface, wo: vec3f, key: u32) -> SceneShade {
     }
     workCounters[WORK_LIGHT]++;
     let irradiance = clamp(dot(N, Ld), 0.0, 1.0) * colour;
-    directDiffuse += irradiance * diffuseContribution / SCENE_PI;
-    directSpecular += irradiance * sceneBRDFGGXMulti(Ld, V, N, specularColorBlended, 1.0, roughness);
+    let fresnel = sceneFSchlick(m.f0, m.f90, clamp(dot(V, normalize(Ld + V)), 0.0, 1.0));
+    directDiffuse += irradiance * diffuseContribution / SCENE_PI * (1.0 - fresnel);
+    directSpecular += irradiance * sceneBRDFGGX(Ld, V, N, specularColorBlended, 1.0, roughness) * multiScatteringCompensation;
     if (clearcoat) { ccDirect += irradiance * sceneBRDFGGX(Ld, V, N, vec3f(0.04), 1.0, m.clearcoatRoughness); }
   }
   // Indirect: hemisphere irradiance + PMREM radiance/irradiance (no GTAO).
   var irradiance = vec3f(0.0);
   if ((L.counts.y & LIGHT_HEMI) != 0u) { irradiance = mix(L.hemiGround.rgb, L.hemiSky.rgb, dot(N, L.hemiUp.xyz) * 0.5 + 0.5); }
-  var indirectDiffuse = irradiance * diffuseContribution / SCENE_PI;
+  var indirectDiffuse = irradiance * diffuseContribution / SCENE_PI * (1.0 - (ssD + msD));
   var indirectSpecular = vec3f(0.0);
   var ccIndirect = vec3f(0.0);
   if ((L.counts.y & LIGHT_ENVIRONMENT) != 0u) {
@@ -518,13 +487,8 @@ fn sceneShade(s: SceneSurface, wo: vec3f, key: u32) -> SceneShade {
     }
     let radiance = env[0];
     let iblIrradiance = env[1] * SCENE_PI;
-    let fab = sceneDFG(roughness, dotNV);
-    let ssD = m.f0 * fab.x + m.f90 * fab.y;
     let ssM = diffuseColor * fab.x + m.f90 * fab.y;
-    let ems = 1.0 - (fab.x + fab.y);
-    let favgD = m.f0 + (1.0 - m.f0) * 0.047619;
     let favgM = diffuseColor + (1.0 - diffuseColor) * 0.047619;
-    let msD = ssD * favgD / (1.0 - ems * favgD) * ems;
     let msM = ssM * favgM / (1.0 - ems * favgM) * ems;
     let single = mix(ssD, ssM, metal); let multi = mix(msD, msM, metal);
     let cosineWeighted = iblIrradiance / SCENE_PI;
@@ -550,88 +514,4 @@ fn sceneShade(s: SceneSurface, wo: vec3f, key: u32) -> SceneShade {
   }
   out.rgb = outgoing;
   return out;
-}
-
-// ---------------------------------------------------------------- composition
-const SCENE_HIT: u32 = 4u;
-const SCENE_BACKGROUND: u32 = 5u;
-const SCENE_UNSUPPORTED: u32 = 7u;
-const BVH_TRAVERSAL_ERROR: u32 = 8u;
-const TRANSPARENCY_LIMIT: u32 = 9u;
-const SCENE_MAX_TRANSPARENT_LAYERS: u32 = 6u;
-const SCENE_FAR: f32 = 1.0e7;
-struct SceneSample {
-  rgb: vec3f, status: u32, firstT: f32, firstNormal: vec3f, firstMaterial: u32,
-  layers: u32, reflectionOutside: bool, bvhError: u32,
-}
-/// sceneRadiance when the nearest surface along the ray is already known: the
-/// staged integrator's traversal kernel supplies layer 0 and this composites
-/// exactly as sceneRadiance does, continuing inline through transparent layers.
-fn sceneRadianceFromHit(origin: vec3f, direction: vec3f, key: u32, first: SceneHit) -> SceneSample {
-  var res: SceneSample;
-  res.firstT = -1.0;
-  var radiance = vec3f(0.0);
-  var transmittance = 1.0;
-  var tMin = 0.0;
-  var hit = first;
-  let layerBound = sceneRuntimeBound(SCENE_MAX_TRANSPARENT_LAYERS + 1u);
-  for (var layer = 0u; layer < layerBound; layer++) {
-    if (layer > 0u) { hit = sceneIntersect(origin, direction, tMin, SCENE_FAR); }
-    if (hit.status == HIT_ERROR) { res.status = BVH_TRAVERSAL_ERROR; res.bvhError = hit.error; res.rgb = vec3f(0.0); return res; }
-    if (hit.status == HIT_NONE) {
-      radiance += transmittance * sceneEnvironmentRadiance(direction);
-      res.rgb = radiance; res.status = select(SCENE_HIT, SCENE_BACKGROUND, layer == 0u); res.layers = layer;
-      return res;
-    }
-    let s = sceneReconstruct(hit, direction, origin);
-    if (layer == 0u) { res.firstT = hit.t; res.firstNormal = s.N; res.firstMaterial = s.material; }
-    if ((s.flags & INSTANCE_UNSUPPORTED) != 0u) { res.status = SCENE_UNSUPPORTED; res.rgb = vec3f(0.0); return res; }
-    let shade = sceneShade(s, -direction, key + layer * 0x9e3779b9u);
-    res.reflectionOutside = res.reflectionOutside || shade.reflectionOutside;
-    if ((s.flags & INSTANCE_TRANSPARENT) == 0u) {
-      res.rgb = radiance + transmittance * shade.rgb; res.status = SCENE_HIT; res.layers = layer;
-      return res;
-    }
-    radiance += transmittance * shade.alpha * shade.rgb;
-    transmittance *= 1.0 - shade.alpha;
-    tMin = hit.t + 1.0e-4 + 2.0e-6 * hit.t;
-  }
-  res.status = TRANSPARENCY_LIMIT; res.rgb = vec3f(0.0); res.layers = SCENE_MAX_TRANSPARENT_LAYERS + 1u;
-  return res;
-}
-/// The lens shading stage's SceneRadianceProvider: nearest real surface, its
-/// material and lighting, and a BOUNDED front-to-back composite through
-/// alpha-blended layers along the same ray (no refraction is simulated).
-fn sceneRadiance(origin: vec3f, direction: vec3f, key: u32) -> SceneSample {
-  var res: SceneSample;
-  res.firstT = -1.0;
-  var radiance = vec3f(0.0);
-  var transmittance = 1.0;
-  var tMin = 0.0;
-  let layerBound = sceneRuntimeBound(SCENE_MAX_TRANSPARENT_LAYERS + 1u);
-  for (var layer = 0u; layer < layerBound; layer++) {
-    let hit = sceneIntersect(origin, direction, tMin, SCENE_FAR);
-    if (hit.status == HIT_ERROR) { res.status = BVH_TRAVERSAL_ERROR; res.bvhError = hit.error; res.rgb = vec3f(0.0); return res; }
-    if (hit.status == HIT_NONE) {
-      radiance += transmittance * sceneEnvironmentRadiance(direction);
-      res.rgb = radiance; res.status = select(SCENE_HIT, SCENE_BACKGROUND, layer == 0u); res.layers = layer;
-      return res;
-    }
-    let s = sceneReconstruct(hit, direction, origin);
-    if (layer == 0u) { res.firstT = hit.t; res.firstNormal = s.N; res.firstMaterial = s.material; }
-    if ((s.flags & INSTANCE_UNSUPPORTED) != 0u) { res.status = SCENE_UNSUPPORTED; res.rgb = vec3f(0.0); return res; }
-    let shade = sceneShade(s, -direction, key + layer * 0x9e3779b9u);
-    res.reflectionOutside = res.reflectionOutside || shade.reflectionOutside;
-    if ((s.flags & INSTANCE_TRANSPARENT) == 0u) {
-      res.rgb = radiance + transmittance * shade.rgb; res.status = SCENE_HIT; res.layers = layer;
-      return res;
-    }
-    radiance += transmittance * shade.alpha * shade.rgb;
-    transmittance *= 1.0 - shade.alpha;
-    // Continue along the SAME ray beyond this layer. The gap excludes the
-    // same surface and coplanar duplicates across a shared edge.
-    tMin = hit.t + 1.0e-4 + 2.0e-6 * hit.t;
-  }
-  res.status = TRANSPARENCY_LIMIT; res.rgb = vec3f(0.0); res.layers = SCENE_MAX_TRANSPARENT_LAYERS + 1u;
-  return res;
 }
