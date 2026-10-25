@@ -23,7 +23,7 @@ const hdr = await tracer.readHDR();     // { width, height, spp, data: Float32Ar
 | `createLensTracer({ device \| interop, provider, width, sensorMm, outputFormat, workers, memoryBudget, scene, … })` | `interop` 来自 `createThreeInterop(renderer)`（three 适配，输出图为 StorageTexture）；否则用原始 `GPUDevice`。`workers.*`：省略 = 打包的模块 Worker，`false` = 主线程内联，`() => Worker` = 宿主提供。 |
 | `requiredLimits(adapter.limits, { provider })` | 宿主 `requestDevice` 时请求的限额；按提供者的每阶段资源检查（`gpu-policy.js`）。 |
 | `setLens(prescription, { fNumber, sensorZMm, sensorMm, dispersion, pupilSampling })` | 传感器长宽比与图像一致（宽为 3 的倍数、高为偶数）。 |
-| `updateOptics(patch)`、`focus(distanceM)`、`autofocus()`、`referenceTarget()` | 与 lens-sim 相同的对焦搜索（对焦表 / 移动镜组 / 传感器），保持物理光阑半径。 |
+| `updateOptics(patch)`、`focus(distanceM, { trim })`、`autofocus()`、`referenceTarget()` | 与 lens-sim 相同的对焦搜索（对焦表 / 移动镜组 / 传感器的 RMS 搜索；无镜组数据的镜头再按轴上 MTF 微调像面，`trim` 可指定其它方法也微调，如 `FOCUS_METHODS` 全部微调，见 [lens-data.md](lens-data.md#focus-criterion)），保持物理光阑半径。 |
 | `setPose(m)`、`setOrigin([x,y,z])` | 原点以 f64 从位姿与全部实例变换中减去（远离原点的世界保持相机附近 f32 精度）；提供者收到的是重定心后的坐标。 |
 | `setScene(source)`、`setRadianceProvider(provider)` | 场景源见下；提供者可在运行中替换（编译完成前旧提供者继续工作）。 |
 | `sample(opts)`、`render({ targetSpp })`、`reset()`、`resize(w)`、`statistics()`、`readHDR()` | `outputTexture` 为显示用的钳制线性图（`outputFormat`）；`readHDR` 不钳制、不半精度。 |

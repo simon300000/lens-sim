@@ -59,11 +59,13 @@ export async function createLensTracer({device,interop,provider,width=960,sensor
     updateOptics(patch){state={...state,...patch};const packed=engine.updateOptics(state);state.fNumber=packed.fNumber;return packed;},
     /** Focus the base prescription at distanceM (null = infinity) with the same
      * search as lens-sim (focus table, moving groups or the sensor), keeping the
-     * physical stop radius. Resolves to the solver result plus the new f-number. */
-    async focus(distanceM,{stale}={}){
+     * physical stop radius. trim: the focus methods given the contrast trim
+     * (focus-search.js; default: plane-search only). Resolves to the solver
+     * result plus the new f-number. */
+    async focus(distanceM,{stale,trim}={}){
       if(!baseLens)throw new Error('setLens before focus');
       const packed=engine.packed;
-      const moved=await solver.solve(baseLens,distanceM,{currentLens:{...engine.lens,sensorZMm:packed.sensorZMm},stopRadiusMm:packed.stopRadiusMm,dispersion:state.dispersion});
+      const moved=await solver.solve(baseLens,distanceM,{currentLens:{...engine.lens,sensorZMm:packed.sensorZMm},stopRadiusMm:packed.stopRadiusMm,dispersion:state.dispersion,...(trim?{trim}:{})});
       if(disposed)throw new Error('Lens tracer disposed');if(stale?.())return null;
       const limits=apertureLimits(moved.lens);
       const fNumber=Math.max(limits.minFNumber,Math.min(limits.maxFNumber,Math.abs(limits.focalLengthMm*limits.pupilMagnification)/(2*packed.stopRadiusMm)));

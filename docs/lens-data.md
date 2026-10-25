@@ -86,8 +86,9 @@ Manual distance commands and centre AF-S both use the motion data when available
 AF-S obtains the scene target through the existing reference ray, then applies its
 axial object distance to the cam; it does not replace the table calibration with an
 RMS sensor search. The prescribed sensor coordinate stays fixed while surface
-positions, focal length, pupil calibration and GPU surface buffers update. The
-physical stop opening is retained across focus changes. The UI distance remains
+positions, focal length, pupil calibration and GPU surface buffers update (an
+embedder that asks for the contrast trim on these lenses, below, also moves the
+image plane). The physical stop opening is retained across focus changes. The UI distance remains
 measured from the first vertex; explicit table distances are converted to the
 object-to-sensor convention internally. Manual image-distance micro-adjustment
 remains available; the next cam focus command restores the prescribed sensor.
@@ -98,3 +99,39 @@ reproduce the supplied motion, but does not establish commercial-lens calibratio
 between its source nodes. Unit tests compare all 23 supplied explicit tables to
 the pinned upstream interpolation functions; GPU runtime acceptance covers both
 cam paths and the existing sensor fallback.
+
+### Focus criterion
+
+`searchFocus` (`src/optics/focus-search.js`) focuses in two stages from the same
+on-axis rays: a 12×12 pupil grid aimed at the real stop, at the lens's focus
+wavelengths, traced with the f64 prescription tracer.
+
+1. RMS search, as lens-bench: without a focus table the focusing groups move along
+   the cam (`cam-search`: 17 coarse steps, then golden section in inverse distance);
+   without group data the image plane is scanned twice with 17 positions over ±2% of
+   f, centred on the paraxial extension for the distance (`plane-search`). Both
+   minimise the polychromatic RMS spot radius.
+2. Contrast trim, by default for `plane-search` only (lenses without focusing-group
+   data): the image plane is scanned within ±max(0.5 mm, 0.15·N, 0.01·f) of the RMS
+   plane, 33 positions then 17 around the best, for the highest mean geometric polychromatic MTF at 20/40/80
+   lp/mm (each grid ray stands for a ring, OTF J0(2πνr)). The rays are traced once.
+
+RMS weights the pupil rim by r². With strong spherical aberration wide open (Canon
+FL 50mm F1.8, f/0.95 designs) the RMS plane sits off the sharp core: FL 50 at f/1.89
+and 5.9 m, 0.21 mm behind paraxial focus with MTF40 ≈ 0.07; the trim moves it 0.25 mm
+forward to MTF40 ≈ 0.36. Well-corrected lenses peak in contrast at their RMS plane
+and move a few µm. A sensor on the cover glass's rear face (zero image gap) moves
+with its trailing plane-parallel plates, which gives the same exit rays. Survey of 456
+lenses × wide open, f/2.8, f/5.6 × near/3 m/10 m/∞ against a 501-plane dense
+reference: with group or plane search, the trimmed plane is within 5% of the best
+contrast in 99.7% of conditions (wide open 99.4%; RMS plane alone 70%), never below
+85% and at most 2.2% below the RMS plane; trimmed focus tables reach 100% within 5%
+(untrimmed 71%).
+
+Focus tables (`table`) are never searched. Lenses with focusing-group data (`table`,
+`cam-search`) keep the RMS result here; their contrast is still reported. An embedder
+can trim them too: `searchFocus(lens, d, { trim: FOCUS_METHODS })`, or
+`tracer.focus(d, { trim })`; the default is `DEFAULT_TRIM_METHODS` (`['plane-search']`).
+The result keeps `beforeRmsMm` / `afterRmsMm` (at the final plane) and adds
+`rmsPlaneRmsMm` and `contrast` {frequenciesLpMm, offsetMm, windowMm, rmsPlaneMtf, mtf}
+(offset and window 0 when not trimmed).

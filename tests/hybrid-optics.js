@@ -63,7 +63,9 @@ try{
   const target=await engine.referenceTarget();check(target.status===4&&Math.abs(target.distanceM-10)<.3,'AF reference target mapping failed: '+JSON.stringify({target,stats}));
   const focusNear=focusTestLens(engine,lens,5),focusFar=focusTestLens(engine,lens,15);
   check(focusNear.lens.sensorZMm>focusFar.lens.sensorZMm,'AF sensor position must change with target distance');
-  check(focusNear.afterRmsMm<=focusNear.beforeRmsMm+1e-5&&focusFar.afterRmsMm<=focusFar.beforeRmsMm+1e-5,'AF search did not improve pupil-grid RMS');
+  check(focusNear.rmsPlaneRmsMm<=focusNear.beforeRmsMm+1e-5&&focusFar.rmsPlaneRmsMm<=focusFar.beforeRmsMm+1e-5,'AF search did not improve pupil-grid RMS');
+  const contrast=v=>v.reduce((a,b)=>a+b,0)/v.length;
+  check([focusNear,focusFar].every(f=>contrast(f.contrast.mtf)>=contrast(f.contrast.rmsPlaneMtf)),'AF contrast trim lost on-axis contrast');
   step('af done');
   engine.setLens(focusNear.lens,{sensorZMm:focusNear.lens.sensorZMm,fNumber:2.8,dispersion:true});
   for(let i=0;i<16;i++){engine.sample({batchSpp:4,targetSpp:64});await interop.device.queue.onSubmittedWorkDone();}
