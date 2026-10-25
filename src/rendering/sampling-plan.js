@@ -3,10 +3,12 @@ export const PIXEL_BYTES = 64;
 export const CAMERA_WIDTHS = [6000, 6720, 7362, 7953, 8256, 8688, 9504];
 export const MAX_IMAGE_WIDTH = 9504;
 /** aspect = width / height of the sensor. The width is a multiple of 3 and the
- * height even (paired mirror bands), so 3:2 keeps its exact 2w/3. */
-export function imagePlan(width, limits, { paired = false, aspect = 1.5 } = {}) {
+ * height even (paired mirror bands), so 3:2 keeps its exact 2w/3. maxWidth: the
+ * resolution ceiling (Infinity: only the device, whose output texture must fit
+ * maxTextureDimension2D in both directions). */
+export function imagePlan(width, limits, { paired = false, aspect = 1.5, maxWidth = MAX_IMAGE_WIDTH } = {}) {
   const w = Math.max(48, Math.round(width / 3) * 3), h = Math.max(2, 2 * Math.round(w / aspect / 2));
-  if (!Number.isFinite(w) || !Number.isFinite(h) || w > MAX_IMAGE_WIDTH || w > limits.maxTextureDimension2D || h > limits.maxTextureDimension2D)
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w > maxWidth || w > limits.maxTextureDimension2D || h > limits.maxTextureDimension2D)
     throw new Error(`此 GPU 不支持 ${w}×${h} 的图像尺寸`);
   const bindingBytes = Math.min(limits.maxStorageBufferBindingSize, limits.maxBufferSize);
   const rows = Math.floor(bindingBytes / (w * PIXEL_BYTES) / (paired ? 16 : 8)) * (paired ? 16 : 8);

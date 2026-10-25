@@ -19,7 +19,8 @@ export const STAGED_SCRATCH_BYTES=256*1024**2;
  * mode 'ray': no traversal kernel and no BVH bindings; the scene kernel hands each
  * world ray to the ray provider (shading = SCENE_RAY_WGSL + provider WGSL).
  * mode 'cached': raygen into the ray cache plus the binning, per-cell resolve and
- * accumulate kernels of ray-cache.js (sample: scene-sample.wgsl). */
+ * accumulate kernels of ray-cache.js (sample: scene-sample.wgsl); its raygen starts
+ * after the attempts of held batches (ray-cache.js cacheAttempts). */
 export function stagedIntegratorSources({integrator,optical,work,intersector,shading,spectral,sampling,pupil,sample,counting=false,roundSppLimit=ROUND_SPP_LIMIT,mode='surface'}){
   const surface=mode==='surface';
   if(!surface&&mode!=='ray'&&mode!=='cached')throw new RangeError('Unknown staged integration mode '+mode);
@@ -50,6 +51,14 @@ fn mirrorPixel(group:u32,lane:u32,halfWidth:u32)->vec2u {
   let blocksX=(halfWidth+7u)/8u;
   return vec2u((group%blocksX)*8u+lane%8u,(group/blocksX)*8u+lane/8u);
 }
+${mode==='cached'?`// Cached batches may cover a column window of the group rows (a sensor tile): pinholeClipToCamera[0].zw
+// (unused in cached mode) = first column and width in 8x8 blocks; width 0 = whole rows from the cursor.
+fn windowPixel(local:u32,lane:u32,halfWidth:u32)->vec2u {
+  let w=bitcast<u32>(render.pinholeClipToCamera[0].w);
+  if(w==0u){return mirrorPixel(render.debug.y+local,lane,halfWidth);}
+  let blocksX=(halfWidth+7u)/8u;
+  return mirrorPixel(render.debug.y+(local/w)*blocksX+bitcast<u32>(render.pinholeClipToCamera[0].z)+local%w,lane,halfWidth);
+}`:`fn windowPixel(local:u32,lane:u32,halfWidth:u32)->vec2u { return mirrorPixel(render.debug.y+local,lane,halfWidth); }`}
 fn outputIndex(c:vec2u,q:u32)->u32 {
   let halfHeight=bitcast<u32>(render.environment.w);
   let x=select(c.x,render.size.x-1u-c.x,(q&1u)!=0u);
@@ -71,10 +80,10 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   if(localGroup>=render.debug.w){return;}
   let lane=(id.y%8u)*8u+id.x%8u;let packet=localGroup*64u+lane;
   let halfWidth=(render.size.x+1u)/2u;let halfHeight=bitcast<u32>(render.environment.w);
-  let c=mirrorPixel(render.debug.y+localGroup,lane,halfWidth);
+  let c=windowPixel(localGroup,lane,halfWidth);
   if(c.x>=halfWidth||c.y>=halfHeight){return;}
   let image=c+vec2u(0,render.settings.w);
-  let first=accumulation[outputIndex(c,0u)].attempts;
+  let first=accumulation[outputIndex(c,0u)].attempts${mode==='cached'?'+bitcast<u32>(render.pinholeClipToCamera[0].y)':''};
   let remaining=select(render.size.w-min(render.size.w,first),0xffffffffu-first,render.size.w==0u);
   let batch=min(min(render.size.z,remaining),ROUND_SPP_LIMIT);
   let capacity=render.debug.w*64u;
@@ -96,7 +105,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   let quadrant=sceneGroup%4u;let localGroup=sceneGroup/4u;
   let lane=(id.y%8u)*8u+id.x%8u;let packet=localGroup*64u+lane;
   let halfWidth=(render.size.x+1u)/2u;let halfHeight=bitcast<u32>(render.environment.w);
-  let c=mirrorPixel(render.debug.y+localGroup,lane,halfWidth);
+  let c=windowPixel(localGroup,lane,halfWidth);
   if(c.x>=halfWidth||c.y>=halfHeight){return;}
   let mirrorX=(quadrant&1u)!=0u;let mirrorY=(quadrant&2u)!=0u;
   let image=vec2u(select(c.x,render.size.x-1u-c.x,mirrorX),select(c.y+render.settings.w,render.size.y-1u-render.settings.w-c.y,mirrorY));
@@ -136,7 +145,7 @@ fn main(@builtin(global_invocation_id) id:vec3u){
   let quadrant=sceneGroup%4u;let localGroup=sceneGroup/4u;
   let lane=(id.y%8u)*8u+id.x%8u;let packet=localGroup*64u+lane;
   let halfWidth=(render.size.x+1u)/2u;let halfHeight=bitcast<u32>(render.environment.w);
-  let c=mirrorPixel(render.debug.y+localGroup,lane,halfWidth);
+  let c=windowPixel(localGroup,lane,halfWidth);
   if(c.x>=halfWidth||c.y>=halfHeight){return;}
   let mirrorX=(quadrant&1u)!=0u;let mirrorY=(quadrant&2u)!=0u;
   let image=vec2u(select(c.x,render.size.x-1u-c.x,mirrorX),select(c.y+render.settings.w,render.size.y-1u-render.settings.w-c.y,mirrorY));

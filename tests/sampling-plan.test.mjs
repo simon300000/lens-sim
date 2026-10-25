@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { imagePlan, CAMERA_WIDTHS, sampleBudget, hasSamplesRemaining, PIXEL_BYTES } from '../src/rendering/sampling-plan.js';
+import { imagePlan, CAMERA_WIDTHS, sampleBudget, hasSamplesRemaining, PIXEL_BYTES, MAX_IMAGE_WIDTH } from '../src/rendering/sampling-plan.js';
 const limits={maxTextureDimension2D:16384,maxBufferSize:256*1024**2,maxStorageBufferBindingSize:128*1024**2};
 test('camera images cover the entire sensor within per-buffer GPU limits',()=>{
   for(const width of [480,...CAMERA_WIDTHS]){
@@ -11,6 +11,13 @@ test('camera images cover the entire sensor within per-buffer GPU limits',()=>{
   assert.equal(imagePlan(6000,limits).width*imagePlan(6000,limits).height,24000000);
   assert.ok(imagePlan(9504,limits).tiles.length>1);
   assert.throws(()=>imagePlan(9504,{...limits,maxTextureDimension2D:8192}),/GPU/);
+});
+test('the width ceiling is MAX_IMAGE_WIDTH unless the embedder lifts it to the device limit',()=>{
+  assert.throws(()=>imagePlan(MAX_IMAGE_WIDTH+3,limits),/GPU/);
+  const wide=imagePlan(16383,limits,{maxWidth:Infinity});
+  assert.equal(wide.width,16383);assert.equal(wide.height,10922);
+  assert.throws(()=>imagePlan(16386,limits,{maxWidth:Infinity}),/GPU/,'the output texture still bounds the width');
+  assert.throws(()=>imagePlan(6000,limits,{maxWidth:4800}),/GPU/);
 });
 test('continuous sampling continues beyond former limits; finite budgets remain exact',()=>{
   assert.equal(sampleBudget(4096,0,4),4);assert.equal(hasSamplesRemaining(5000,0),true);

@@ -27,8 +27,9 @@ const hdr = await tracer.readHDR();     // { width, height, spp, data: Float32Ar
 | `setPose(m)`、`setOrigin([x,y,z])` | 原点以 f64 从位姿与全部实例变换中减去（远离原点的世界保持相机附近 f32 精度）；提供者收到的是重定心后的坐标。 |
 | `setScene(source)`、`setRadianceProvider(provider)` | 场景源见下；提供者可在运行中替换（编译完成前旧提供者继续工作）。 |
 | `sample(opts)`、`render({ targetSpp })`、`reset()`、`resize(w)`、`statistics()`、`readHDR()` | `outputTexture` 为显示用的钳制线性图（`outputFormat`）；`readHDR` 不钳制、不半精度。 |
+| `readHDRRows({ y, rows, space })` | 只读图像行 `[y, y + rows)`（只拷贝这些行的累计缓冲，不复制整帧），供大图分段导出。 |
 | `frontElement()`、`exitFootprint({ fields, samples })` | 镜头空间（mm）前组几何与光线实际出射区域（CPU 反向追迹）。 |
-| `rayBatch(opts)`、`renderCached(opts)` | 光线缓存（下节）。 |
+| `rayBatch(opts)`、`renderCached(opts)`、`tracedSpp` | 光线缓存（下节）；`tracedSpp` 含尚未累计的持有批次。 |
 
 ## 辐亮度提供者（radiance provider）
 
@@ -67,7 +68,25 @@ const stats = batch.finish();  // { spp, rays, renders, cells, raysPerCell, maxP
 * 缓存无量化：直接保留分阶段的镜头包（每个正象限像素/样本 48 字节，由 4 条镜像光线共用，即每光线 12 字节），另加每光线 4 字节排序索引和 8 字节结果（f32 波长处光谱辐亮度 + 状态位）。光学失败不进入分格，累计阶段照常计为尝试。
 * 分格：出射圆盘（半径取 `exitFootprint` 的实际出射范围）上 n×n 网格，每批旋转并亚格抖动，格界不固定。GPU 上工作组直方图 → 前缀和 → 工作组内槽位散射；每格记录光线数、范围、定点质心、出射边界与镜头空间方向边界。
 * `memoryBytes` 决定 S：优先整块（tile）一次覆盖，放不下时减小 S，S=1 仍放不下则按包组拆成多批。
-* 解析核心与直接路径使用同一世界光线、同一随机键和同一光谱贡献表达式；GPU 测试 `tests/lens-tracer-gpu.html` 在庭院场景上比较“分阶段表面路径 / 包装 BVH 的光线路径 / 光线缓存路径”。
+* 解析核心与直接路径使用同一世界光线、同一随机键和同一光谱贡献表达式；GPU 测试 `tests/lens-tracer-gpu.html` 在庭院场景上比较“分阶段表面路径 / 包装 BVH 的光线路径 / 光线缓存路径 / 持有批次”。
+
+## 嵌入挂钩
+
+以下功能默认关闭；不使用时 lens-sim 应用与上面的路径完全不变。
+
+* **持有批次** `rayBatch({ hold: true })`：批次持有自己的缓冲直到 `finish()`，多个批次可同时等待视图（按追迹顺序 `finish`）。它们的尝试尚未进入累计缓冲，
+  渲染参数携带此前已追迹的尝试数（`cacheAttempts`），随机键与直接路径一致。`tracer.tracedSpp` 含持有批次；有持有批次时 `tracer.resolve()` 显示已解析部分的估计
+  （每像素：已解析光线均值 × 该批光学通过比例）。缓存预算或设备内存不足时抛出 `code: 'ray-cache-memory'`，宿主先 `finish` 已持有的批次。
+* **延后着色**：光线提供者可返回 `SCENE_DEFERRED`（`scene-sample.wgsl`，所需资源尚未就绪）；该光线保持未解析，从不累计，`batch.retry(k)`（省略 k 为整批）之后只再解析这些光线。
+  `batch.resolveAll()` 一次解析整批；`batch.rescue()` 只再解析已解析但为 `SCENE_UNSUPPORTED` 的光线（提供者的第二次机会）；`batch.discard()` 丢弃最新的持有条带批次而不累计。
+  `batch.lobe` 为该批镜头空间方向包围盒（镜像前），`cellShift(seed, serial)` 与 `diskCells(batch)`（`ray-cache.js`）给出分格的旋转/抖动与出射圆盘覆盖的格。
+* **传感器条带** `tracer.engine.setBands([{ tile, rows: [r0, r1), cols?: [c0, c1) }])`：以 8×8 包组行/列划分累计块（`engine.bandLayout`），须无重叠地覆盖整帧；
+  之后 `rayBatch({ band: i, hold: true })` 逐条带追迹（条带整体追迹，只减小 S；放不下 1 spp 时抛出 `code: 'band-cache'` 与 `bytesPerSpp`）。从已追迹条带切出的条带保留其 spp，
+  `engine.bands` 给出每条带的 `spp`、`held` 与 `bytesPerSpp`；`tracer.spp` 为最小值。`reset()` 取消条带。
+* **分辨率上限** `createLensTracer({ maxWidth })`：默认 `MAX_IMAGE_WIDTH`（9504，应用的上限）；`Infinity` 时只受设备限制（输出图为单张纹理，宽高须不超过 `maxTextureDimension2D`）。
+* **行读回** `readHDRRows`（见上表）。
+
+单元测试：`tests/ray-cache.test.mjs`（着色器与持有/条带/延后的引擎状态，假 GPU）、`tests/sampling-plan.test.mjs`（`maxWidth`）、`tests/lens-tracer.test.mjs`（`readHDRRows`）。
 
 ## 其它嵌入要点
 

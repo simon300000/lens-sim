@@ -3,8 +3,9 @@
 //   fn rayRadiance(ray: LensRay) -> RayRadiance
 // answers its scene-linear RGB radiance directly (e.g. by looking the ray up in
 // raster views rendered from origins on the front element). status is one of
-// SCENE_HIT, SCENE_BACKGROUND, SCENE_UNSUPPORTED (counted, zero contribution) or
-// BVH_TRAVERSAL_ERROR (provider failure, stops accumulation like a BVH error).
+// SCENE_HIT, SCENE_BACKGROUND, SCENE_UNSUPPORTED (counted, zero contribution),
+// BVH_TRAVERSAL_ERROR (provider failure, stops accumulation like a BVH error) or,
+// through the ray cache only, SCENE_DEFERRED (asked again later, never accumulated).
 // t is the distance to the surface when known (geometry-depth diagnostic), else -1.
 // flags: RAY_OUTSIDE_REFERENCE when the answer came from outside the provider's
 // reference data (e.g. off a raster view; counted like the water reflection's

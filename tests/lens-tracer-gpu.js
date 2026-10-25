@@ -9,7 +9,8 @@ import {createDaylight} from '../src/lighting.js';
 import {createLensRig,focusTestLens} from './gpu-fixtures.js';
 /** The embeddable tracer on the real GPU:
  *  A. a raw GPUDevice (no three.js) with a ray provider and default module workers;
- *  B. the ray cache: GPU binning checked ray by ray, and cached == direct accumulation;
+ *  B. the ray cache: GPU binning checked ray by ray, and cached == direct accumulation,
+ *     also with held batches (all traced before the first finish) and sensor bands;
  *  C. the garden scene: direct surface path == ray path (BVH-wrapping provider) ==
  *     ray-cache path, so the cache is validated against today's output. */
 const out=document.querySelector('#result'),check=(c,m)=>{if(!c)throw new Error(m);};
@@ -77,6 +78,25 @@ try{
   const cached=await tracer.readHDR({space:'xyz'}),furnaceDiff=compare(direct,cached);
   check(furnaceDiff.attemptMismatches===0&&furnaceDiff.maxRel<1e-5,'cached furnace differs: '+JSON.stringify(furnaceDiff));
   report.furnace={batches:furnaceBatches,diff:furnaceDiff};
+  // Held batches: every batch is traced before the first is accumulated; their sample keys
+  // start after the attempts of the batches before them, so the result is the direct one.
+  tracer.reset();
+  const held=[];for(let batch;(batch=await tracer.rayBatch({targetSpp:32,spp:8,grid:4,hold:true}));)held.push(batch);
+  check(held.length===4&&tracer.tracedSpp===32&&tracer.spp===0&&tracer.engine.held.batches===4,'held batches: '+JSON.stringify({n:held.length,traced:tracer.tracedSpp,spp:tracer.spp}));
+  for(const batch of held){batch.resolveAll();tracer.resolve();}
+  for(const batch of held)batch.finish();
+  const heldDiff=compare(direct,await tracer.readHDR({space:'xyz'}));
+  check(tracer.spp===32&&tracer.engine.held.batches===0&&heldDiff.attemptMismatches===0&&heldDiff.maxRel<1e-5,'held batches differ: '+JSON.stringify(heldDiff));
+  // Sensor bands: whole group rows and two column windows, traced band by band.
+  tracer.reset();
+  const layout=tracer.engine.bandLayout,rows=layout.tiles[0].rows,cols=layout.blocksX,split=Math.floor(rows/2),window=Math.floor(cols/3);
+  check(layout.tiles.length===1&&rows>2&&cols>2,'band layout '+JSON.stringify(layout));
+  tracer.engine.setBands([{tile:0,rows:[0,split]},{tile:0,rows:[split,rows],cols:[0,window]},{tile:0,rows:[split,rows],cols:[window,cols]}]);
+  let bandBatches=0;
+  for(let band=0;band<3;band++)for(let batch;(batch=await tracer.rayBatch({targetSpp:32,spp:16,grid:4,hold:true,band}));bandBatches++){batch.resolveAll();batch.finish();}
+  const bandDiff=compare(direct,await tracer.readHDR({space:'xyz'}));
+  check(bandBatches===6&&tracer.spp===32&&bandDiff.attemptMismatches===0&&bandDiff.maxRel<1e-5,'sensor bands differ: '+JSON.stringify({bandBatches,spp:tracer.spp,bandDiff}));
+  report.held={batches:held.length,diff:heldDiff,bandBatches,bandDiff};
   tracer.dispose();device.destroy();
   // ---------------------------------------------------------------- C: garden equivalence
   const W=240,SPP=8;

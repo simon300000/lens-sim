@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {planRayBatch,cellOf,orderedBits,fromOrderedBits,decodeCells,CELL_STRIDE,CELL_FIXED_PER_MM,CACHE_BYTES_PER_SAMPLE,CACHE_SPP_LIMIT} from '../src/rendering/ray-cache.js';
+import {readFileSync} from 'node:fs';
+import {planRayBatch,cellOf,diskCells,cellShift,orderedBits,fromOrderedBits,decodeCells,CELL_STRIDE,CELL_FIXED_PER_MM,CACHE_BYTES_PER_SAMPLE,CACHE_SPP_LIMIT,CACHE_RETRY_BIT,CACHE_RESCUE_BIT} from '../src/rendering/ray-cache.js';
 import {stagedIntegratorSources} from '../src/rendering/staged-integrator.js';
 import {SCENE_RAY_WGSL,SCENE_SAMPLE_WGSL,WORK_COUNTERS_WGSL} from '../src/rendering/scene-wgsl.js';
 import {providerSource,createConstantRayProvider} from '../src/rendering/radiance-provider.js';
 import integrator from '../src/rendering/optical-integrator.wgsl.js';
 import optical from '../src/optics/optical-core.wgsl.js';
 import {rng} from './scene-fixtures.js';
+import {createFakeDevice} from './fake-gpu.mjs';
+import {createLensTracer} from '../src/lens-tracer.js';
 
 test('ordered float bits keep order and round-trip exactly (atomic min/max on floats)',()=>{
  const values=[-1e30,-12.5,-1,-1e-20,-0,0,1e-20,.25,1,7.5,3e38].map(Math.fround);
@@ -59,15 +62,118 @@ test('cached kernels reuse the direct path\'s world ray, key and spectral contri
  const shading=SCENE_RAY_WGSL+providerSource(createConstantRayProvider());
  const common={integrator,optical,work:WORK_COUNTERS_WGSL,intersector:'',shading,spectral:'',sampling:'',pupil:'',sample:SCENE_SAMPLE_WGSL};
  const cached=stagedIntegratorSources({...common,mode:'cached',roundSppLimit:CACHE_SPP_LIMIT});
- assert.deepEqual(Object.keys(cached),['raygen','bin','scan','scatter','resolve','accumulate']);
+ assert.deepEqual(Object.keys(cached),['raygen','bin','scan','scatter','resolve','accumulate','preview']);
  const direct=stagedIntegratorSources({...common,mode:'ray'});
- // The lens packets are lossless: the cache stores the raygen output unchanged (12 bytes per mirrored ray).
- assert.equal(cached.raygen.replace(`ROUND_SPP_LIMIT: u32 = ${CACHE_SPP_LIMIT}u`,'ROUND_SPP_LIMIT: u32 = 4u'),direct.raygen);
+ // The lens packets are lossless: the cache stores the raygen output unchanged (12 bytes per mirrored ray),
+ // starting after the attempts of held batches over the same pixels.
+ const offset='+bitcast<u32>(render.pinholeClipToCamera[0].y)';
+ // Sensor tiles: cached batches may cover a column window of group rows; width 0 is the direct mapping.
+ const windowed=/\/\/ Cached batches may cover[\s\S]*?\n}\n/,plain=direct.raygen.match(/fn windowPixel\(.*\n/)[0];
+ assert.match(cached.raygen,windowed);assert.match(cached.raygen,/if\(w==0u\)\{return mirrorPixel\(render\.debug\.y\+local,lane,halfWidth\);\}/);
+ assert.equal(cached.raygen.replace(`ROUND_SPP_LIMIT: u32 = ${CACHE_SPP_LIMIT}u`,'ROUND_SPP_LIMIT: u32 = 4u').replace(offset,'').replace(windowed,plain),direct.raygen);
+ for(const name of ['bin','scatter','resolve','accumulate','preview'])assert.match(cached[name],/cacheAttempts\(/,name+' counts held attempts');
  for(const line of ['let worldOrigin=(render.cameraToWorld*vec4<f32>(optical.p*vec3<f32>(sign,1)*.001,1)).xyz;',
   'let worldDirection=normalize((render.cameraToWorld*vec4<f32>(optical.v*vec3<f32>(sign,1),0)).xyz);'])
   {assert.ok(direct.scene.includes(line));assert.ok(cached.resolve.includes(line));}
  assert.match(direct.scene,/spectralHash32\(globalPixel\^spectralHash32\(a\.attempts\+render\.settings\.x\*0x632be5abu\)\)/);
- assert.match(cached.resolve,/attempts=accumulation\[outputIndex\(c,quadrant\)\]\.attempts\+j;\s*let key=spectralHash32\(\(image\.y\*render\.size\.x\+image\.x\)\^spectralHash32\(attempts\+render\.settings\.x\*0x632be5abu\)\);/);
+ assert.match(cached.resolve,/attempts=cacheAttempts\(accumulation\[outputIndex\(c,quadrant\)\]\.attempts\)\+j;\s*let key=spectralHash32\(\(image\.y\*render\.size\.x\+image\.x\)\^spectralHash32\(attempts\+render\.settings\.x\*0x632be5abu\)\);/);
  assert.match(cached.accumulate,/cieXYZ\(optical\.lambda\)\*\(bitcast<f32>\(result\.x\)\*optical\.weight\*SPECTRAL_XYZ_NORMALIZATION\/\(1\.\/\(optics\.wavelength\.y-optics\.wavelength\.x\)\)\)/);
  assert.doesNotMatch(cached.accumulate,/rayRadiance/,'accumulation never calls the provider');
+ // The preview estimate uses the same contribution and never the provider; retries skip resolved rays.
+ assert.ok(cached.preview.includes('cieXYZ(optical.lambda)*(bitcast<f32>(result.x)*optical.weight*SPECTRAL_XYZ_NORMALIZATION'));
+ assert.doesNotMatch(cached.preview,/rayRadiance/);
+ assert.match(cached.resolve,/cache\.cell\.x&2147483648u\)!=0u&&\(prior&1024u\)!=0u\)\{return;\}/);
+ assert.match(cached.resolve,/cache\.cell\.x&1073741824u\)!=0u&&\(\(prior&1024u\)==0u\|\|\(prior&255u\)!=SCENE_UNSUPPORTED\)\)\{return;\}/);
+ assert.match(cached.resolve,/if\(scene\.status==SCENE_DEFERRED\)\{rayResults\[index\]=vec2u\(0u,SCENE_DEFERRED\);return;\}/,'deferred rays stay unresolved');
+ assert.match(SCENE_SAMPLE_WGSL,/const SCENE_DEFERRED: u32 = 10u;/,'every scene kernel knows the deferred status');
+});
+
+test('disk cells: the lattice cells the exit disk reaches, with area shares; cellShift is per serial',()=>{
+ const lattice={grid:4,radiusMm:10,...cellShift(5,2)},cells=diskCells(lattice,96);
+ assert.ok(Math.abs(cells.reduce((n,c)=>n+c.share,0)-1)<1e-12);
+ for(const c of cells){assert.equal(cellOf(c.centroidMm,{n:4,...lattice}),c.index);assert.ok(c.exitBoundsMm[0]<=c.centroidMm[0]&&c.centroidMm[0]<=c.exitBoundsMm[2]);}
+ assert.deepEqual(cellShift(5,2),cellShift(5,2));assert.notDeepEqual(cellShift(5,2),cellShift(5,3));
+});
+
+// Engine bookkeeping of the embedding hooks on the recording fake device (no kernel runs).
+const lens=JSON.parse(readFileSync(new URL('../public/lenses/canon-fl-50mm-f1-8.json',import.meta.url))).configurations[0];
+async function fakeTracer(options={}){
+ const device=createFakeDevice(),tracer=await createLensTracer({device,provider:createConstantRayProvider(),width:96,workers:{bvh:false,pupil:false,focus:false},...options});
+ await tracer.setLens(lens,{dispersion:false});tracer.setPose([1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1]);
+ // The fake device runs no binning: report ten rays in cell 0 of every batch.
+ const read=tracer.interop.readBuffer;
+ tracer.interop.readBuffer=async(source,...rest)=>{
+  const raw=await read(source,...rest);if(source.label!=='Ray cache: cell table')return raw;
+  const words=new Uint32Array(raw);words[0]=10;words[1]=0;return raw;
+ };
+ return {device,tracer};
+}
+const buffersLabelled=(device,label)=>[...device.log.buffers].filter(b=>b.label===label);
+const words=(buffer,offset=0,n=4)=>Array.from(new Uint32Array(buffer.data.buffer,offset,n));
+
+test('held ray batches: trace-order finish, attempt offsets, preview, retry / rescue words and release',async()=>{
+ const {device,tracer}=await fakeTracer();
+ const a=await tracer.rayBatch({spp:8,targetSpp:32,hold:true}),b=await tracer.rayBatch({spp:8,targetSpp:32,hold:true});
+ assert.equal(a.held,true);assert.equal(a.rays,10);
+ assert.equal(tracer.tracedSpp,16);assert.equal(tracer.spp,0);assert.equal(tracer.engine.held.batches,2);
+ assert.ok(tracer.engine.held.bytes>=a.bytes+b.bytes);
+ // Render parameters word 33: the attempts traced before the batch over the same pixels.
+ const renders=buffersLabelled(device,'Held ray batch: render parameters');
+ assert.deepEqual(renders.map(r=>words(r,33*4,1)[0]),[0,8]);
+ await assert.rejects(tracer.rayBatch({spp:8,targetSpp:32}),/held ray batches first/);
+ assert.throws(()=>tracer.sample({batchSpp:1,targetSpp:32}),/ray batch is open/);
+ assert.throws(()=>b.finish(),/trace order/);
+ // Cell words at byte 32 of the batch's own parameters: index (| retry / rescue bit), first slot, count.
+ const params=buffersLabelled(device,'Held ray batch: parameters');
+ assert.equal(a.resolveAll(),true);assert.deepEqual(words(params[0],32,3),[0,0,10]);
+ assert.equal(a.retry(0),true);assert.deepEqual(words(params[0],32,3),[CACHE_RETRY_BIT>>>0,0,10]);
+ assert.equal(a.rescue(),true);assert.deepEqual(words(params[0],32,3),[CACHE_RESCUE_BIT,0,10]);
+ assert.throws(()=>a.discard(),/band batch/);
+ device.log.passes.length=0;tracer.resolve();
+ assert.equal(device.log.passes.filter(p=>p.label==='Ray cache preview').length,2,'one preview pass per held batch');
+ a.finish();
+ assert.equal(tracer.spp,8);assert.equal(tracer.tracedSpp,16);assert.equal(words(renders[1],33*4,1)[0],0,'the later batch no longer counts the accumulated one');
+ b.finish();
+ assert.equal(tracer.spp,16);assert.equal(tracer.engine.held.batches,0);
+ assert.equal(buffersLabelled(device,'Held ray batch: render parameters').length,0,'held buffers are released');
+ assert.equal(buffersLabelled(device,'Ray cache: preview estimate').length,0);
+ // Out of memory for a held batch: a coded error, nothing left allocated; reset drops held batches.
+ const live=tracer.interop.liveBuffers;device.popErrorScope=()=>Promise.resolve({message:'Out of memory'});
+ await assert.rejects(tracer.rayBatch({spp:8,targetSpp:32,hold:true}),e=>e.code==='ray-cache-memory');
+ assert.equal(tracer.interop.liveBuffers,live);device.popErrorScope=()=>Promise.resolve(null);
+ await tracer.rayBatch({spp:8,targetSpp:32,hold:true});tracer.reset();
+ assert.equal(tracer.engine.held.batches,0);assert.equal(tracer.tracedSpp,0);
+ // Without hold the cached path keeps one shared set of buffers and no attempt offset.
+ const plain=await tracer.rayBatch({spp:8,targetSpp:32});
+ assert.equal(plain.held,false);assert.equal(buffersLabelled(device,'Held ray batch: render parameters').length,0);
+ plain.resolveAll();plain.finish();assert.equal(tracer.spp,8);
+ tracer.dispose();
+});
+
+test('sensor bands: cover the frame without overlap, trace band by band, keep spp when split',async()=>{
+ const {device,tracer}=await fakeTracer(),engine=tracer.engine,{blocksX,tiles}=engine.bandLayout,rows=tiles[0].rows;
+ assert.equal(tiles.length,1);assert.equal(blocksX,6);assert.equal(rows,4);
+ assert.throws(()=>engine.setBands([{tile:0,rows:[0,3]},{tile:0,rows:[2,4]}]),/overlap/);
+ assert.throws(()=>engine.setBands([{tile:0,rows:[0,3]}]),/cover the frame/);
+ assert.throws(()=>engine.setBands([{tile:0,rows:[0,4],cols:[0,7]}]),/columns/);
+ engine.setBands([{tile:0,rows:[0,2]},{tile:0,rows:[2,4],cols:[0,2]},{tile:0,rows:[2,4],cols:[2,6]}]);
+ assert.deepEqual(engine.bands.map(b=>[b.groups,b.spp,b.window]),[[12,0,false],[4,0,true],[8,0,true]]);
+ await assert.rejects(tracer.rayBatch({spp:8,targetSpp:16,band:0}),/hold: true/);
+ const first=await tracer.rayBatch({spp:8,targetSpp:16,hold:true,band:2});
+ const render=buffersLabelled(device,'Held ray batch: render parameters')[0];
+ // Cursor (word 29) at the band's first group; words 34/35: first column and width of the window.
+ assert.equal(words(render,29*4,1)[0],2*blocksX);assert.deepEqual(words(render,34*4,2),[2,4]);
+ assert.equal(engine.bands[2].held,8);assert.equal(tracer.tracedSpp,0);
+ assert.throws(()=>engine.setBands([{tile:0,rows:[0,4]}]),/held ray batches/);
+ first.finish();
+ const again=await tracer.rayBatch({spp:8,targetSpp:16,hold:true,band:2});assert.equal(again.discard(),true);
+ assert.equal(engine.bands[2].held,0);assert.equal(engine.bands[2].spp,8);
+ // Splitting a traced band keeps its spp; a band across bands of different spp is refused.
+ engine.setBands([{tile:0,rows:[0,2]},{tile:0,rows:[2,4],cols:[0,2]},{tile:0,rows:[2,3],cols:[2,6]},{tile:0,rows:[3,4],cols:[2,6]}]);
+ assert.deepEqual(engine.bands.map(b=>b.spp),[0,0,8,8]);assert.equal(tracer.spp,0);
+ assert.throws(()=>engine.setBands([{tile:0,rows:[0,2]},{tile:0,rows:[2,4]}]),/different spp/);
+ for(let band=0;band<4;band++)for(let batch;(batch=await tracer.rayBatch({spp:8,targetSpp:16,hold:true,band}));)batch.finish();
+ assert.deepEqual(engine.bands.map(b=>b.spp),[16,16,16,16]);assert.equal(tracer.spp,16);assert.equal(tracer.tracedSpp,16);
+ tracer.reset();assert.equal(engine.bands,null);
+ tracer.dispose();
 });

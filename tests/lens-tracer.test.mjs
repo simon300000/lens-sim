@@ -67,6 +67,35 @@ test('readHDR returns the unclamped mean per attempted path in image row order',
  tracer.dispose();
 });
 
+test('readHDRRows returns exactly the rows of readHDR, across mirrored halves and accumulation tiles',async()=>{
+ // A small binding cap splits the 96x64 image into several paired tiles.
+ const device=createFakeDevice(),tracer=await createLensTracer({device,provider:createConstantRayProvider(),width:96,workers:inline,accumulationBindingBytes:96*16*PIXEL_BYTES});
+ await tracer.setLens(lens,{dispersion:false});
+ const tiles=[...device.log.buffers].filter(b=>b.label==='Tiled XYZ and attempted-path counters');
+ assert.ok(tiles.length>1,'several accumulation tiles');
+ let seed=7;const next=()=>(seed=(seed*1664525+1013904223)>>>0)/4294967296;
+ for(const t of tiles){const f=new Float32Array(t.data.buffer),u=new Uint32Array(t.data.buffer);for(let i=0;i<f.length;i+=PIXEL_BYTES/4){f[i]=next()*9;f[i+1]=next();f[i+2]=next()*3;u[i+3]=1+Math.floor(next()*40);}}
+ const {height}=tracer.dimensions;
+ for(const space of ['xyz','linear-srgb']){
+  const all=await tracer.readHDR({space}),row=all.width*4;
+  for(const [y,rows] of [[0,height],[0,1],[height-1,1],[5,17],[height/2-3,6],[13,height-20]]){
+   const part=await tracer.readHDRRows({y,rows,space});
+   assert.equal(part.y,y);assert.equal(part.rows,rows);
+   assert.deepEqual(part.data,all.data.subarray(y*row,(y+rows)*row),`${space} rows ${y}+${rows}`);
+  }
+ }
+ await assert.rejects(tracer.readHDRRows({y:height-1,rows:2}),/outside the image/);
+ tracer.dispose();
+});
+
+test('maxWidth: the engine refuses widths above it at creation and on resize',async()=>{
+ await assert.rejects(createLensTracer({device:createFakeDevice(),provider:createConstantRayProvider(),width:192,maxWidth:96,workers:inline}),/GPU/);
+ const tracer=await createLensTracer({device:createFakeDevice(),provider:createConstantRayProvider(),width:96,maxWidth:120,workers:inline});
+ await tracer.setLens(lens,{dispersion:false});
+ await assert.rejects(Promise.resolve().then(()=>tracer.resize(144)),/GPU/);
+ assert.equal(tracer.dimensions.width,96);tracer.dispose();
+});
+
 test('provider splice: the garden-style surface kind binds from the provider base; a surface provider can run as a ray provider',async()=>{
  const device=createFakeDevice();
  const surface={kind:'surface',label:'probe',revision:0,resources:{storageBuffers:1},
