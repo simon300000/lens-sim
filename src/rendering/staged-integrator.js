@@ -73,10 +73,13 @@ fn outputIndex(c:vec2u,q:u32)->u32 {
 @group(0) @binding(2) var<storage,read> glassLut:array<f32>;
 @group(0) @binding(4) var<storage,read> accumulation:array<PixelAccum>;
 @group(0) @binding(21) var<storage,read_write> stagedRays:array<OpticalSample>;
+${mode==='cached'?'@group(0) @binding(22) var<uniform> rayRange: vec4u;':''}
 `+index+`
 @compute @workgroup_size(8,8)
 fn main(@builtin(global_invocation_id) id:vec3u){
-  let localGroup=(id.y/8u)*render.debug.z+id.x/8u;
+  ${mode==='cached'?`let dispatchedGroup=(id.y/8u)*rayRange.z+id.x/8u;
+  if(dispatchedGroup>=rayRange.y){return;}
+  let localGroup=rayRange.x+dispatchedGroup;`:`let localGroup=(id.y/8u)*render.debug.z+id.x/8u;`}
   if(localGroup>=render.debug.w){return;}
   let lane=(id.y%8u)*8u+id.x%8u;let packet=localGroup*64u+lane;
   let halfWidth=(render.size.x+1u)/2u;let halfHeight=bitcast<u32>(render.environment.w);

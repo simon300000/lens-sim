@@ -39,6 +39,13 @@ export const CACHE_TABLE_WORDS=CACHE_LOBE_WORD+8;
 export const CACHE_SPP_LIMIT=64;           // compile-time bound of one batch
 /** Bytes one canonical pixel needs per cached spp (packet + 4 results + 4 indices). */
 export const CACHE_BYTES_PER_SAMPLE=CACHE_RAY_BYTES+4*(CACHE_RESULT_BYTES+CACHE_INDEX_BYTES);
+/** Packet ranges retain every sample of the resident batch, with an independent dispatch-work limit. */
+export function* raygenRanges(groups,spp,maxSamples=Infinity){
+  if(!Number.isInteger(groups)||groups<1||!Number.isInteger(spp)||spp<1||spp>CACHE_SPP_LIMIT)throw new RangeError('Invalid optical batch shape');
+  if(maxSamples!==Infinity&&(!Number.isInteger(maxSamples)||maxSamples<spp*64))throw new RangeError('Optical dispatch limit cannot hold one packet group');
+  const perDispatch=Math.min(groups,Math.floor(maxSamples/(spp*64)));
+  for(let first=0;first<groups;first+=perDispatch)yield {first,count:Math.min(perDispatch,groups-first)};
+}
 const CELL={count:0,offset:1,cursor:2,sumX:4,sumY:6,minX:8,maxX:9,minY:10,maxY:11,dirMin:12,dirMax:15};
 export const RAY_FLAGS=Object.freeze({INVALID:256,REFLECTION_OUTSIDE:512,RESOLVED:1024});
 /** resolve() with this bit on the cell index resolves only the range's still unresolved (deferred) rays. */

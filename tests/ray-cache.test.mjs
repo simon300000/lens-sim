@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {planRayBatch,cellOf,diskCells,cellShift,orderedBits,fromOrderedBits,decodeCells,CELL_STRIDE,CELL_FIXED_PER_MM,CACHE_BYTES_PER_SAMPLE,CACHE_SPP_LIMIT,CACHE_RETRY_BIT,CACHE_RESCUE_BIT} from '../src/rendering/ray-cache.js';
+import {raygenRanges,planRayBatch,cellOf,diskCells,cellShift,orderedBits,fromOrderedBits,decodeCells,CELL_STRIDE,CELL_FIXED_PER_MM,CACHE_BYTES_PER_SAMPLE,CACHE_SPP_LIMIT,CACHE_RETRY_BIT,CACHE_RESCUE_BIT} from '../src/rendering/ray-cache.js';
 import {stagedIntegratorSources} from '../src/rendering/staged-integrator.js';
 import {SCENE_RAY_WGSL,SCENE_SAMPLE_WGSL,WORK_COUNTERS_WGSL} from '../src/rendering/scene-wgsl.js';
 import {providerSource,createConstantRayProvider} from '../src/rendering/radiance-provider.js';
@@ -70,7 +70,12 @@ test('cached kernels reuse the direct path\'s world ray, key and spectral contri
  // Sensor tiles: cached batches may cover a column window of group rows; width 0 is the direct mapping.
  const windowed=/\/\/ Cached batches may cover[\s\S]*?\n}\n/,plain=direct.raygen.match(/fn windowPixel\(.*\n/)[0];
  assert.match(cached.raygen,windowed);assert.match(cached.raygen,/if\(w==0u\)\{return mirrorPixel\(render\.debug\.y\+local,lane,halfWidth\);\}/);
- assert.equal(cached.raygen.replace(`ROUND_SPP_LIMIT: u32 = ${CACHE_SPP_LIMIT}u`,'ROUND_SPP_LIMIT: u32 = 4u').replace(offset,'').replace(windowed,plain),direct.raygen);
+ const rangeUniform='@group(0) @binding(22) var<uniform> rayRange: vec4u;';
+ const ranged='let dispatchedGroup=(id.y/8u)*rayRange.z+id.x/8u;\n  if(dispatchedGroup>=rayRange.y){return;}\n  let localGroup=rayRange.x+dispatchedGroup;';
+ assert.ok(cached.raygen.includes(rangeUniform));assert.ok(cached.raygen.includes(ranged));
+ assert.equal(cached.raygen.replace(`ROUND_SPP_LIMIT: u32 = ${CACHE_SPP_LIMIT}u`,'ROUND_SPP_LIMIT: u32 = 4u').replace(offset,'').replace(windowed,plain)
+   .replace(rangeUniform,'').replace(ranged,'let localGroup=(id.y/8u)*render.debug.z+id.x/8u;'),direct.raygen,
+   'only range addressing differs; the optical sample loop and math are unchanged');
  for(const name of ['bin','scatter','resolve','accumulate','preview'])assert.match(cached[name],/cacheAttempts\(/,name+' counts held attempts');
  for(const line of ['let worldOrigin=(render.cameraToWorld*vec4<f32>(optical.p*vec3<f32>(sign,1)*.001,1)).xyz;',
   'let worldDirection=normalize((render.cameraToWorld*vec4<f32>(optical.v*vec3<f32>(sign,1),0)).xyz);'])
@@ -128,6 +133,10 @@ test('held ray batches: trace-order finish, attempt offsets, preview, retry / re
  assert.equal(a.resolveAll(),true);assert.deepEqual(words(params[0],32,3),[0,0,10]);
  assert.equal(a.retry(0),true);assert.deepEqual(words(params[0],32,3),[CACHE_RETRY_BIT>>>0,0,10]);
  assert.equal(a.rescue(),true);assert.deepEqual(words(params[0],32,3),[CACHE_RESCUE_BIT,0,10]);
+ assert.equal(a.resolveRange(2,3),true);assert.deepEqual(words(params[0],32,3),[0,2,3]);
+ assert.equal(a.resolveRange(5,5,true),true);assert.deepEqual(words(params[0],32,3),[CACHE_RESCUE_BIT,5,5]);
+ assert.equal(a.resolveRange(10,0),false);
+ for(const range of [[-1,1],[0,11],[9,2],[.5,1],[0,-1]])assert.throws(()=>a.resolveRange(...range),/Invalid ray range/);
  assert.throws(()=>a.discard(),/band batch/);
  device.log.passes.length=0;tracer.resolve();
  assert.equal(device.log.passes.filter(p=>p.label==='Ray cache preview').length,2,'one preview pass per held batch');
@@ -176,4 +185,15 @@ test('sensor bands: cover the frame without overlap, trace band by band, keep sp
  assert.deepEqual(engine.bands.map(b=>b.spp),[16,16,16,16]);assert.equal(tracer.spp,16);assert.equal(tracer.tracedSpp,16);
  tracer.reset();assert.equal(engine.bands,null);
  tracer.dispose();
+});
+
+test('optical dispatch ranges cover the resident batch exactly and bound samples independently of its size',()=>{
+ for(const groups of [1,97,1000,40007])for(const spp of [1,8,64])for(const limit of [65536,262144]){
+  let next=0;for(const range of raygenRanges(groups,spp,limit)){
+   assert.equal(range.first,next);assert.ok(range.count>0);assert.ok(range.count*spp*64<=limit);next+=range.count;
+  }
+  assert.equal(next,groups);
+ }
+ assert.deepEqual([...raygenRanges(97,8)],[{first:0,count:97}]);
+ assert.throws(()=>[...raygenRanges(1,8,64)],/cannot hold/);
 });

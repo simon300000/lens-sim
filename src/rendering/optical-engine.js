@@ -2,7 +2,7 @@ import {stripWorkCounting} from './shader-source.js';
 import rawOpticalSource from '../optics/optical-core.wgsl.js';
 import {opticalSourceForLutPolicy} from './optical-source.js';
 import { SCENE_INTERSECTOR_WGSL, SCENE_SURFACE_WGSL, SCENE_RAY_WGSL, SCENE_SAMPLE_WGSL, WORK_COUNTERS_WGSL } from './scene-wgsl.js';
-import {planRayBatch,decodeCells,decodeLobe,initialCellTable,CACHE_TABLE_WORDS,CACHE_BYTES_PER_SAMPLE,cellShift,CACHE_SPP_LIMIT,CACHE_CELLS_MAX,CELL_STRIDE,CELL_FIXED_PER_MM,CACHE_RAY_BYTES,CACHE_RESULT_BYTES,CACHE_INDEX_BYTES,CACHE_RETRY_BIT,CACHE_RESCUE_BIT} from './ray-cache.js';
+import {raygenRanges,planRayBatch,decodeCells,decodeLobe,initialCellTable,CACHE_TABLE_WORDS,CACHE_BYTES_PER_SAMPLE,cellShift,CACHE_SPP_LIMIT,CACHE_CELLS_MAX,CELL_STRIDE,CELL_FIXED_PER_MM,CACHE_RAY_BYTES,CACHE_RESULT_BYTES,CACHE_INDEX_BYTES,CACHE_RETRY_BIT,CACHE_RESCUE_BIT} from './ray-cache.js';
 import {exitFootprint} from '../optics/front-element.js';
 import rawIntegratorSource from './optical-integrator.wgsl.js';
 import resolveSource from './resolve.wgsl.js';
@@ -45,7 +45,7 @@ function inverseAffinePoint(m,p){
  *   provider: radiance provider (radiance-provider.js)
  *   aspect: image width / height (the sensor's, kept in step by setLens)
  *   maxWidth: resolution ceiling (default MAX_IMAGE_WIDTH; Infinity: the device's texture limit only) */
-export async function createOpticalEngine({interop,sceneResources=null,provider,width=480,aspect=1.5,outputFormat='rgba16float',accumulationBindingBytes=Infinity,stageTiming=false,chunkTiming='timestamp',opticalLutReuse=false,stagedRayBufferBytes=STAGED_SCRATCH_BYTES,roundSppLimit=ROUND_SPP_LIMIT,maxWidth=MAX_IMAGE_WIDTH,workers}) {
+export async function createOpticalEngine({interop,sceneResources=null,provider,width=480,aspect=1.5,outputFormat='rgba16float',accumulationBindingBytes=Infinity,stageTiming=false,chunkTiming='timestamp',opticalLutReuse=false,stagedRayBufferBytes=STAGED_SCRATCH_BYTES,roundSppLimit=ROUND_SPP_LIMIT,maxWidth=MAX_IMAGE_WIDTH,maxCachedRaygenSamples=Infinity,workers}) {
   const started=performance.now(),{device}=interop;
   if(!OUTPUT_FORMATS.includes(outputFormat))throw new RangeError(`Unsupported output format ${outputFormat}`);
   if(provider.kind==='surface'&&!sceneResources)throw new Error('A surface radiance provider needs scene BVH resources');
@@ -404,6 +404,7 @@ export async function createOpticalEngine({interop,sceneResources=null,provider,
     const sizes={rays:capacity*budget*CACHE_RAY_BYTES,indices:rays*CACHE_INDEX_BYTES,results:rays*CACHE_RESULT_BYTES};
     cacheBuffers??={};
     const cells=cacheBuffer('cells',CACHE_TABLE_WORDS*4,'Ray cache: cell table');
+    const rayRange=cacheBuffers.range??=interop.uniform(new Uint32Array(4),'Ray cache dispatch range');
     let rayBuffer,indices,results,cacheParams,batchRender,buffers=[];
     if(hold){
       buffers=await heldBuffers([[sizes.rays,'Held ray batch: lens packets'],[sizes.indices,'Held ray batch: cell-sorted ray indices'],[sizes.results,'Held ray batch: per-ray results'],[48,'Held ray batch: parameters',true],[192,'Held ray batch: render parameters',true]]);
@@ -431,14 +432,20 @@ export async function createOpticalEngine({interop,sceneResources=null,provider,
     device.queue.writeBuffer(batchRender,0,bytes);
     const lensBindings=[uniformBinding(0,optics),uniformBinding(1,surfaces),uniformBinding(2,lut)];
     const p=cacheCore,b=(binding,buffer)=>uniformBinding(binding,buffer);
-    const encoder=device.createCommandEncoder({label:'Ray cache batch'});
-    const run=(pipeline,entries,grid2,label)=>{const pass=encoder.beginComputePass({label});pass.setPipeline(pipeline);pass.setBindGroup(0,group(pipeline,entries));pass.dispatchWorkgroups(grid2.x,grid2.y);pass.end();};
-    if(hold)encoder.clearBuffer(results);
-    run(p.raygen,[...lensBindings,b(3,batchRender),b(4,tile.buffer),b(20,pupil),b(21,rayBuffer)],dispatch,'Ray cache lens batch');
-    run(p.bin,[b(3,batchRender),b(4,tile.buffer),b(16,cells),b(19,cacheParams),b(21,rayBuffer)],sceneDispatch,'Ray cache binning');
-    run(p.scan,[b(16,cells),b(19,cacheParams)],{x:1,y:1},'Ray cache prefix sum');
-    run(p.scatter,[b(3,batchRender),b(4,tile.buffer),b(16,cells),b(17,indices),b(19,cacheParams),b(21,rayBuffer)],sceneDispatch,'Ray cache scatter');
-    device.queue.submit([encoder.finish()]);
+    if(hold){const clear=device.createCommandEncoder({label:'Ray cache clear'});clear.clearBuffer(results);device.queue.submit([clear.finish()]);}
+    const run=async(pipeline,entries,grid2,label)=>{
+      const encoder=device.createCommandEncoder({label}),pass=encoder.beginComputePass({label});
+      pass.setPipeline(pipeline);pass.setBindGroup(0,group(pipeline,entries));pass.dispatchWorkgroups(grid2.x,grid2.y);pass.end();
+      device.queue.submit([encoder.finish()]);await device.queue.onSubmittedWorkDone();
+    };
+    for(const {first,count} of raygenRanges(groups,budget,maxCachedRaygenSamples)){
+      const chunk=chunkDispatch(count,device.limits.maxComputeWorkgroupsPerDimension);
+      device.queue.writeBuffer(rayRange,0,new Uint32Array([first,count,chunk.x,0]));
+      await run(p.raygen,[...lensBindings,b(3,batchRender),b(4,tile.buffer),b(20,pupil),b(21,rayBuffer),b(22,rayRange)],chunk,'Ray cache lens range');
+    }
+    await run(p.bin,[b(3,batchRender),b(4,tile.buffer),b(16,cells),b(19,cacheParams),b(21,rayBuffer)],sceneDispatch,'Ray cache binning');
+    await run(p.scan,[b(16,cells),b(19,cacheParams)],{x:1,y:1},'Ray cache prefix sum');
+    await run(p.scatter,[b(3,batchRender),b(4,tile.buffer),b(16,cells),b(17,indices),b(19,cacheParams),b(21,rayBuffer)],sceneDispatch,'Ray cache scatter');
     const started=performance.now();
     const words=new Uint32Array(await interop.readBuffer(cells,CACHE_TABLE_WORDS*4));
     const decoded=decodeCells(words,{n:grid,radiusMm:R}),lobe=decodeLobe(words);
@@ -483,6 +490,15 @@ export async function createOpticalEngine({interop,sceneResources=null,provider,
         if(finished)throw new Error('Ray batch already finished');
         if(!batch.rays||revision!==currentRevision)return false;
         dispatchCell(0,0,batch.rays,'Ray cache resolve all');resolved++;return true;
+      },
+      /** Resolve a bounded range of sorted rays without changing sample or accumulation order. */
+      resolveRange(first,count,rescue=false){
+        if(finished)throw new Error('Ray batch already finished');
+        if(!Number.isInteger(first)||!Number.isInteger(count)||first<0||count<0||first+count>batch.rays)throw new RangeError('Invalid ray range');
+        if(!count||revision!==currentRevision)return false;
+        dispatchCell(rescue?CACHE_RESCUE_BIT:0,first,count,rescue?'Ray cache rescue range':'Ray cache resolve range');
+        if(!rescue)resolved++;
+        return true;
       },
       /** Resolve again the rays of cell k (all cells without k) that are still unresolved:
        * the provider deferred them (SCENE_DEFERRED) until its resources change. */
