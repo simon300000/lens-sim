@@ -3,7 +3,7 @@
  *
  * Ported verbatim (as an ES module) from lens-bench js/lensio.js,
  * https://github.com/anvcor/lens-bench (GPL-3.0), pinned submodule commit
- * 8274ca9d34bf75611f5a3c00af54a6a8498f076b. Only the module wrapper changed;
+ * 454788a0469d14b44171c7a8871b2c41bcaa893f. Only the module wrapper changed;
  * parsing rules, warnings and glass-catalog matching are the upstream ones so
  * an imported file produces the same record lens-bench itself would load.
  * The record is then adapted by src/optics/prescription.js like bundled data.

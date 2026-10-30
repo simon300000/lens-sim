@@ -240,7 +240,8 @@ const BRAND_RULES = [
   [/canon/i, '佳能 Canon'], [/nikon/i, '尼康 Nikon'], [/pentax|takumar|\bsmc\b/i, '宾得 Pentax'], [/sigma/i, '适马 SIGMA'],
   [/sony/i, '索尼 Sony'], [/fuji/i, '富士 Fujifilm'], [/leica/i, '徕卡 Leica'], [/voigtl/i, '福伦达 Voigtländer'],
   [/viltrox/i, '唯卓仕 Viltrox'], [/hasselblad/i, '哈苏 Hasselblad'], [/olympus|^om[\s_-]/i, '奥林巴斯 Olympus'],
-  [/zeiss|loxia/i, '蔡司 ZEISS'], [/7artisans/i, '七工匠 7Artisans'], [/songraw/i, 'SONGRAW'],
+  [/zeiss|loxia/i, '蔡司 ZEISS'], [/7artisans/i, '七工匠 7Artisans'], [/songraw/i, 'SONGRAW'], [/panasonic|lumix/i, '松下 Panasonic'],
+  [/meike/i, '美科 MEIKE'], [/zhongyi/i, '中一光学 Zhongyi'],
 ];
 export function brandOf(lens = {}) {
   if (typeof lens.brand === 'string' && lens.brand.trim()) return lens.brand.trim();
