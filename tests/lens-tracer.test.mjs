@@ -129,3 +129,38 @@ test('lens library resolves assets against its base URL or serves preloaded data
  assert.deepEqual(await offline.prescription('b'),{id:'b0'});
  await assert.rejects(offline.asset('c'),/Unknown lens c/);
 });
+
+test('failed optical updates preserve the last valid CPU and GPU state',async()=>{
+ const device=createFakeDevice(),tracer=await createLensTracer({device,provider:createConstantRayProvider(),width:96,workers:inline});
+ await tracer.setLens(lens,{fNumber:2.8,dispersion:false});tracer.sample({batchSpp:1,targetSpp:1});
+ const state=tracer.opticsState,packed=tracer.packed,dimensions=tracer.dimensions;
+ const snapshot=()=>[...device.log.buffers].filter(b=>['Optics runtime parameters','Radial exit pupil proposal table'].includes(b.label)).map(b=>b.data.slice());
+ const before=snapshot();
+ assert.throws(()=>tracer.updateOptics({sensorMm:[0,24],fNumber:4}),/Invalid sensor size/);
+ assert.deepEqual(tracer.opticsState,state);assert.equal(tracer.packed,packed);
+ assert.deepEqual(tracer.dimensions,dimensions);assert.deepEqual(snapshot(),before);assert.equal(tracer.spp,1);
+ assert.equal(tracer.updateOptics({fNumber:4}).fNumber,4);
+ const updated=tracer.packed,updatedState=tracer.opticsState,updatedGPU=snapshot(),texture=tracer.outputTexture;
+ const create=device.createBuffer;device.createBuffer=()=>{throw new Error('allocation failed');};
+ assert.throws(()=>tracer.updateOptics({sensorMm:[24,24],fNumber:5.6}),/allocation failed/);
+ device.createBuffer=create;
+ assert.equal(tracer.packed,updated);assert.deepEqual(tracer.opticsState,updatedState);assert.deepEqual(snapshot(),updatedGPU);
+ assert.deepEqual(tracer.dimensions,dimensions);assert.equal(tracer.outputTexture,texture);
+ tracer.updateOptics({sensorMm:[24,24]});assert.equal(tracer.dimensions.height,96);tracer.dispose();
+});
+
+test('a failed sensor reallocation in setLens keeps the previous lens and state',async()=>{
+ const device=createFakeDevice(),tracer=await createLensTracer({device,provider:createConstantRayProvider(),width:96,workers:inline});
+ await tracer.setLens(lens,{fNumber:2.8,dispersion:false});tracer.sample({batchSpp:1,targetSpp:1});
+ const state=tracer.opticsState,packed=tracer.packed,engineLens=tracer.lens,dimensions=tracer.dimensions,texture=tracer.outputTexture,live=tracer.interop.liveBuffers;
+ const snapshot=()=>[...device.log.buffers].filter(b=>['Optics runtime parameters','Radial exit pupil proposal table'].includes(b.label)).map(b=>b.data.slice());
+ const before=snapshot(),create=device.createBuffer;
+ device.createBuffer=d=>{if(/Tiled XYZ/.test(d.label))throw new Error('allocation failed');return create.call(device,d);};
+ await assert.rejects(tracer.setLens(lens,{fNumber:4,sensorMm:[24,24],pupilBins:24,dispersion:false}),/allocation failed/);
+ device.createBuffer=create;
+ assert.equal(tracer.packed,packed);assert.equal(tracer.lens,engineLens);assert.deepEqual(tracer.opticsState,state);
+ assert.deepEqual(tracer.dimensions,dimensions);assert.equal(tracer.outputTexture,texture);assert.deepEqual(snapshot(),before);
+ assert.equal(tracer.interop.liveBuffers,live);assert.equal(tracer.spp,1);
+ assert.equal((await tracer.setLens(lens,{fNumber:4,sensorMm:[24,24],dispersion:false})).fNumber,4);
+ assert.equal(tracer.dimensions.height,96);tracer.dispose();
+});

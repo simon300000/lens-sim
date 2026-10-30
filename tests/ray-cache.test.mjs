@@ -197,3 +197,43 @@ test('optical dispatch ranges cover the resident batch exactly and bound samples
  assert.deepEqual([...raygenRanges(97,8)],[{first:0,count:97}]);
  assert.throws(()=>[...raygenRanges(1,8,64)],/cannot hold/);
 });
+
+test('held offsets follow overlapping coverage when memory changes the partition',async()=>{
+ const {device,tracer}=await fakeTracer(),perGroup=64*CACHE_BYTES_PER_SAMPLE;
+ const batches=[];
+ for(const memoryBytes of [24,12,12,24,24].map(n=>n*perGroup))batches.push(await tracer.rayBatch({spp:1,targetSpp:3,hold:true,memoryBytes}));
+ const renders=buffersLabelled(device,'Held ray batch: render parameters');
+ assert.deepEqual(renders.map(r=>words(r,33*4,1)[0]),[0,1,1,2,2]);
+ assert.deepEqual(renders.map(r=>words(r,29*4,1)[0]),[0,0,12,0,12]);
+ assert.equal(tracer.tracedSpp,3);
+ batches[0].finish();assert.deepEqual(renders.slice(1).map(r=>words(r,33*4,1)[0]),[0,0,1,1]);
+ batches[1].finish();assert.deepEqual(renders.slice(2).map(r=>words(r,33*4,1)[0]),[0,0,1]);
+ for(const batch of batches.slice(2))batch.finish();assert.equal(tracer.spp,3);
+ tracer.dispose();
+});
+
+test('ray batch creation rejects concurrency and releases its guard after failure',async()=>{
+ const {device,tracer}=await fakeTracer();
+ const first=tracer.rayBatch({spp:1,hold:true});
+ await assert.rejects(tracer.rayBatch({spp:1,hold:true}),/being created/);
+ const batch=await first;
+ assert.equal(tracer.tracedSpp,1);batch.finish();
+ device.popErrorScope=()=>Promise.resolve({message:'Out of memory'});
+ await assert.rejects(tracer.rayBatch({spp:1,hold:true}),e=>e.code==='ray-cache-memory');
+ device.popErrorScope=()=>Promise.resolve(null);
+ const next=await tracer.rayBatch({spp:1,hold:true});next.finish();
+ assert.equal(tracer.spp,2);tracer.dispose();
+});
+
+test('held sensor-band and whole-tile batches cannot be mixed',async()=>{
+ const {tracer}=await fakeTracer(),engine=tracer.engine;
+ engine.setBands([{tile:0,rows:[0,2]},{tile:0,rows:[2,4],cols:[0,2]},{tile:0,rows:[2,4],cols:[2,6]}]);
+ const band=await tracer.rayBatch({spp:1,targetSpp:4,hold:true,band:2});
+ await assert.rejects(tracer.rayBatch({spp:1,targetSpp:4,hold:true}),/sensor-band and whole-tile/);
+ band.finish();
+ const tile=await tracer.rayBatch({spp:1,targetSpp:4,hold:true});
+ await assert.rejects(tracer.rayBatch({spp:1,targetSpp:4,hold:true,band:1}),/sensor-band and whole-tile/);
+ tile.finish();
+ const next=await tracer.rayBatch({spp:1,targetSpp:4,hold:true,band:1});next.finish();assert.equal(engine.bands[1].spp,1);
+ tracer.dispose();
+});

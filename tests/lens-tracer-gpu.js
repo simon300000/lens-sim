@@ -3,7 +3,7 @@ import {createLensTracer,requiredLimits,createConstantRayProvider,createLensLibr
 import {createSurfaceRayProvider} from '../src/rendering/radiance-provider.js';
 import {cellOf} from '../src/rendering/ray-cache.js';
 import {requiredGPULimits} from '../src/rendering/gpu-policy.js';
-import {cameraPose} from '../src/rendering/three-interop.js';
+import {cameraPose,installShadowMapInit} from '../src/rendering/three-interop.js';
 import {buildSanteiScene} from '../src/scene/santei-scene.js';
 import {createDaylight} from '../src/lighting.js';
 import {createLensRig,focusTestLens} from './gpu-fixtures.js';
@@ -97,18 +97,35 @@ try{
   const bandDiff=compare(direct,await tracer.readHDR({space:'xyz'}));
   check(bandBatches===6&&tracer.spp===32&&bandDiff.attemptMismatches===0&&bandDiff.maxRel<1e-5,'sensor bands differ: '+JSON.stringify({bandBatches,spp:tracer.spp,bandDiff}));
   report.held={batches:held.length,diff:heldDiff,bandBatches,bandDiff};
+  tracer.reset();await tracer.render({targetSpp:3});
+  const partitionReference=await tracer.readHDR({space:'xyz'});
+  tracer.reset();
+  const packetGroups=tracer.engine.bandLayout.blocksX*tracer.engine.bandLayout.tiles[0].rows,perGroup=64*96,partitioned=[];
+  for(const memoryBytes of [packetGroups,packetGroups/2,packetGroups/2,packetGroups,packetGroups].map(n=>n*perGroup)){
+    const batch=await tracer.rayBatch({spp:1,targetSpp:3,hold:true,memoryBytes});partitioned.push(batch);
+  }
+  for(const batch of partitioned){batch.resolveAll();batch.finish();}
+  const partitionDiff=compare(partitionReference,await tracer.readHDR({space:'xyz'}));
+  check(tracer.spp===3&&partitionDiff.attemptMismatches===0&&partitionDiff.maxRel<1e-5,'changed cache partition differs: '+JSON.stringify(partitionDiff));
+  tracer.reset();
+  const firstBatch=tracer.rayBatch({spp:1,hold:true});
+  const concurrent=await tracer.rayBatch({spp:1,hold:true}).then(()=>null,e=>e);
+  check(concurrent?.message.includes('being created'),'concurrent batch creation was accepted');
+  const onlyBatch=await firstBatch;onlyBatch.resolveAll();onlyBatch.finish();
+  report.partitioned={diff:partitionDiff,concurrentRejected:true};
   tracer.dispose();device.destroy();
   // ---------------------------------------------------------------- C: garden equivalence
   const W=240,SPP=8;
+  installShadowMapInit();
   const renderer=new THREE.WebGPURenderer({antialias:false,requiredLimits:requiredGPULimits(adapter.limits)});
   await renderer.init();renderer.setSize(W,W/1.5);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;renderer.toneMapping=THREE.NoToneMapping;
-  renderer.backend.device.addEventListener('uncapturederror',e=>{if(!/ShadowDepthTexture"\] used in a submit/.test(e.error.message))report.errors.push(e.error.message);});
+  renderer.backend.device.addEventListener('uncapturederror',e=>report.errors.push(e.error.message));
   const {scene,details}=buildSanteiScene();
   for(const lamp of details.lamps.slice(0,2)){lamp.light.castShadow=true;lamp.light.shadow.mapSize.set(512,512);lamp.light.shadow.camera.near=.08;lamp.light.shadow.camera.far=11;lamp.light.shadow.camera.layers.set(1);}
   const daylight=createDaylight(scene,renderer,{details});
   const camera=new THREE.PerspectiveCamera(40,1.5,.15,450);camera.position.set(21,13,27);camera.lookAt(0,2.7,2);camera.updateMatrixWorld();
   daylight.update({hour:16.5,date:'2026-09-26'},true);
-  const first=new THREE.RenderTarget(W,W/1.5,{type:THREE.HalfFloatType});renderer.setRenderTarget(first);renderer.render(scene,camera);renderer.setRenderTarget(null);
+  const first=new THREE.RenderTarget(W,W/1.5,{type:THREE.HalfFloatType});renderer.setRenderTarget(first);await renderer.compileAsync(scene,camera);renderer.render(scene,camera);renderer.setRenderTarget(null);
   await renderer.backend.device.queue.onSubmittedWorkDone();step('garden raster');
   const rig=await createLensRig({renderer,scene,camera,width:W,environment:daylight});
   const {engine,interop}=rig;
@@ -126,6 +143,7 @@ try{
     hitOfPassed:[surfaceStats.sceneHitOfPassed,rayStats.sceneHitOfPassed,cacheStats.sceneHitOfPassed],bvhError:[surfaceStats.bvhErrorRate,rayStats.bvhErrorRate,cacheStats.bvhErrorRate]};
   for(const [name,d] of [['ray',rayDiff],['cache',cacheDiff]])check(d.attemptMismatches===0&&d.maxRel<1e-4,`garden ${name} path differs: ${JSON.stringify(d)}`);
   check(surfaceStats.sceneHitOfPassed===cacheStats.sceneHitOfPassed&&cacheStats.bvhErrorRate===0,'garden statuses differ');
+  await renderer.backend.device.queue.onSubmittedWorkDone();await new Promise(r=>setTimeout(r,0));
   check(report.errors.length===0,'GPU errors: '+report.errors.join('\n'));
   report.passed=true;
 }catch(error){report.error=String(error.stack||error);console.error(error);}

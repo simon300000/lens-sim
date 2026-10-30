@@ -116,7 +116,7 @@ export async function createOpticalEngine({interop,sceneResources=null,provider,
   let pupilTable;
   let surfaces,lut,tiles=[],tileCursor=0,groupCursor=0,chunkBudget=createChunkBudget(),lastSubmission=null,sampleSerial=0,roundBudget=0,roundTarget=0,roundMirror=0,tileGroups=0,image,packed,lens,groups={},spp=0,disposed=false,computeMs=null,statsPending=null,lastTiming=null;
   let dimensions={width:0,height:0},currentRevision=0,resizeRevision=0;
-  let cacheCore=null,cacheResolve=null,cacheBuffers=null,cacheBatch=null,cacheRadius=null,cacheSerial=0;
+  let cacheCore=null,cacheResolve=null,cacheBuffers=null,cacheBatch=null,cacheRadius=null,cacheSerial=0,cacheCreating=false;
   // Held ray batches in trace order, and the spp of sweeps they traced completely (not yet accumulated).
   let held=[],heldSpp=0;
   // Sensor bands (setBands): explicit packet-group ranges traced band by band; spp per band.
@@ -183,8 +183,8 @@ export async function createOpticalEngine({interop,sceneResources=null,provider,
   }
   /** Surface providers: 4 quadrant hit records per optical sample. Ray providers trace nothing. */
   function stagedHitBytes(plan){return mode==='surface'?stagedRayBytes(plan)/STAGED_RAY_BYTES*4*STAGED_HIT_BYTES:0;}
-  function allocate(nextWidth){
-    const plan=imagePlan(nextWidth,imageLimits,{paired:true,aspect:currentAspect,maxWidth}),buffers=[];let output,rayBuffer,hitBuffer;
+  function allocate(nextWidth,aspect=currentAspect){
+    const plan=imagePlan(nextWidth,imageLimits,{paired:true,aspect,maxWidth}),buffers=[];let output,rayBuffer,hitBuffer;
     interop.memoryBudget?.assertAdditional(plan.memoryBytes+(stagedRayBytes(plan)+stagedHitBytes(plan)),'新旧图像并存的分配峰值');
     try{
       for(const t of plan.tiles)buffers.push({...t,buffer:interop.storage(t.bytes,'Tiled XYZ and attempted-path counters')});
@@ -220,31 +220,37 @@ export async function createOpticalEngine({interop,sceneResources=null,provider,
     return install(candidate);
   }
   try{resize(width);}catch(error){pupilPrecomputer.dispose();timer.dispose();stageTimer?.dispose();for(const b of startupBuffers)interop.release(b);throw error;}
-  function updatePupil(nextLens,next,state){
-    const table=buildPupilTable(nextLens,next,{enabled:state?.pupilSampling!==false,bins:state?.pupilBins,movingCenter:state?.pupilMovingCenter});
-    if(table!==pupilTable){device.queue.writeBuffer(pupil,0,table.data);pupilTable=table;}
-  }
   /** A sensor of another aspect ratio reallocates the image at the same width. */
+  function sensorAspect(state){
+    const sensor=state?.sensorMm;if(!sensor)return currentAspect;
+    const aspect=sensor[0]/sensor[1];if(!(aspect>0&&Number.isFinite(aspect)))throw new RangeError('Invalid sensor size');return aspect;
+  }
   function matchSensor(state){
-    const sensor=state?.sensorMm;if(!sensor)return;
-    const next=sensor[0]/sensor[1];if(!(next>0&&Number.isFinite(next)))throw new RangeError('Invalid sensor size');
-    if(Math.abs(next-currentAspect)>1e-9){currentAspect=next;install(allocate(dimensions.width));}
+    const next=sensorAspect(state);
+    if(Math.abs(next-currentAspect)>1e-9){const candidate=allocate(dimensions.width,next);currentAspect=next;install(candidate);}
   }
   function setLens(nextLens,state){
-    const next=packLens(nextLens,state);
-    // Build the proposal before replacing any live GPU resources.
+    const next=packLens(nextLens,state),aspect=sensorAspect(state);
+    // Build the proposal, lens buffers and any new image before replacing live GPU resources.
     const nextPupil=buildPupilTable(nextLens,next,{enabled:state?.pupilSampling!==false,bins:state?.pupilBins,movingCenter:state?.pupilMovingCenter});
-    const nextSurfaces=interop.storage(next.surfaces,'Current lens analytic surfaces');let nextLut;
+    let nextSurfaces,nextLut,candidate=null;
     try{
+      nextSurfaces=interop.storage(next.surfaces,'Current lens analytic surfaces');
       nextLut=interop.storage(next.lut.values,'Current lens n(lambda) LUT');
-      if(nextPupil!==pupilTable){device.queue.writeBuffer(pupil,0,nextPupil.data);pupilTable=nextPupil;}
-    }catch(error){interop.release(nextSurfaces);if(nextLut)interop.release(nextLut);throw error;}
+      if(Math.abs(aspect-currentAspect)>1e-9)candidate=allocate(dimensions.width,aspect);
+    }catch(error){if(nextSurfaces)interop.release(nextSurfaces);if(nextLut)interop.release(nextLut);throw error;}
+    if(nextPupil!==pupilTable){device.queue.writeBuffer(pupil,0,nextPupil.data);pupilTable=nextPupil;}
     if(surfaces)interop.release(surfaces);if(lut)interop.release(lut);
     surfaces=nextSurfaces;lut=nextLut;
-    packed=next;lens=nextLens;device.queue.writeBuffer(optics,0,next.parameters);matchSensor(state);rebuildGroups();reset({resetTiming:true});return next;
+    packed=next;lens=nextLens;device.queue.writeBuffer(optics,0,next.parameters);
+    if(candidate){currentAspect=aspect;install(candidate);}
+    rebuildGroups();reset({resetTiming:true});return next;
   }
   function updateOptics(state){
-    const next=packLens(lens,state);updatePupil(lens,next,state);packed=next;device.queue.writeBuffer(optics,0,next.parameters);matchSensor(state);reset({resetTiming:true});return next;
+    const next=packLens(lens,state),nextPupil=buildPupilTable(lens,next,{enabled:state?.pupilSampling!==false,bins:state?.pupilBins,movingCenter:state?.pupilMovingCenter});
+    matchSensor(state);
+    if(nextPupil!==pupilTable){device.queue.writeBuffer(pupil,0,nextPupil.data);pupilTable=nextPupil;}
+    packed=next;device.queue.writeBuffer(optics,0,next.parameters);reset({resetTiming:true});return next;
   }
   /** cameraToWorld: column-major 4x4 (16 numbers), lens space (metres) -> world. */
   function setPose(cameraToWorld){
@@ -371,11 +377,18 @@ export async function createOpticalEngine({interop,sceneResources=null,provider,
   }
   /** One cached batch (see lens-tracer.js rayBatch). Resolves to the batch handle
    * or null when the target spp is already reached. */
-  async function rayBatch({spp:requested=16,targetSpp=0,seed=1,grid=4,memoryBytes=512*1024**2,rotation,jitter,radiusMm,hold=false,band:bandIndex=null}={}){
+  async function rayBatch(options){
+    if(cacheCreating)throw new Error('A ray batch is being created');
+    cacheCreating=true;
+    try{return await createRayBatch(options);}finally{cacheCreating=false;}
+  }
+  async function createRayBatch({spp:requested=16,targetSpp=0,seed=1,grid=4,memoryBytes=512*1024**2,rotation,jitter,radiusMm,hold=false,band:bandIndex=null}={}){
     if(cacheBatch)throw new Error('Finish the open ray batch first');
     if(held.length&&!hold)throw new Error('Finish the held ray batches first');
     const band=bandIndex===null?null:bands?.[bandIndex];
     if(bandIndex!==null&&(!band||!hold))throw new Error('A band batch needs setBands() and hold: true');
+    // Held offsets are kept per band or per whole-tile coverage, never across both.
+    if(held.some(h=>!h.band!==!band))throw new Error('Finish the held ray batches first: sensor-band and whole-tile held batches cannot be mixed');
     if(!Number.isInteger(grid)||grid<1||grid*grid>CACHE_CELLS_MAX)throw new RangeError(`Ray cache grid must be 1..${Math.sqrt(CACHE_CELLS_MAX)}`);
     await cachePipelines();bindScene();
     if(!tiles[0]?.scene)throw new Error('镜头或辐亮度提供者尚未准备');
@@ -400,6 +413,8 @@ export async function createOpticalEngine({interop,sceneResources=null,provider,
     }else budget=roundBudget;
     // A tile that does not fit the budget is resolved in several batches of packet groups.
     groups=band?band.groups:planRayBatch({totalGroups:totalGroups-groupCursor,spp:budget,memoryBytes,maxBufferBytes:limit,fixedSpp:true}).groups;
+    // Each batch must have one offset across all of its packet groups.
+    if(!band)for(const h of held)if(h.tile===tile)for(const edge of [h.cursor,h.cursor+h.groups])if(edge>cursor)groups=Math.min(groups,edge-cursor);
     const capacity=groups*64,rays=capacity*budget*4;
     const sizes={rays:capacity*budget*CACHE_RAY_BYTES,indices:rays*CACHE_INDEX_BYTES,results:rays*CACHE_RESULT_BYTES};
     cacheBuffers??={};
@@ -420,9 +435,8 @@ export async function createOpticalEngine({interop,sceneResources=null,provider,
     const params=new ArrayBuffer(48),pf=new Float32Array(params);
     pf.set([Math.cos(angle),Math.sin(angle),1/(2*R),grid,offset[0],offset[1],CELL_FIXED_PER_MM,R]);
     device.queue.writeBuffer(cacheParams,0,params);
-    // Attempts of earlier held batches over the same pixels (same tile and packet groups).
-    // Same pixels: the same band (sensor tiles share cursors), else the same tile and cursor.
-    const same=h=>band?h.band===band:h.tile===tile&&h.cursor===cursor;
+    // Attempts of earlier held batches over these pixels: the same band, else held coverage of this cursor.
+    const same=h=>band?h.band===band:h.tile===tile&&h.cursor<=cursor&&cursor<h.cursor+h.groups;
     const traced=held.filter(same).reduce((n,h)=>n+h.spp,0);
     device.queue.writeBuffer(cells,0,initialCellTable());
     // The staged render parameters of this chunk (mirror mode, cursor, packet groups).
@@ -461,7 +475,7 @@ export async function createOpticalEngine({interop,sceneResources=null,provider,
     let entry=null;
     if(hold){
       if(revision!==currentRevision){for(const buffer of buffers)interop.release(buffer);throw new DOMException('Ray batch invalidated by a reset','AbortError');}
-      entry={tile,cursor,spp:budget,render:batchRender,rays:rayBuffer,results,sceneDispatch,buffers,band,completes:band?false:advance(),offset:traced};
+      entry={tile,cursor,groups,spp:budget,render:batchRender,rays:rayBuffer,results,sceneDispatch,buffers,band,completes:band?false:advance(),offset:traced};
       if(entry.completes)heldSpp+=budget;
       if(band)band.held+=budget;
       held.push(entry);
@@ -543,7 +557,7 @@ export async function createOpticalEngine({interop,sceneResources=null,provider,
         pass.dispatchWorkgroups(sceneDispatch.x,sceneDispatch.y);pass.end();device.queue.submit([encoder.finish()]);
         if(hold){
           held.shift();for(const buffer of buffers)interop.release(buffer);
-          for(const h of held)if(entry.band?h.band===entry.band:h.tile===tile&&h.cursor===entry.cursor){h.offset-=budget;device.queue.writeBuffer(h.render,33*4,new Uint32Array([h.offset]));}
+          for(const h of held)if(entry.band?h.band===entry.band:h.tile===tile&&h.cursor>=entry.cursor&&h.cursor<entry.cursor+entry.groups){h.offset-=budget;device.queue.writeBuffer(h.render,33*4,new Uint32Array([h.offset]));}
           if(entry.completes){spp+=budget;heldSpp-=budget;}
           if(entry.band){entry.band.held-=budget;entry.band.spp+=budget;spp=Math.min(...bands.map(b=>b.spp));}
           if(!held.length)for(const t of tiles)if(t.estimate){interop.release(t.estimate);t.estimate=null;}
@@ -651,7 +665,7 @@ export async function createOpticalEngine({interop,sceneResources=null,provider,
     },
     rayBatch,
     sample({batchSpp=1,targetSpp=64,seed=1,diagnostic='beauty',constantEnvironment=null,pinhole=null,chunked=false,interactive=false,mirrorReuse=true,mirrorReference=false}={}){
-      if(cacheBatch||held.length)throw new Error('A ray batch is open');
+      if(cacheCreating||cacheBatch||held.length)throw new Error('A ray batch is open');
       if((tileCursor||groupCursor)&&roundMirror===CACHED_ROUND)throw new Error('A cached sampling round is in progress');
       bindScene();
       if(!tiles[0]?.scene)throw new Error('场景 BVH、光照资源或镜头尚未准备');

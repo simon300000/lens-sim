@@ -58,7 +58,7 @@ export async function createLensTracer({device,interop,provider,width=960,sensor
       baseLens=prescription;state={...next,fNumber:packed.fNumber};return packed;
     },
     /** Aperture, sensor position or dispersion of the current lens; no recompile. */
-    updateOptics(patch){state={...state,...patch};const packed=engine.updateOptics(state);state.fNumber=packed.fNumber;return packed;},
+    updateOptics(patch){const next={...state,...patch},packed=engine.updateOptics(next);state={...next,fNumber:packed.fNumber};return packed;},
     /** Focus the base prescription at distanceM (null = infinity) with the same
      * search as lens-sim (focus table, moving groups or the sensor), keeping the
      * physical stop radius. trim: the focus methods given the contrast trim
